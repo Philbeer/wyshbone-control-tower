@@ -138,10 +138,7 @@ function renderCriticalPathSection() {
     return '';
   }
 
-  const tasksToShow = criticalTasks.slice(0, 12);
-  const hasMore = criticalTasks.length > 12;
-
-  const tasksHtml = tasksToShow.map(task => {
+  const tasksHtml = criticalTasks.map(task => {
     const appLabel = { ui: 'UI', supervisor: 'SUP', poller: 'POL', meta: 'META' }[task.app] || task.app;
     const complexity = task.complexity || 'M';
     
@@ -162,10 +159,14 @@ function renderCriticalPathSection() {
       <h2 class="section-title">⭐ Critical Path to Agentic v1</h2>
       <div style="border: 2px solid #f59e0b; border-radius: 8px; padding: 20px; background: #fffbeb; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
         <p style="margin: 0 0 16px 0; color: #78350f; font-size: 13px;">
-          ${criticalTasks.length} critical tasks required for Agentic v1. Showing next ${tasksToShow.length} in dependency order.
+          ${criticalTasks.length} critical tasks required for Agentic v1. All tasks shown in dependency order.
         </p>
-        ${tasksHtml}
-        ${hasMore ? `<p style="margin: 12px 0 0 0; color: #92400e; font-size: 12px; font-style: italic;">+ ${criticalTasks.length - 12} more tasks...</p>` : ''}
+        <div style="max-height: 600px; overflow-y: auto; padding-right: 8px;">
+          ${tasksHtml}
+        </div>
+        <p style="margin: 16px 0 0 0; color: #92400e; font-size: 11px; font-style: italic;">
+          💡 Scroll to view all ${criticalTasks.length} tasks. Tasks are ordered by dependencies (prerequisites first).
+        </p>
       </div>
     </div>
   `;
