@@ -1,0 +1,167 @@
+You are editing the Wyshbone Poller Replit project.
+
+Goal
+-----
+Add a simple "Replit usage meter" widget to the main Poller dashboard view so Phil can see:
+- Current additional usage in USD (from Replit’s “Additional usage: $XXX spent” line)
+- The next $50 (~£45) billing step
+- How much is left before the next $50 charge
+- A small progress bar for this $50 step
+
+The widget should read the value from an environment variable and be easy to update.
+
+Environment variable
+---------------------
+Assume there is (or will be) a secret / env var defined in the Replit workspace called:
+
+  REPLIT_ADDITIONAL_USAGE_USD
+
+It will contain a number like `322.26` (the “Additional usage: $322.26 spent” value).
+
+Your job is to:
+1. Create a reusable React component `UsageMeter` that takes `currentUsageUsd` as a prop.
+2. Wire it into the main Poller dashboard page and feed it from `process.env.REPLIT_ADDITIONAL_USAGE_USD`.
+3. Keep styling simple and compatible with the existing UI (dark background, no extra libraries).
+
+Implementation steps
+---------------------
+
+1) Create the UsageMeter component
+
+Create a new file at:
+  client/src/components/UsageMeter.tsx
+
+Put this exact code in it (adjust only imports if the TypeScript/React setup needs minor tweaks):
+
+--------------------------------------------------
+import React from "react";
+
+const BILLING_STEP_USD = 50; // each extra charge is about $50 (~£45)
+
+type UsageMeterProps = {
+  currentUsageUsd: number;
+};
+
+export const UsageMeter: React.FC<UsageMeterProps> = ({ currentUsageUsd }) => {
+  // Work out the next $50 boundary (50, 100, 150, ...)
+  const nextBillAt =
+    currentUsageUsd <= 0
+      ? BILLING_STEP_USD
+      : Math.ceil(currentUsageUsd / BILLING_STEP_USD) * BILLING_STEP_USD;
+
+  const remainingUsd = nextBillAt - currentUsageUsd;
+
+  // Progress within the current $50 block
+  const progressWithinStep =
+    currentUsageUsd <= 0
+      ? 0
+      : (currentUsageUsd % BILLING_STEP_USD) / BILLING_STEP_USD;
+
+  const percent = Math.min(100, Math.max(0, progressWithinStep * 100));
+
+  return (
+    <div
+      style={{
+        border: "1px solid #333",
+        borderRadius: 8,
+        padding: 12,
+        marginBottom: 16,
+        background: "#0b0b0f",
+      }}
+    >
+      <h3 style={{ marginTop: 0, marginBottom: 8 }}>Replit usage meter</h3>
+
+      <p style={{ margin: "2px 0" }}>
+        Current additional usage: <strong>${currentUsageUsd.toFixed(2)}</strong>
+      </p>
+      <p style={{ margin: "2px 0" }}>
+        Next $50 / ~£45 top-up at: <strong>${nextBillAt.toFixed(2)}</strong>
+      </p>
+      <p style={{ margin: "2px 0" }}>
+        Remaining this step: <strong>${remainingUsd.toFixed(2)}</strong>
+      </p>
+
+      <div
+        style={{
+          marginTop: 8,
+          height: 8,
+          borderRadius: 999,
+          background: "#222",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            width: `${percent}%`,
+            height: "100%",
+            background: percent > 80 ? "#ff5252" : "#4caf50`,
+            transition: "width 0.3s ease",
+          }}
+        />
+      </div>
+
+      <small style={{ display: "block", marginTop: 6, color: "#aaa" }}>
+        Update <code>REPLIT_ADDITIONAL_USAGE_USD</code> in Replit secrets when
+        you check your usage page.
+      </small>
+    </div>
+  );
+};
+--------------------------------------------------
+
+2) Find the main Poller dashboard view
+
+Find the component that renders the main Poller dashboard screen – likely something like:
+
+- client/src/pages/index.tsx
+- client/src/pages/Dashboard.tsx
+- or a similar file that clearly looks like the main Poller dashboard layout.
+
+Once you find it, do the following in that file.
+
+3) Import and use UsageMeter
+
+At the top of the dashboard file, add:
+
+--------------------------------------------------
+import { UsageMeter } from "../components/UsageMeter";
+--------------------------------------------------
+
+(Adjust the import path if the dashboard file is in a different folder. The goal is to import the component we just created.)
+
+Inside the dashboard component, before returning JSX, read the env var and convert it to a number:
+
+--------------------------------------------------
+const rawUsage = process.env.REPLIT_ADDITIONAL_USAGE_USD || "0";
+const currentUsageUsd = Number(rawUsage) || 0;
+--------------------------------------------------
+
+Now, in the JSX of the dashboard (near the top of the main content, above the rest of the Poller widgets), render the usage meter:
+
+--------------------------------------------------
+<UsageMeter currentUsageUsd={currentUsageUsd} />
+--------------------------------------------------
+
+Make sure this sits inside whatever layout/container the rest of the dashboard widgets use so it matches the styling.
+
+4) Ensure environment variable is available
+
+Do NOT hard-code the usage value in the code. It must come from the env var.
+
+Phil will update the value manually in Replit:
+- Replit left sidebar → Secrets / Environment → add or edit `REPLIT_ADDITIONAL_USAGE_USD` with the current “Additional usage: $XXX.XX spent” number from https://replit.com/account/usage.
+
+If the build system needs any extra exposure (for example Vite requiring VITE_ prefix for client-side env vars), then:
+- Adjust to use the correct env var mechanism (e.g. define VITE_REPLIT_ADDITIONAL_USAGE_USD and read from import.meta.env.VITE_REPLIT_ADDITIONAL_USAGE_USD instead).
+- In that case, update both the code and briefly comment in the file which env var name Phil should set.
+
+5) Final check
+
+- Type-check / build the client.
+- Run the Poller app.
+- Confirm that:
+  - The dashboard renders a “Replit usage meter” box.
+  - It shows the current usage, the next $50 boundary, the remaining amount, and a progress bar.
+  - If the env var is missing or non-numeric, it safely shows $0 and 0% progress instead of crashing.
+
+That’s all. Please implement this completely and keep other existing behaviour of the Poller app unchanged.

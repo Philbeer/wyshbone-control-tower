@@ -39,6 +39,68 @@ function renderStatusBadge(status) {
   return '<span style="display: inline-block; padding: 4px 12px; background: #9ca3af; color: white; border-radius: 4px; font-size: 12px; font-weight: 600;">NO DATA</span>';
 }
 
+function renderUsageMeter() {
+  const BILLING_STEP_USD = 50; // each extra charge is about $50 (~£45)
+  
+  // Read from environment variable
+  const rawUsage = process.env.REPLIT_ADDITIONAL_USAGE_USD || '0';
+  const currentUsageUsd = Number(rawUsage) || 0;
+  
+  // Work out the next $50 boundary (50, 100, 150, ...)
+  const nextBillAt = currentUsageUsd <= 0
+    ? BILLING_STEP_USD
+    : Math.ceil(currentUsageUsd / BILLING_STEP_USD) * BILLING_STEP_USD;
+  
+  const remainingUsd = nextBillAt - currentUsageUsd;
+  
+  // Progress within the current $50 block
+  const progressWithinStep = currentUsageUsd <= 0
+    ? 0
+    : (currentUsageUsd % BILLING_STEP_USD) / BILLING_STEP_USD;
+  
+  const percent = Math.min(100, Math.max(0, progressWithinStep * 100));
+  const barColor = percent > 80 ? '#ef4444' : '#22c55e';
+  
+  return `
+    <div style="border: 2px solid #3b82f6; border-radius: 8px; padding: 20px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 24px;">
+      <h3 style="margin: 0 0 16px 0; font-size: 18px; font-weight: 600; color: #1f2937;">💰 Replit Usage Meter</h3>
+      
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+        <div>
+          <div style="color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Current Usage</div>
+          <div style="font-family: monospace; font-size: 22px; font-weight: bold; color: #1f2937;">$${currentUsageUsd.toFixed(2)}</div>
+        </div>
+        <div>
+          <div style="color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Next Bill At</div>
+          <div style="font-family: monospace; font-size: 22px; font-weight: bold; color: #1f2937;">$${nextBillAt.toFixed(2)}</div>
+          <div style="color: #9ca3af; font-size: 11px; margin-top: 2px;">≈ £${(nextBillAt * 0.9).toFixed(2)}</div>
+        </div>
+        <div>
+          <div style="color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Remaining</div>
+          <div style="font-family: monospace; font-size: 22px; font-weight: bold; color: ${percent > 80 ? '#ef4444' : '#22c55e'};">$${remainingUsd.toFixed(2)}</div>
+        </div>
+      </div>
+      
+      <div style="margin-top: 12px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+          <span style="font-size: 12px; color: #6b7280;">Progress to next $50 charge</span>
+          <span style="font-size: 12px; font-weight: 600; color: #1f2937;">${percent.toFixed(1)}%</span>
+        </div>
+        <div style="height: 12px; border-radius: 999px; background: #e5e7eb; overflow: hidden;">
+          <div style="width: ${percent}%; height: 100%; background: ${barColor}; transition: width 0.3s ease;"></div>
+        </div>
+      </div>
+      
+      <div style="margin-top: 12px; padding: 8px 12px; background: #f9fafb; border-radius: 4px; border-left: 3px solid #3b82f6;">
+        <small style="color: #6b7280; font-size: 11px;">
+          💡 Update <code style="background: #e5e7eb; padding: 2px 6px; border-radius: 3px; font-family: monospace;">REPLIT_ADDITIONAL_USAGE_USD</code> 
+          in Replit Secrets when you check <a href="https://replit.com/account/usage" target="_blank" style="color: #3b82f6;">your usage page</a>
+        </small>
+      </div>
+    </div>
+  `;
+}
+
 function renderDashboard(state) {
   const recentEventsHtml = state.recentEvents.length > 0
     ? state.recentEvents.map(event => {
@@ -184,6 +246,8 @@ function renderDashboard(state) {
       <div class="container">
         <h1>Wyshbone Status Dashboard</h1>
         <div class="subtitle">Auto-refreshing every 60 seconds</div>
+        
+        ${renderUsageMeter()}
         
         <div class="section">
           <h2 class="section-title">Recent Changes (Last 10 Events)</h2>
