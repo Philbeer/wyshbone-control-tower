@@ -1,5 +1,6 @@
 import express from 'express';
 import { poller } from './lib/poller.js';
+import { tasksManager } from './lib/tasks.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -37,6 +38,74 @@ function renderStatusBadge(status) {
     return '<span style="display: inline-block; padding: 4px 12px; background: #ef4444; color: white; border-radius: 4px; font-size: 12px; font-weight: 600;">ERROR</span>';
   }
   return '<span style="display: inline-block; padding: 4px 12px; background: #9ca3af; color: white; border-radius: 4px; font-size: 12px; font-weight: 600;">NO DATA</span>';
+}
+
+function renderTaskStatusBadge(status) {
+  const colors = {
+    planned: '#3b82f6',
+    in_progress: '#f59e0b',
+    done: '#22c55e',
+    blocked: '#ef4444'
+  };
+  const labels = {
+    planned: 'PLANNED',
+    in_progress: 'IN PROGRESS',
+    done: 'DONE',
+    blocked: 'BLOCKED'
+  };
+  const color = colors[status] || '#9ca3af';
+  const label = labels[status] || status.toUpperCase();
+  return `<span style="display: inline-block; padding: 2px 8px; background: ${color}; color: white; border-radius: 3px; font-size: 10px; font-weight: 600;">${label}</span>`;
+}
+
+function renderTaskPriorityBadge(priority) {
+  const colors = {
+    low: '#6b7280',
+    medium: '#3b82f6',
+    high: '#ef4444'
+  };
+  const color = colors[priority] || '#9ca3af';
+  return `<span style="display: inline-block; padding: 2px 6px; background: ${color}; color: white; border-radius: 3px; font-size: 9px; font-weight: 600;">${priority.toUpperCase()}</span>`;
+}
+
+function renderTasksList(tasks) {
+  if (!tasks || tasks.length === 0) {
+    return '<p style="color: #9ca3af; font-style: italic; font-size: 14px;">No tasks</p>';
+  }
+
+  const groupedByStatus = {
+    in_progress: tasks.filter(t => t.status === 'in_progress'),
+    planned: tasks.filter(t => t.status === 'planned'),
+    blocked: tasks.filter(t => t.status === 'blocked'),
+    done: tasks.filter(t => t.status === 'done')
+  };
+
+  const renderGroup = (status, statusTasks) => {
+    if (statusTasks.length === 0) return '';
+    return statusTasks.map(task => {
+      const hasAcceptance = task.acceptanceCheck && task.acceptanceCheck.type === 'fileContains';
+      return `
+        <div style="padding: 8px 12px; margin-bottom: 8px; background: #f9fafb; border-left: 3px solid ${status === 'done' ? '#22c55e' : status === 'in_progress' ? '#f59e0b' : status === 'blocked' ? '#ef4444' : '#3b82f6'}; border-radius: 4px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+            ${renderTaskStatusBadge(task.status)}
+            ${renderTaskPriorityBadge(task.priority)}
+            <span style="font-size: 11px; color: #9ca3af; font-family: monospace;">${task.id}</span>
+            ${hasAcceptance ? '<span style="font-size: 10px; background: #e0e7ff; color: #3730a3; padding: 2px 6px; border-radius: 3px; font-weight: 600;">AUTO-CHECK</span>' : ''}
+          </div>
+          <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px; color: #1f2937;">${task.title}</div>
+          ${task.description ? `<div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">${task.description}</div>` : ''}
+          ${task.type ? `<div style="font-size: 11px; color: #9ca3af;">Type: <span style="font-family: monospace;">${task.type}</span></div>` : ''}
+        </div>
+      `;
+    }).join('');
+  };
+
+  return `
+    ${renderGroup('in_progress', groupedByStatus.in_progress)}
+    ${renderGroup('planned', groupedByStatus.planned)}
+    ${renderGroup('blocked', groupedByStatus.blocked)}
+    ${renderGroup('done', groupedByStatus.done)}
+  `;
 }
 
 function renderUsageMeter() {
@@ -101,7 +170,7 @@ function renderUsageMeter() {
   `;
 }
 
-function renderDashboard(state) {
+function renderDashboard(state, tasksState) {
   const recentEventsHtml = state.recentEvents.length > 0
     ? state.recentEvents.map(event => {
         const parts = [];
@@ -175,6 +244,22 @@ function renderDashboard(state) {
       `;
     }
 
+    // Get tasks for this source
+    let appKey = null;
+    if (source.name === 'Wyshbone UI') {
+      appKey = 'ui';
+    } else if (source.name === 'Wyshbone Supervisor') {
+      appKey = 'supervisor';
+    }
+    
+    const tasks = appKey ? tasksState[appKey] : [];
+    const tasksHtml = tasks.length > 0 ? `
+      <div style="margin-top: 24px; padding-top: 20px; border-top: 2px solid #e5e7eb;">
+        <h3 style="margin: 0 0 12px 0; font-size: 16px; font-weight: 600; color: #374151;">📋 Tasks</h3>
+        ${renderTasksList(tasks)}
+      </div>
+    ` : '';
+
     return `
       <div style="border: 2px solid ${source.status === 'OK' ? '#22c55e' : source.status === 'ERROR' ? '#ef4444' : '#d1d5db'}; border-radius: 8px; padding: 24px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
         <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -185,9 +270,22 @@ function renderDashboard(state) {
           ${latest ? `Last updated: ${formatRelativeTime(latest.fetchedAt)}` : 'Never updated'}
         </div>
         ${metricsHtml}
+        ${tasksHtml}
       </div>
     `;
   }).join('');
+
+  // Add Poller tasks section
+  const pollerTasks = tasksState.poller || [];
+  const pollerTasksHtml = pollerTasks.length > 0 ? `
+    <div class="section">
+      <h2 class="section-title">Wyshbone Poller Tasks</h2>
+      <div style="border: 2px solid #3b82f6; border-radius: 8px; padding: 24px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        <h3 style="margin: 0 0 12px 0; font-size: 16px; font-weight: 600; color: #374151;">📋 Poller Tasks</h3>
+        ${renderTasksList(pollerTasks)}
+      </div>
+    </div>
+  ` : '';
 
   return `
     <!DOCTYPE html>
@@ -260,6 +358,8 @@ function renderDashboard(state) {
             ${sourceCardsHtml}
           </div>
         </div>
+
+        ${pollerTasksHtml}
       </div>
     </body>
     </html>
@@ -274,8 +374,45 @@ app.get('/status.json', (req, res) => {
 
 app.get('/status', (req, res) => {
   const state = poller.getState();
-  const html = renderDashboard(state);
+  const tasksState = poller.getTasksState();
+  const html = renderDashboard(state, tasksState);
   res.send(html);
+});
+
+// Tasks API routes
+app.get('/tasks.json', (req, res) => {
+  const tasksState = poller.getTasksState();
+  res.json(tasksState);
+});
+
+app.post('/tasks/:id/status', async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status || !['planned', 'in_progress', 'done', 'blocked'].includes(status)) {
+    return res.status(400).json({
+      error: 'Invalid status. Must be one of: planned, in_progress, done, blocked'
+    });
+  }
+
+  const task = tasksManager.getTaskById(id);
+  if (!task) {
+    return res.status(404).json({
+      error: `Task not found: ${id}`
+    });
+  }
+
+  const success = await tasksManager.updateTaskStatus(id, status);
+  if (success) {
+    res.json({
+      success: true,
+      task: tasksManager.getTaskById(id)
+    });
+  } else {
+    res.status(500).json({
+      error: 'Failed to update task status'
+    });
+  }
 });
 
 app.get('/proxy/file', async (req, res) => {
@@ -328,6 +465,10 @@ app.get('/', (req, res) => {
 async function start() {
   console.log('\n=== Wyshbone Status Dashboard ===\n');
   
+  // Load tasks
+  await tasksManager.loadTasks();
+  
+  // Start polling
   await poller.startPolling();
   
   app.listen(PORT, () => {
@@ -336,11 +477,13 @@ async function start() {
     console.log(`  1. Edit config/sources.json with your Wyshbone app URLs and export keys`);
     console.log(`  2. Access the dashboard at: http://localhost:${PORT}/status`);
     console.log(`  3. Machine-readable JSON feed: http://localhost:${PORT}/status.json`);
-    console.log(`  4. Proxy file requests: http://localhost:${PORT}/proxy/file?src=<source-name>&path=<file-path>`);
+    console.log(`  4. Tasks API: http://localhost:${PORT}/tasks.json`);
+    console.log(`  5. Proxy file requests: http://localhost:${PORT}/proxy/file?src=<source-name>&path=<file-path>`);
     console.log(`\nConfiguration:`);
     console.log(`  - Polling interval: ${120000 / 1000} seconds`);
     console.log(`  - Auto-refresh: 60 seconds`);
-    console.log(`  - History retained: 50 snapshots per source\n`);
+    console.log(`  - History retained: 50 snapshots per source`);
+    console.log(`  - Tasks loaded: ${tasksManager.getAllTasks().length} task(s)\n`);
   });
 }
 
