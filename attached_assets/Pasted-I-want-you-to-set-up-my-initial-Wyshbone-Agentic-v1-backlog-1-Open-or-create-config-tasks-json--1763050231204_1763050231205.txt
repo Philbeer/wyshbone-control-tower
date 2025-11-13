@@ -1,0 +1,110 @@
+I want you to set up my initial Wyshbone Agentic v1 backlog.
+
+1. Open or create config/tasks.json in this repl.
+2. Replace its entire contents with the EXACT JSON array below (no comments, no trailing commas):
+
+[
+  {
+    "id": "UI-001",
+    "app": "ui",
+    "title": "Capture user goal at start of chat",
+    "description": "When a user starts a Wyshbone UI chat, capture their high-level goal (e.g. 'I want 50 new pubs in Yorkshire that rotate guest ales') and store it in session context so Supervisor and tools can use it.",
+    "status": "planned",
+    "priority": "high",
+    "type": "replit_prompt",
+    "replitPrompt": "You are my coding assistant for the Wyshbone UI repl. Add a small module and integration so that when a new chat session starts, the UI asks the user for their high-level sales/lead goal in natural language (if one is not already known). Store this goal in persistent session state (e.g. per-user context) and make it available to the tool-calling layer so tools like lead search and monitoring can see it. Do not hardcode any specific industries; treat it as free text. After implementation, expose a helper function like `getUserGoal(sessionId)` we can call from elsewhere.",
+    "acceptanceCheck": {
+      "type": "fileContains",
+      "file": "client/src",
+      "mustContain": "getUserGoal"
+    },
+    "createdAt": "2025-11-13T00:00:00.000Z",
+    "updatedAt": "2025-11-13T00:00:00.000Z"
+  },
+  {
+    "id": "UI-002",
+    "app": "ui",
+    "title": "Clarifying question step before running tools",
+    "description": "Before Wyshbone UI runs any heavy tool calls (lead search, monitoring, outreach), it should ask 1–3 clarifying questions if the goal or parameters are underspecified, instead of jumping straight to actions.",
+    "status": "planned",
+    "priority": "high",
+    "type": "replit_prompt",
+    "replitPrompt": "You are my coding assistant for the Wyshbone UI repl. Modify the tool-calling logic so that when the user asks for something that will trigger tools (lead search, monitoring, outreach), the chat first checks whether it has enough information: target region, target persona, volume and timing. If these are missing or ambiguous, ask up to 3 clarifying questions to fill the gaps before calling any tools. Keep questions short and practical for salespeople. Once clarified, proceed to call tools with the enriched parameters.",
+    "acceptanceCheck": {
+      "type": "fileContains",
+      "file": "server",
+      "mustContain": "clarifyingQuestions"
+    },
+    "createdAt": "2025-11-13T00:00:00.000Z",
+    "updatedAt": "2025-11-13T00:00:00.000Z"
+  },
+  {
+    "id": "SUP-001",
+    "app": "supervisor",
+    "title": "Lead generation plan object (Agentic v1 core)",
+    "description": "Supervisor should be able to turn a user goal + context (industry, region, volume) into a structured LeadGenPlan describing which tools to run, in what order, and with what parameters.",
+    "status": "planned",
+    "priority": "high",
+    "type": "replit_prompt",
+    "replitPrompt": "You are my coding assistant for the Wyshbone Supervisor repl. Create a LeadGenPlan representation (TypeScript type or interface) and a function like `planLeadGeneration(goal, context)` that returns a plan: steps with tool identifiers (e.g. GOOGLE_PLACES_SEARCH, HUNTER_ENRICH, EMAIL_SEQUENCE_SETUP), parameters, and dependencies. This is planning only: do not execute tools here. We will later have an executor that reads this plan and runs the tools.",
+    "acceptanceCheck": {
+      "type": "fileContains",
+      "file": "server",
+      "mustContain": "planLeadGeneration"
+    },
+    "createdAt": "2025-11-13T00:00:00.000Z",
+    "updatedAt": "2025-11-13T00:00:00.000Z"
+  },
+  {
+    "id": "SUP-002",
+    "app": "supervisor",
+    "title": "LeadGen plan executor",
+    "description": "Given a LeadGenPlan, Supervisor should be able to execute the steps one by one, handle errors, and write progress updates back to the user via Wyshbone UI or email.",
+    "status": "planned",
+    "priority": "high",
+    "type": "replit_prompt",
+    "replitPrompt": "You are my coding assistant for the Wyshbone Supervisor repl. Implement a LeadGenPlan executor function like `executeLeadGenerationPlan(plan, user)` that runs the tools defined in the plan in order, passing the right parameters, handling failures with retries where sensible, and logging structured progress events. Do not design new tools here; assume existing ones like global lead search, enrichment, and outreach. Make it easy to plug in new tools later by routing through a single tool-execution layer.",
+    "acceptanceCheck": {
+      "type": "fileContains",
+      "file": "server",
+      "mustContain": "executeLeadGenerationPlan"
+    },
+    "createdAt": "2025-11-13T00:00:00.000Z",
+    "updatedAt": "2025-11-13T00:00:00.000Z"
+  },
+  {
+    "id": "SUP-003",
+    "app": "supervisor",
+    "title": "Background monitor for user goals",
+    "description": "Supervisor periodically wakes up, looks at active user goals, and decides whether to suggest new segments, new experiments, or new monitors to the user based on past performance.",
+    "status": "planned",
+    "priority": "medium",
+    "type": "replit_prompt",
+    "replitPrompt": "You are my coding assistant for the Wyshbone Supervisor repl. Add a lightweight background monitor job that, on a schedule, iterates over active user goals / lead-generation projects and evaluates simple performance metrics (e.g. leads found, emails sent). Based on thresholds, generate suggestions like 'try this new region', 'try targeting bottle shops as well as pubs', or 'increase or decrease volume'. For now, log these suggestions and expose them via an internal API; later we will wire them into UI and email.",
+    "acceptanceCheck": {
+      "type": "fileContains",
+      "file": "server",
+      "mustContain": "runGoalMonitor"
+    },
+    "createdAt": "2025-11-13T00:00:00.000Z",
+    "updatedAt": "2025-11-13T00:00:00.000Z"
+  },
+  {
+    "id": "POL-001",
+    "app": "poller",
+    "title": "Persist status snapshots for history",
+    "description": "Store a rolling history of status snapshots (cleverness, LOC, TODO/FIXME) to disk so we can see trends over time, not just the latest view.",
+    "status": "planned",
+    "priority": "medium",
+    "type": "internal",
+    "replitPrompt": "You are my coding assistant for the WyshbonePoller repl. Extend the poller so that each polling cycle appends a compact snapshot (timestamp, app name, clevernessIndex, LOC, TODO, FIXME) to a local JSONL file under data/status_history.jsonl, keeping disk usage reasonable (e.g. truncate older than N days or keep last N records per app). This is purely for historical analysis and graphs later.",
+    "createdAt": "2025-11-13T00:00:00.000Z",
+    "updatedAt": "2025-11-13T00:00:00.000Z"
+  }
+]
+
+3. Make sure config/tasks.json is valid JSON (no trailing comma at the end).
+4. Restart the server if needed so /status and /tasks.json pick up the new tasks.
+5. Confirm to me that:
+   - /status shows these tasks under the appropriate app cards, and
+   - /tasks.json returns them grouped by app as designed earlier.
