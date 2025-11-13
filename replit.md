@@ -71,6 +71,15 @@ Server runs on port defined by `PORT` environment variable (default: 3000).
 
 ## Recent Changes
 
+- 2025-11-13: Roadmap enrichment implementation
+  - Expanded roadmap from 6 to 51 tasks across 6 architectural layers
+  - Enriched tasks with layer, group, complexity (S/M/L/XL), dependencies, criticalPath
+  - Enhanced lib/tasks.js with layer grouping, critical path extraction, and topological sorting
+  - Added dependency validation that fails fast on missing dependencies
+  - Implemented critical path dashboard section showing next 10-12 blockers
+  - Added /critical-path.json API endpoint returning 27 critical tasks in dependency order
+  - Added scripts/enrich-tasks.js with warning about not re-running after manual edits
+
 - 2025-11-13: Initial implementation
   - Created poller with configurable sources
   - Built server-side rendered dashboard
