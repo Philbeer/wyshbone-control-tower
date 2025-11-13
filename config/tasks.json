@@ -67,11 +67,11 @@
     "app": "poller",
     "title": "Add health check endpoint",
     "description": "Create a simple /health endpoint that returns uptime, last poll time, and source statuses. Useful for monitoring.",
-    "status": "planned",
+    "status": "in_progress",
     "priority": "low",
     "type": "replit_prompt",
     "replitPrompt": "Add GET /health route that returns JSON with: uptime, lastPollTime, sources array with each source's status and last successful fetch time.",
     "createdAt": "2025-11-13T15:45:00.000Z",
-    "updatedAt": "2025-11-13T15:45:00.000Z"
+    "updatedAt": "2025-11-13T15:33:33.747Z"
   }
 ]
