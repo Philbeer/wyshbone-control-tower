@@ -68,43 +68,106 @@ function renderTaskPriorityBadge(priority) {
   return `<span style="display: inline-block; padding: 2px 6px; background: ${color}; color: white; border-radius: 3px; font-size: 9px; font-weight: 600;">${priority.toUpperCase()}</span>`;
 }
 
-function renderTasksList(tasks) {
+function renderComplexityBadge(complexity) {
+  const colors = {
+    S: '#22c55e',
+    M: '#3b82f6',
+    L: '#f59e0b',
+    XL: '#ef4444'
+  };
+  const color = colors[complexity] || '#9ca3af';
+  return `<span style="display: inline-block; padding: 2px 6px; background: ${color}; color: white; border-radius: 3px; font-size: 9px; font-weight: 600;">${complexity}</span>`;
+}
+
+function renderCriticalPathBadge() {
+  return '<span style="font-size: 12px;" title="Critical Path">⭐</span>';
+}
+
+function renderTasksListByLayer(tasks) {
   if (!tasks || tasks.length === 0) {
     return '<p style="color: #9ca3af; font-style: italic; font-size: 14px;">No tasks</p>';
   }
 
-  const groupedByStatus = {
-    in_progress: tasks.filter(t => t.status === 'in_progress'),
-    planned: tasks.filter(t => t.status === 'planned'),
-    blocked: tasks.filter(t => t.status === 'blocked'),
-    done: tasks.filter(t => t.status === 'done')
-  };
+  const tasksByLayer = {};
+  tasks.forEach(task => {
+    const layer = task.layer || 1;
+    if (!tasksByLayer[layer]) {
+      tasksByLayer[layer] = [];
+    }
+    tasksByLayer[layer].push(task);
+  });
 
-  const renderGroup = (status, statusTasks) => {
-    if (statusTasks.length === 0) return '';
-    return statusTasks.map(task => {
+  const layers = Object.keys(tasksByLayer).sort((a, b) => parseInt(a) - parseInt(b));
+
+  return layers.map(layer => {
+    const layerTasks = tasksByLayer[layer];
+    const groupName = layerTasks[0]?.group || `Layer ${layer}`;
+    
+    const tasksHtml = layerTasks.map(task => {
       const hasAcceptance = task.acceptanceCheck && task.acceptanceCheck.type === 'fileContains';
+      const complexity = task.complexity || 'M';
+      const isCritical = task.criticalPath || false;
+      
       return `
-        <div style="padding: 8px 12px; margin-bottom: 8px; background: #f9fafb; border-left: 3px solid ${status === 'done' ? '#22c55e' : status === 'in_progress' ? '#f59e0b' : status === 'blocked' ? '#ef4444' : '#3b82f6'}; border-radius: 4px;">
-          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+        <div style="padding: 8px 12px; margin-bottom: 8px; background: #f9fafb; border-left: 3px solid ${task.status === 'done' ? '#22c55e' : task.status === 'in_progress' ? '#f59e0b' : task.status === 'blocked' ? '#ef4444' : '#3b82f6'}; border-radius: 4px;">
+          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px; flex-wrap: wrap;">
+            ${renderComplexityBadge(complexity)}
+            ${isCritical ? renderCriticalPathBadge() : ''}
             ${renderTaskStatusBadge(task.status)}
-            ${renderTaskPriorityBadge(task.priority)}
             <span style="font-size: 11px; color: #9ca3af; font-family: monospace;">${task.id}</span>
-            ${hasAcceptance ? '<span style="font-size: 10px; background: #e0e7ff; color: #3730a3; padding: 2px 6px; border-radius: 3px; font-weight: 600;">AUTO-CHECK</span>' : ''}
+            ${hasAcceptance ? '<span style="font-size: 10px; background: #e0e7ff; color: #3730a3; padding: 2px 6px; border-radius: 3px; font-weight: 600;">AUTO</span>' : ''}
           </div>
-          <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px; color: #1f2937;">${task.title}</div>
-          ${task.description ? `<div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">${task.description}</div>` : ''}
-          ${task.type ? `<div style="font-size: 11px; color: #9ca3af;">Type: <span style="font-family: monospace;">${task.type}</span></div>` : ''}
+          <div style="font-weight: 600; font-size: 13px; color: #1f2937;">${task.title}</div>
         </div>
       `;
     }).join('');
-  };
+
+    return `
+      <div style="margin-bottom: 16px;">
+        <h4 style="margin: 0 0 8px 0; font-size: 13px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">${groupName}</h4>
+        ${tasksHtml}
+      </div>
+    `;
+  }).join('');
+}
+
+function renderCriticalPathSection() {
+  const criticalTasks = tasksManager.getCriticalPathTasks();
+  
+  if (!criticalTasks || criticalTasks.length === 0) {
+    return '';
+  }
+
+  const tasksToShow = criticalTasks.slice(0, 12);
+  const hasMore = criticalTasks.length > 12;
+
+  const tasksHtml = tasksToShow.map(task => {
+    const appLabel = { ui: 'UI', supervisor: 'SUP', poller: 'POL', meta: 'META' }[task.app] || task.app;
+    const complexity = task.complexity || 'M';
+    
+    return `
+      <div style="padding: 10px 14px; margin-bottom: 8px; background: white; border: 1px solid #e5e7eb; border-radius: 4px; display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 11px; color: #9ca3af; font-weight: 600; min-width: 45px;">Layer ${task.layer}</span>
+        ${renderComplexityBadge(complexity)}
+        ${renderTaskStatusBadge(task.status)}
+        <span style="font-size: 11px; color: #9ca3af; font-family: monospace; min-width: 70px;">${task.id}</span>
+        <span style="font-size: 12px; font-weight: 500; color: #374151; flex: 1;">${task.title}</span>
+        <span style="font-size: 11px; color: #9ca3af; background: #f3f4f6; padding: 2px 8px; border-radius: 3px;">${appLabel}</span>
+      </div>
+    `;
+  }).join('');
 
   return `
-    ${renderGroup('in_progress', groupedByStatus.in_progress)}
-    ${renderGroup('planned', groupedByStatus.planned)}
-    ${renderGroup('blocked', groupedByStatus.blocked)}
-    ${renderGroup('done', groupedByStatus.done)}
+    <div class="section">
+      <h2 class="section-title">⭐ Critical Path to Agentic v1</h2>
+      <div style="border: 2px solid #f59e0b; border-radius: 8px; padding: 20px; background: #fffbeb; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        <p style="margin: 0 0 16px 0; color: #78350f; font-size: 13px;">
+          ${criticalTasks.length} critical tasks required for Agentic v1. Showing next ${tasksToShow.length} in dependency order.
+        </p>
+        ${tasksHtml}
+        ${hasMore ? `<p style="margin: 12px 0 0 0; color: #92400e; font-size: 12px; font-style: italic;">+ ${criticalTasks.length - 12} more tasks...</p>` : ''}
+      </div>
+    </div>
   `;
 }
 
@@ -256,7 +319,7 @@ function renderDashboard(state, tasksState) {
     const tasksHtml = tasks.length > 0 ? `
       <div style="margin-top: 24px; padding-top: 20px; border-top: 2px solid #e5e7eb;">
         <h3 style="margin: 0 0 12px 0; font-size: 16px; font-weight: 600; color: #374151;">📋 Tasks</h3>
-        ${renderTasksList(tasks)}
+        ${renderTasksListByLayer(tasks)}
       </div>
     ` : '';
 
@@ -282,10 +345,13 @@ function renderDashboard(state, tasksState) {
       <h2 class="section-title">Wyshbone Poller Tasks</h2>
       <div style="border: 2px solid #3b82f6; border-radius: 8px; padding: 24px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
         <h3 style="margin: 0 0 12px 0; font-size: 16px; font-weight: 600; color: #374151;">📋 Poller Tasks</h3>
-        ${renderTasksList(pollerTasks)}
+        ${renderTasksListByLayer(pollerTasks)}
       </div>
     </div>
   ` : '';
+  
+  // Add Critical Path section
+  const criticalPathHtml = renderCriticalPathSection();
 
   return `
     <!DOCTYPE html>
@@ -347,6 +413,8 @@ function renderDashboard(state, tasksState) {
         
         ${renderUsageMeter()}
         
+        ${criticalPathHtml}
+        
         <div class="section">
           <h2 class="section-title">Recent Changes (Last 10 Events)</h2>
           ${recentEventsHtml}
@@ -383,6 +451,14 @@ app.get('/status', (req, res) => {
 app.get('/tasks.json', (req, res) => {
   const tasksState = poller.getTasksState();
   res.json(tasksState);
+});
+
+app.get('/critical-path.json', (req, res) => {
+  const criticalTasks = tasksManager.getCriticalPathTasks();
+  res.json({
+    total: criticalTasks.length,
+    tasks: criticalTasks
+  });
 });
 
 app.post('/tasks/:id/status', async (req, res) => {

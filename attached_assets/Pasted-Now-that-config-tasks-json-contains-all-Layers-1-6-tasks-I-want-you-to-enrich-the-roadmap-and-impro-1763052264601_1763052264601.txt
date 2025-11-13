@@ -1,0 +1,234 @@
+Now that config/tasks.json contains all Layers 1–6 tasks, I want you to enrich the roadmap and improve the dashboard.
+
+GOAL
+Add:
+1) estimated complexity per task
+2) layer numbers and dependencies
+3) critical path flags
+4) automatic grouping by layer in the /status dashboard
+5) a simple “critical path” view
+
+IMPORTANT: Keep all existing task IDs and text. Only ADD new fields, don’t remove anything.
+
+────────────────────────────────────
+1. EXTEND THE TASK SCHEMA
+────────────────────────────────────
+
+In the tasks model (lib/tasks.js and config/tasks.json), add these new fields for each task:
+
+- "layer": number          // 1–6
+- "group": string          // human-readable layer name
+- "complexity": string     // "S" | "M" | "L" | "XL"
+- "dependsOn": string[]    // list of other task IDs this one depends on
+- "criticalPath": boolean  // true if important for Agentic v1 path
+
+Update lib/tasks.js so it:
+- can read/write these fields
+- provides helper functions:
+
+  - getTasksByAppAndLayer() → { [app]: { [layer]: Task[] } }
+  - getCriticalPathTasks() → Task[] sorted by (layer asc, complexity desc)
+
+If any tasks in tasks.json are missing these new fields, set sensible defaults (see below).
+
+────────────────────────────────────
+2. ASSIGN LAYERS & GROUP NAMES
+────────────────────────────────────
+
+Assign "layer" and "group" like this:
+
+LAYER 1 – "Layer 1 – Agentic Core"
+- UI-001
+- UI-002
+- SUP-001
+- SUP-002
+- SUP-003
+- POL-001
+
+LAYER 2 – "Layer 2 – Goal-centric UX"
+- All tasks with ids:
+  UI-010, UI-011, UI-012, UI-013,
+  UI-020, UI-021, UI-022,
+  UI-030, UI-031, UI-032,
+  SUP-010, SUP-011, SUP-012
+
+LAYER 3 – "Layer 3 – Adaptive Planner & Executor"
+- SUP-020, SUP-021, SUP-022,
+  SUP-030, SUP-031,
+  UI-040, UI-041, UI-042
+
+LAYER 4 – "Layer 4 – System Self-Monitoring"
+- POL-010, POL-011,
+  SUP-040,
+  POL-020, POL-021, POL-022,
+  POL-030, POL-031, POL-032,
+  UI-050
+
+LAYER 5 – "Layer 5 – Self-Improvement & Experimentation"
+- POL-040,
+  SUP-050, SUP-051, SUP-052,
+  POL-050, POL-051,
+  SUP-060, SUP-061,
+  UI-060
+
+LAYER 6 – "Layer 6 – Meta-Agent / Multi-User Optimiser"
+- META-010, META-011,
+  META-020, META-021,
+  META-030
+
+Any other tasks not explicitly mentioned should keep their current layer if already set; otherwise treat them as Layer 2 with group "Layer 2 – Goal-centric UX".
+
+────────────────────────────────────
+3. ESTIMATE COMPLEXITY PER TASK
+────────────────────────────────────
+
+Add a "complexity" field with values:
+
+- "S"  = small (a few files or minor UI changes)
+- "M"  = medium (new feature but limited surface area)
+- "L"  = large (new subsystem or heavy refactor)
+- "XL" = very large / multi-epic (use sparingly)
+
+Use this heuristic:
+
+- Default complexity: "M"
+- Mark as "L":
+  - SUP-001 (planLeadGeneration)
+  - SUP-002 (executeLeadGenerationPlan)
+  - SUP-010, SUP-011, SUP-012
+  - SUP-020, SUP-021, SUP-022
+  - SUP-050, SUP-051, SUP-052
+  - SUP-060, SUP-061
+  - POL-040
+  - META-010, META-020
+- Mark as "S":
+  - POL-001
+  - UI-020, UI-021, UI-022
+  - POL-010, POL-011
+  - POL-020, POL-021, POL-022
+  - POL-030, POL-031, POL-032
+- Everything else can remain "M" unless you see a clear reason to override.
+
+────────────────────────────────────
+4. ADD DEPENDENCIES
+────────────────────────────────────
+
+Add a "dependsOn": string[] field to encode simple dependencies.
+
+Use a simple rule-based approach so we don’t have to hand-annotate every single task:
+
+- For any Layer 1 task:
+  - dependsOn: [] (empty)
+
+- For any Layer 2+ task:
+  - dependsOn should include all Layer 1 tasks of the SAME app where it makes sense.
+    Examples:
+      - For UI Layer 2 tasks → at least ["UI-001", "UI-002"].
+      - For Supervisor Layer 2 tasks → at least ["SUP-001", "SUP-002"].
+      - For Poller Layer 2+ tasks → at least ["POL-001"] if appropriate.
+
+- For some specific tasks, add extra dependencies:
+
+  - UI-020, UI-021, UI-022 dependOn: ["UI-010"]
+  - UI-030, UI-031, UI-032 dependOn: ["UI-001", "UI-002", "SUP-001", "SUP-002"]
+  - SUP-020, SUP-021, SUP-022 dependOn: ["SUP-001", "SUP-002", "SUP-010", "SUP-011", "SUP-012"]
+  - SUP-030, SUP-031 dependOn: ["SUP-020", "SUP-021", "SUP-022"]
+  - POL-020, POL-021, POL-022 dependOn: ["POL-010", "POL-011"]
+  - POL-030, POL-031, POL-032 dependOn: ["POL-020", "POL-021", "POL-022"]
+  - SUP-050, SUP-051, SUP-052, POL-050, POL-051, SUP-060, SUP-061 dependOn all Layer 3 and Layer 4 tasks of the same app where applicable.
+
+You don’t need a perfect DAG; just make the dependencies sensible enough that a topological sort is possible.
+
+In lib/tasks.js, add a helper function to produce a "sorted by dependency" list:
+- topologicallySortedTasks(tasks: Task[]): Task[]
+
+Use that in the critical path view below.
+
+────────────────────────────────────
+5. MARK CRITICAL PATH TASKS
+────────────────────────────────────
+
+Add a boolean "criticalPath" field:
+
+- Default: false
+- Set criticalPath = true for all tasks that matter for reaching “Agentic v1” (Layers 1–4):
+
+  - All Layer 1 tasks.
+  - From Layer 2:
+    - UI-010, UI-020, UI-030,
+    - SUP-010, SUP-011, SUP-012
+  - From Layer 3:
+    - SUP-020, SUP-021, SUP-022,
+    - SUP-030,
+    - UI-040
+  - From Layer 4:
+    - POL-010, POL-011,
+    - SUP-040,
+    - POL-020, POL-021, POL-022,
+    - POL-030, POL-031, POL-032,
+    - UI-050
+
+You may mark additional tasks as criticalPath = true if you think they are obviously required, but don’t unset these.
+
+In lib/tasks.js, implement getCriticalPathTasks() which:
+- filters tasks where criticalPath === true
+- sorts by (layer ascending, then using the topological sort from dependencies)
+
+────────────────────────────────────
+6. UPDATE THE /status DASHBOARD GROUPING
+────────────────────────────────────
+
+Update server.js and the HTML rendering for the /status dashboard so that:
+
+1. Under each source card (Wyshbone UI, Wyshbone Supervisor, Wyshbone Poller), tasks are shown grouped by layer.
+
+   Example layout inside each card:
+
+   Layer 1 – Agentic Core
+     [M][C] UI-001 – Capture user goal at start of chat (status, complexity, critical badge)
+     [M][C] UI-002 – Clarifying question step before running tools
+
+   Layer 2 – Goal-centric UX
+     [M] UI-010 – My Goals panel
+     [S] UI-020 – Progress summary widget
+     ...
+
+   - Use small badges:
+     - complexity: S / M / L / XL
+     - show a small ⭐ icon or similar for criticalPath tasks.
+
+2. Add a new section on the page, e.g. under Source Status:
+
+   "Critical Path to Agentic v1"
+
+   - Render the list from getCriticalPathTasks(),
+   - in dependency-sorted order,
+   - with columns: [Layer] [ID] [Title] [App] [Status] [Complexity].
+   - This should make it obvious what the next important tasks are.
+
+3. Ensure that the existing layout is kept clean – don’t overwhelm the UI. It’s ok if you only show the top 5 tasks per layer under each card with a “+ more…” note if there are many.
+
+────────────────────────────────────
+7. API SUPPORT (OPTIONAL BUT NICE)
+────────────────────────────────────
+
+Add a new JSON endpoint:
+
+- GET /critical-path.json
+  - Returns the list from getCriticalPathTasks() with all fields, so that I (or another AI) can fetch it directly later.
+
+────────────────────────────────────
+8. VALIDATION
+
+After making these changes:
+
+- Ensure config/tasks.json is still valid JSON.
+- Ensure the server starts without errors.
+- Check:
+  - /status shows:
+    - tasks grouped by layer under each app card
+    - a “Critical Path to Agentic v1” section
+  - /tasks.json includes the new fields (layer, group, complexity, dependsOn, criticalPath)
+  - /critical-path.json returns the critical path list.
+
+Please implement all of the above changes in this WyshbonePoller repl.
