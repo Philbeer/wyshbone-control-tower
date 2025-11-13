@@ -1,0 +1,103 @@
+I want you to expand config/tasks.json into the full Wyshbone Agentic Roadmap.
+
+Keep the existing detailed Layer 1 tasks exactly as they are.
+
+Add additional tasks for Layers 2–6 as high-level tasks with:
+- id
+- app
+- title
+- description
+- status = "planned"
+- priority = "medium"
+- type = "placeholder"
+- acceptanceCheck = null
+- replitPrompt = "" (empty string)
+- createdAt / updatedAt timestamps set to now
+
+Do NOT implement these tasks, only add them to the roadmap.
+
+Use the structure below. For each bullet point, create one task entry.
+
+══════════════════════════════════════
+LAYER 2 — GOAL-CENTRIC UX (Task Titles)
+══════════════════════════════════════
+
+UI-010: My Goals panel
+UI-011: Pause/resume goals
+UI-012: Clone/adjust goals
+UI-013: Goal templates (pubs, bottle shops, coffee shops)
+UI-020: Progress summary widget
+UI-021: Natural-language progress updates
+UI-022: Traffic-light goal status
+UI-030: User approval of plan
+UI-031: Edit plan steps
+UI-032: Override segments and target persona
+
+SUP-010: Plan branches by budget/volume constraints
+SUP-011: Fallback data sources in plan generation
+SUP-012: Use historical performance in planning
+
+══════════════════════════════════════
+LAYER 3 — ADAPTIVE PLANNER & EXECUTOR
+══════════════════════════════════════
+
+SUP-020: Retry logic with exponential backoff
+SUP-021: Reorder plan steps dynamically
+SUP-022: Partial-success handling
+SUP-030: Decision points asking user for guidance
+SUP-031: Suggestions injected into the chat during execution
+
+UI-040: Display Supervisor suggestions inline
+UI-041: Execution timeline view
+UI-042: Error explanation view (“what happened and why”)
+
+══════════════════════════════════════
+LAYER 4 — SYSTEM SELF-MONITORING
+══════════════════════════════════════
+
+POL-010: Success metrics per goal
+POL-011: Per-goal success score
+SUP-040: Weekly goal review summary
+POL-020: Cleverness trend graph
+POL-021: Complexity vs TODO/FIXME trend
+POL-022: Tool error rate charts
+POL-030: Error spike alerting
+POL-031: Goal stagnation alerting
+POL-032: System status dashboard (Green/Amber/Red)
+
+UI-050: Show system health inside chat when something is wrong
+
+══════════════════════════════════════
+LAYER 5 — SELF-IMPROVEMENT & EXPERIMENTATION
+══════════════════════════════════════
+
+POL-040: Define Experiment object
+SUP-050: Supervisor proposes experiments
+SUP-051: Auto-run experiments in safe mode
+POL-050: Poller auto-creates tasks when TODO spikes
+SUP-052: Supervisor auto-creates tasks when tools underperform
+POL-051: Task ranking by impact/effort
+SUP-060: Learn from experiment outcomes
+SUP-061: Build vertical-specific Playbooks
+UI-060: Show Playbook suggestions to user
+
+══════════════════════════════════════
+LAYER 6 — META-AGENT / MULTI-USER OPTIMISER
+══════════════════════════════════════
+
+META-010: Global knowledge base of patterns
+META-011: Cross-user anonymised performance data
+META-020: Global strategy updates pushed to users
+META-021: Cross-vertical pattern transfer system
+META-030: Per-user opt-in/out for global learning
+
+══════════════════════════════════════
+
+For each of these items, create a JSON task object matching the existing structure in tasks.json, but with:
+- type = "placeholder"
+- replitPrompt = "" (empty)
+- acceptanceCheck = null
+
+Do NOT remove the existing detailed tasks.
+
+After adding all layers, ensure tasks.json remains valid JSON.
