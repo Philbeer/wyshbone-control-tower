@@ -1,0 +1,47 @@
+You are my coding assistant for the Wyshbone Control Tower (previously Poller) repl.
+
+I want Control Tower to automatically recognise when the Wyshbone UI has implemented the “UI-001: capture user goal at start of chat” feature, based on a flag exposed in the UI’s status JSON.
+
+The Wyshbone UI status/export endpoint will now include a boolean field:
+
+  ui001_goalCaptureEnabled: true
+
+Please do the following, in a minimal and focused way:
+
+1. Open the task configuration file where tasks like UI-001 are defined (for example tasks.json or similar). Locate the entry for the UI-001 task (“Capture user goal at start of chat”).
+
+2. Add a new property to this task definition, for example:
+
+   "acceptanceKey": "ui001_goalCaptureEnabled"
+
+   This tells Control Tower which key in the UI status JSON to look at to decide if this task is implemented.
+
+3. In the code where Control Tower:
+   - fetches the current UI status JSON, and
+   - renders or computes status for each task,
+
+   extend the logic so that:
+
+   - For tasks that have an "acceptanceKey" defined AND are associated with the UI app:
+     - Look up that key in the latest UI status JSON.
+     - If the status JSON contains that key and its value is strictly true, then treat that task’s effective status as “done” (or “implemented”), even if the static status field in tasks.json is still "planned".
+     - If the status JSON does not contain the key or it is false, keep the task as planned/pending.
+
+   You can implement this either by:
+   - adding a computed field like effectiveStatus, or
+   - updating the status used for rendering in memory only, without overwriting the source file.
+
+4. Update the UI rendering so that when a task’s effective status is considered “done” by this acceptanceKey check, it is visually shown as completed in the Control Tower (e.g. DONE instead of PLANNED).
+
+5. If there is a “cleverness index” or progress percentage that is computed based on how many tasks are complete, include UI-001 in that calculation via this acceptance check (so when ui001_goalCaptureEnabled is true, the index should tick up appropriately).
+
+6. Do not add any heavy code scanning, repo cloning, or large refactors. Keep this as a lightweight check based purely on:
+   - the JSON returned by the UI status/export endpoint, and
+   - the task definition that references an acceptanceKey.
+
+After implementation, the behaviour should be:
+
+- When the UI status JSON includes "ui001_goalCaptureEnabled": true, Control Tower should show UI-001 as completed and factor it into any progress/cleverness calculation.
+- When that flag is absent or false, UI-001 should remain in its previous state (e.g. planned).
+
+Please keep changes minimal and focused on this acceptanceKey mechanism.

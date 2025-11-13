@@ -114,6 +114,52 @@ GET /proxy/file?src=Wyshbone%20UI&path=src/components/Button.tsx
 }
 ```
 
+## Task Acceptance Checking
+
+The dashboard automatically monitors task completion through two mechanisms:
+
+### 1. Status JSON Flags (acceptanceKey)
+
+The lightweight, preferred method. Tasks can specify an `acceptanceKey` in their definition:
+
+```json
+{
+  "id": "UI-001",
+  "acceptanceKey": "ui001_goalCaptureEnabled",
+  ...
+}
+```
+
+When the Wyshbone app exports this field as `true` in its `/export/status.json`:
+
+```json
+{
+  "ui001_goalCaptureEnabled": true,
+  ...
+}
+```
+
+The dashboard automatically marks the task as **DONE**. No file fetching or scanning required!
+
+### 2. File Contents Check (fileContains)
+
+Fallback method when `acceptanceKey` is not available:
+
+```json
+{
+  "id": "UI-002",
+  "acceptanceCheck": {
+    "type": "fileContains",
+    "file": "server/routes.ts",
+    "mustContain": "clarifyingQuestions"
+  }
+}
+```
+
+The dashboard fetches the specified file and checks if it contains the required string.
+
+**Priority**: `acceptanceKey` is checked first (instant), then falls back to `fileContains` (requires file fetch).
+
 ## Configuration
 
 ### Polling Interval
