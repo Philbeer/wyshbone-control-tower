@@ -71,6 +71,14 @@ Server runs on port defined by `PORT` environment variable (default: 3000).
 
 ## Recent Changes
 
+- 2025-11-13: Phase 2 visual indicators
+  - Added bold "Phase 2" badges to all tasks with layer >= 5
+  - Badges appear on layer headings (e.g., "Layer 5 – Self-Improvement & Experimentation **Phase 2**")
+  - Badges also appear on individual task rows in the badge row
+  - Purple/violet styling (#7c3aed background #ede9fe) makes Phase 2 tasks stand out
+  - Applied across all task rendering locations: Critical Path, Source Status, and Poller sections
+  - 9 tasks currently marked as Phase 2 (all in Layer 5)
+
 - 2025-11-13: Interactive task modal with copy-to-clipboard
   - Made all task rows clickable in Critical Path section and per-app task lists
   - Added modal popup showing full task details (ID, title, description, app, layer, status, complexity)

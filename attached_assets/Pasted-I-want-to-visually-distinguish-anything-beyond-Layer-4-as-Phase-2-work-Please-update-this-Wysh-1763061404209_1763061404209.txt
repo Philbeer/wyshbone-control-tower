@@ -1,0 +1,43 @@
+I want to visually distinguish anything beyond Layer 4 as “Phase 2” work.
+
+Please update this WyshbonePoller repl so that:
+
+GOAL
+- Any task with layer >= 5 is clearly marked as **Phase 2** in the UI.
+- The label should appear in bold next to the layer name or task title anywhere tasks are rendered.
+
+DETAILS
+
+1. DETECTION
+   - Use the existing `layer` field on tasks (1–6).
+   - A task is considered Phase 2 if: task.layer >= 5.
+
+2. BADGE / LABEL
+   - In the HTML rendering for tasks (Critical Path section, Source Status cards, and any other task lists):
+     - For each Phase 2 task, add a bold text label:
+       - e.g. **Phase 2** or `<strong>Phase 2</strong>`
+     - Place it near the layer/group label or next to the task title so it’s clearly visible.
+   - For example:
+       Layer 5 – SELF-IMPROVEMENT & EXPERIMENTATION **(Phase 2)**
+     or:
+       [M][PLANNED] POL-040 – Define Experiment object **Phase 2**
+
+   - The exact styling can be simple:
+       - Use `<strong>` for bold.
+       - Optionally wrap it in a small span with a subtle style (e.g. smaller font-size, slight padding) but keep it minimal.
+
+3. WHERE TO SHOW IT
+   - Apply the Phase 2 label anywhere tasks are rendered:
+     - In the per-app “Source Status” task lists.
+     - In any task grouping sections that include Layer >= 5 (e.g. Poller tasks, future roadmap, etc.).
+   - It is OK if the Critical Path section never shows Phase 2 tasks (since it’s for Layers 1–4), but the code should still be robust: if a Phase 2 task somehow appears there, it should still show the label.
+
+4. IMPLEMENTATION NOTES
+   - You do NOT need to change tasks.json or the task objects themselves; just use `task.layer` at render time to decide whether to show the label.
+   - Keep the rest of the layout as it is now; we’re only adding a visual tag, not changing grouping or filtering.
+
+5. VALIDATION
+   - After changes:
+     - /status loads correctly.
+     - Any task with layer >= 5 shows a bold “Phase 2” indication next to its layer or title.
+     - Tasks with layers 1–4 remain unchanged.

@@ -83,6 +83,10 @@ function renderCriticalPathBadge() {
   return '<span style="font-size: 12px;" title="Critical Path">⭐</span>';
 }
 
+function renderPhase2Badge() {
+  return '<strong style="font-size: 10px; color: #7c3aed; background: #ede9fe; padding: 2px 6px; border-radius: 3px; margin-left: 6px;">Phase 2</strong>';
+}
+
 function renderTasksListByLayer(tasks) {
   if (!tasks || tasks.length === 0) {
     return '<p style="color: #9ca3af; font-style: italic; font-size: 14px;">No tasks</p>';
@@ -102,11 +106,13 @@ function renderTasksListByLayer(tasks) {
   return layers.map(layer => {
     const layerTasks = tasksByLayer[layer];
     const groupName = layerTasks[0]?.group || `Layer ${layer}`;
+    const isPhase2 = parseInt(layer) >= 5;
     
     const tasksHtml = layerTasks.map(task => {
       const hasAcceptance = task.acceptanceCheck && task.acceptanceCheck.type === 'fileContains';
       const complexity = task.complexity || 'M';
       const isCritical = task.criticalPath || false;
+      const taskIsPhase2 = (task.layer || 1) >= 5;
       
       return `
         <div class="task-row" data-task-id="${task.id}" style="padding: 8px 12px; margin-bottom: 8px; background: #f9fafb; border-left: 3px solid ${task.status === 'done' ? '#22c55e' : task.status === 'in_progress' ? '#f59e0b' : task.status === 'blocked' ? '#ef4444' : '#3b82f6'}; border-radius: 4px; cursor: pointer; transition: background 0.2s;">
@@ -116,6 +122,7 @@ function renderTasksListByLayer(tasks) {
             ${renderTaskStatusBadge(task.status)}
             <span style="font-size: 11px; color: #9ca3af; font-family: monospace;">${task.id}</span>
             ${hasAcceptance ? '<span style="font-size: 10px; background: #e0e7ff; color: #3730a3; padding: 2px 6px; border-radius: 3px; font-weight: 600;">AUTO</span>' : ''}
+            ${taskIsPhase2 ? renderPhase2Badge() : ''}
           </div>
           <div style="font-weight: 600; font-size: 13px; color: #1f2937;">${task.title}</div>
         </div>
@@ -124,7 +131,9 @@ function renderTasksListByLayer(tasks) {
 
     return `
       <div style="margin-bottom: 16px;">
-        <h4 style="margin: 0 0 8px 0; font-size: 13px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">${groupName}</h4>
+        <h4 style="margin: 0 0 8px 0; font-size: 13px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">
+          ${groupName}${isPhase2 ? renderPhase2Badge() : ''}
+        </h4>
         ${tasksHtml}
       </div>
     `;
@@ -141,10 +150,11 @@ function renderCriticalPathSection() {
   const tasksHtml = criticalTasks.map(task => {
     const appLabel = { ui: 'UI', supervisor: 'SUP', poller: 'POL', meta: 'META' }[task.app] || task.app;
     const complexity = task.complexity || 'M';
+    const isPhase2 = (task.layer || 1) >= 5;
     
     return `
       <div class="task-row" data-task-id="${task.id}" style="padding: 10px 14px; margin-bottom: 8px; background: white; border: 1px solid #e5e7eb; border-radius: 4px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: background 0.2s;">
-        <span style="font-size: 11px; color: #9ca3af; font-weight: 600; min-width: 45px;">Layer ${task.layer}</span>
+        <span style="font-size: 11px; color: #9ca3af; font-weight: 600; min-width: 45px;">Layer ${task.layer}${isPhase2 ? renderPhase2Badge() : ''}</span>
         ${renderComplexityBadge(complexity)}
         ${renderTaskStatusBadge(task.status)}
         <span style="font-size: 11px; color: #9ca3af; font-family: monospace; min-width: 70px;">${task.id}</span>
