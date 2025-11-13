@@ -109,7 +109,7 @@ function renderTasksListByLayer(tasks) {
       const isCritical = task.criticalPath || false;
       
       return `
-        <div style="padding: 8px 12px; margin-bottom: 8px; background: #f9fafb; border-left: 3px solid ${task.status === 'done' ? '#22c55e' : task.status === 'in_progress' ? '#f59e0b' : task.status === 'blocked' ? '#ef4444' : '#3b82f6'}; border-radius: 4px;">
+        <div class="task-row" data-task-id="${task.id}" style="padding: 8px 12px; margin-bottom: 8px; background: #f9fafb; border-left: 3px solid ${task.status === 'done' ? '#22c55e' : task.status === 'in_progress' ? '#f59e0b' : task.status === 'blocked' ? '#ef4444' : '#3b82f6'}; border-radius: 4px; cursor: pointer; transition: background 0.2s;">
           <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px; flex-wrap: wrap;">
             ${renderComplexityBadge(complexity)}
             ${isCritical ? renderCriticalPathBadge() : ''}
@@ -143,7 +143,7 @@ function renderCriticalPathSection() {
     const complexity = task.complexity || 'M';
     
     return `
-      <div style="padding: 10px 14px; margin-bottom: 8px; background: white; border: 1px solid #e5e7eb; border-radius: 4px; display: flex; align-items: center; gap: 10px;">
+      <div class="task-row" data-task-id="${task.id}" style="padding: 10px 14px; margin-bottom: 8px; background: white; border: 1px solid #e5e7eb; border-radius: 4px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: background 0.2s;">
         <span style="font-size: 11px; color: #9ca3af; font-weight: 600; min-width: 45px;">Layer ${task.layer}</span>
         ${renderComplexityBadge(complexity)}
         ${renderTaskStatusBadge(task.status)}
@@ -405,6 +405,114 @@ function renderDashboard(state, tasksState) {
             grid-template-columns: 1fr;
           }
         }
+        .task-row:hover {
+          background: #e5e7eb !important;
+        }
+        .modal-overlay {
+          display: none;
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.5);
+          z-index: 1000;
+          align-items: center;
+          justify-content: center;
+          padding: 20px;
+        }
+        .modal-overlay.active {
+          display: flex;
+        }
+        .modal-content {
+          background: white;
+          border-radius: 8px;
+          max-width: 800px;
+          width: 100%;
+          max-height: 90vh;
+          overflow-y: auto;
+          box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+        .modal-header {
+          padding: 24px;
+          border-bottom: 1px solid #e5e7eb;
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+        }
+        .modal-body {
+          padding: 24px;
+        }
+        .modal-close {
+          background: #f3f4f6;
+          border: none;
+          border-radius: 4px;
+          padding: 8px 12px;
+          cursor: pointer;
+          font-size: 18px;
+          color: #6b7280;
+          transition: background 0.2s;
+        }
+        .modal-close:hover {
+          background: #e5e7eb;
+        }
+        .task-detail-row {
+          margin-bottom: 16px;
+        }
+        .task-detail-label {
+          font-size: 12px;
+          font-weight: 600;
+          color: #6b7280;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          margin-bottom: 4px;
+        }
+        .task-detail-value {
+          font-size: 14px;
+          color: #1f2937;
+        }
+        .prompt-container {
+          background: #f9fafb;
+          border: 1px solid #e5e7eb;
+          border-radius: 4px;
+          padding: 12px;
+          max-height: 300px;
+          overflow-y: auto;
+          font-family: monospace;
+          font-size: 12px;
+          white-space: pre-wrap;
+          word-wrap: break-word;
+          margin-bottom: 12px;
+        }
+        .copy-btn {
+          background: #3b82f6;
+          color: white;
+          border: none;
+          border-radius: 4px;
+          padding: 8px 16px;
+          font-weight: 600;
+          cursor: pointer;
+          font-size: 13px;
+          transition: background 0.2s;
+        }
+        .copy-btn:hover {
+          background: #2563eb;
+        }
+        .copy-btn.success {
+          background: #22c55e;
+        }
+        .copy-feedback {
+          display: inline-block;
+          margin-left: 12px;
+          color: #22c55e;
+          font-size: 13px;
+          font-weight: 600;
+        }
+        .no-prompt-msg {
+          color: #9ca3af;
+          font-style: italic;
+          padding: 12px;
+        }
       </style>
     </head>
     <body>
@@ -430,6 +538,155 @@ function renderDashboard(state, tasksState) {
 
         ${pollerTasksHtml}
       </div>
+
+      <!-- Task Detail Modal -->
+      <div id="taskModal" class="modal-overlay">
+        <div class="modal-content">
+          <div class="modal-header">
+            <div>
+              <h2 id="modalTaskTitle" style="font-size: 20px; font-weight: 600; margin-bottom: 8px;"></h2>
+              <div id="modalTaskId" style="font-size: 12px; color: #9ca3af; font-family: monospace;"></div>
+            </div>
+            <button class="modal-close" onclick="closeTaskModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="task-detail-row">
+              <div class="task-detail-label">App</div>
+              <div id="modalTaskApp" class="task-detail-value"></div>
+            </div>
+            <div class="task-detail-row">
+              <div class="task-detail-label">Layer & Group</div>
+              <div id="modalTaskLayer" class="task-detail-value"></div>
+            </div>
+            <div class="task-detail-row">
+              <div class="task-detail-label">Status</div>
+              <div id="modalTaskStatus" class="task-detail-value"></div>
+            </div>
+            <div class="task-detail-row">
+              <div class="task-detail-label">Complexity</div>
+              <div id="modalTaskComplexity" class="task-detail-value"></div>
+            </div>
+            <div class="task-detail-row">
+              <div class="task-detail-label">Description</div>
+              <div id="modalTaskDescription" class="task-detail-value"></div>
+            </div>
+            <div class="task-detail-row">
+              <div class="task-detail-label">Implementation Prompt</div>
+              <div id="modalTaskPromptContainer"></div>
+              <div>
+                <button id="copyPromptBtn" class="copy-btn" onclick="copyPromptToClipboard()">📋 Copy prompt</button>
+                <span id="copyFeedback" class="copy-feedback" style="display: none;"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <script>
+        // Embed all tasks data
+        const TASKS_DATA = ${JSON.stringify(tasksManager.getAllTasks())};
+
+        // Create task lookup map
+        const tasksMap = new Map();
+        TASKS_DATA.forEach(task => tasksMap.set(task.id, task));
+
+        // Handle task row clicks
+        document.querySelectorAll('.task-row').forEach(row => {
+          row.addEventListener('click', function(e) {
+            e.preventDefault();
+            const taskId = this.getAttribute('data-task-id');
+            openTaskModal(taskId);
+          });
+        });
+
+        function openTaskModal(taskId) {
+          const task = tasksMap.get(taskId);
+          if (!task) return;
+
+          const appLabels = { ui: 'Wyshbone UI', supervisor: 'Wyshbone Supervisor', poller: 'Wyshbone Poller', meta: 'Meta-Agent' };
+          
+          document.getElementById('modalTaskTitle').textContent = task.title;
+          document.getElementById('modalTaskId').textContent = task.id;
+          document.getElementById('modalTaskApp').textContent = appLabels[task.app] || task.app;
+          document.getElementById('modalTaskLayer').textContent = \`Layer \${task.layer} – \${task.group || 'Unknown'}\`;
+          document.getElementById('modalTaskStatus').textContent = (task.status || 'planned').toUpperCase();
+          document.getElementById('modalTaskComplexity').textContent = task.complexity || 'M';
+          document.getElementById('modalTaskDescription').textContent = task.description || 'No description available.';
+
+          const promptContainer = document.getElementById('modalTaskPromptContainer');
+          const copyBtn = document.getElementById('copyPromptBtn');
+          
+          if (task.replitPrompt && task.replitPrompt.trim()) {
+            promptContainer.innerHTML = \`<div class="prompt-container">\${escapeHtml(task.replitPrompt)}</div>\`;
+            copyBtn.style.display = 'inline-block';
+          } else {
+            promptContainer.innerHTML = '<div class="no-prompt-msg">No implementation prompt yet – this is a roadmap placeholder.</div>';
+            copyBtn.style.display = 'none';
+          }
+
+          document.getElementById('copyFeedback').style.display = 'none';
+          document.getElementById('taskModal').classList.add('active');
+        }
+
+        function closeTaskModal() {
+          document.getElementById('taskModal').classList.remove('active');
+        }
+
+        function copyPromptToClipboard() {
+          const taskId = document.getElementById('modalTaskId').textContent;
+          const task = tasksMap.get(taskId);
+          
+          if (!task || !task.replitPrompt || !task.replitPrompt.trim()) {
+            showCopyFeedback('No prompt available!', false);
+            return;
+          }
+
+          navigator.clipboard.writeText(task.replitPrompt).then(() => {
+            showCopyFeedback('✓ Copied!', true);
+          }).catch(err => {
+            showCopyFeedback('Failed to copy', false);
+            console.error('Copy failed:', err);
+          });
+        }
+
+        function showCopyFeedback(message, success) {
+          const feedback = document.getElementById('copyFeedback');
+          const btn = document.getElementById('copyPromptBtn');
+          
+          feedback.textContent = message;
+          feedback.style.display = 'inline-block';
+          feedback.style.color = success ? '#22c55e' : '#ef4444';
+          
+          if (success) {
+            btn.classList.add('success');
+          }
+
+          setTimeout(() => {
+            feedback.style.display = 'none';
+            btn.classList.remove('success');
+          }, 2000);
+        }
+
+        function escapeHtml(text) {
+          const div = document.createElement('div');
+          div.textContent = text;
+          return div.innerHTML;
+        }
+
+        // Close modal when clicking overlay
+        document.getElementById('taskModal').addEventListener('click', function(e) {
+          if (e.target === this) {
+            closeTaskModal();
+          }
+        });
+
+        // Close modal with Escape key
+        document.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') {
+            closeTaskModal();
+          }
+        });
+      </script>
     </body>
     </html>
   `;

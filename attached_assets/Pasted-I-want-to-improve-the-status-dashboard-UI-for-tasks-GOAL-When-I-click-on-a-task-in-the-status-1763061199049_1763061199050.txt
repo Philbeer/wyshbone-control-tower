@@ -1,0 +1,64 @@
+I want to improve the /status dashboard UI for tasks.
+
+GOAL
+When I click on a task in the /status page, I should see a pop-up (modal or side drawer) that shows the full task detail, including the `replitPrompt`, with a one-click “Copy prompt” button that copies that text to the clipboard. This is so I can easily paste the prompt into the Wyshbone UI or Wyshbone Supervisor repl agents.
+
+Please implement the following:
+
+1. DATA ACCESS
+   - Use the existing task data you already have in memory (from config/tasks.json).
+   - Each rendered task row should have access to:
+     - id
+     - title
+     - description
+     - app
+     - layer
+     - status
+     - complexity
+     - criticalPath
+     - replitPrompt
+
+2. CLICKABLE TASK ROWS
+   - In the HTML for each task row (both in the Critical Path section and under each Source Status card), wrap the row in a clickable element (e.g. <button> or <div> with a data-task-id attribute).
+   - When a row is clicked, prevent navigation and instead open a task detail panel.
+
+3. TASK DETAIL POP-UP
+   - Add a lightweight modal or side drawer to the page (no external CSS frameworks, just simple CSS).
+   - The pop-up should show:
+     - Task ID and title
+     - App (UI / SUP / POL / etc.)
+     - Layer and group name
+     - Status and complexity
+     - Full description
+     - A readonly <textarea> or <pre> block containing the `replitPrompt` text (even if it is empty for placeholder tasks).
+
+   - For placeholder tasks where `replitPrompt` is an empty string, show a short message like:
+     - “No implementation prompt yet – this is a roadmap placeholder.”
+
+4. COPY-TO-CLIPBOARD BUTTON
+   - Inside the modal, add a “Copy prompt” button.
+   - When clicked:
+     - If `replitPrompt` is non-empty, copy it to the clipboard using `navigator.clipboard.writeText(replitPrompt)`.
+     - Show a small confirmation message, e.g. “Copied!” for a couple seconds.
+     - If `replitPrompt` is empty, show a message like “No prompt available for this task.”
+
+   - Keep the implementation simple vanilla JS; you can inline the script in the HTML template if needed.
+
+5. UX DETAILS
+   - Modal should have:
+     - A close button (X) in the top-right.
+     - Clicking outside the modal (on the overlay) should also close it.
+     - The page should not reload when opening/closing the modal.
+   - Limit the height of the prompt area and allow vertical scrolling inside it so long prompts don’t blow up the layout.
+
+6. WIRING
+   - Make sure that:
+     - Critical Path section uses the same click behavior.
+     - The per-app task lists under “Source Status” also use the same modal.
+   - You can embed the full task list as a JS object in the rendered HTML to avoid extra network calls; or, if you prefer, expose an internal endpoint like /task/:id.json and fetch dynamically. Either approach is fine.
+
+7. VALIDATION
+   - After implementation, ensure:
+     - /status loads without errors.
+     - Clicking on a task opens the detail modal with all the expected fields.
+     - “Copy prompt” successfully copies the `replitPrompt` field for tasks like UI-001, UI-002, SUP-001, SUP-002, etc.

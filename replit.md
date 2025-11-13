@@ -71,12 +71,21 @@ Server runs on port defined by `PORT` environment variable (default: 3000).
 
 ## Recent Changes
 
+- 2025-11-13: Interactive task modal with copy-to-clipboard
+  - Made all task rows clickable in Critical Path section and per-app task lists
+  - Added modal popup showing full task details (ID, title, description, app, layer, status, complexity)
+  - Implemented copy-to-clipboard button for `replitPrompt` field
+  - Modal closes via X button, clicking overlay, or ESC key
+  - Embedded all 51 tasks as JSON in HTML for instant modal population
+  - Added hover effects on task rows for better UX
+  - Shows helpful message for placeholder tasks without implementation prompts
+
 - 2025-11-13: Roadmap enrichment implementation
   - Expanded roadmap from 6 to 51 tasks across 6 architectural layers
   - Enriched tasks with layer, group, complexity (S/M/L/XL), dependencies, criticalPath
   - Enhanced lib/tasks.js with layer grouping, critical path extraction, and topological sorting
   - Added dependency validation that fails fast on missing dependencies
-  - Implemented critical path dashboard section showing next 10-12 blockers
+  - Implemented critical path dashboard section showing all 27 critical tasks (scrollable)
   - Added /critical-path.json API endpoint returning 27 critical tasks in dependency order
   - Added scripts/enrich-tasks.js with warning about not re-running after manual edits
 
