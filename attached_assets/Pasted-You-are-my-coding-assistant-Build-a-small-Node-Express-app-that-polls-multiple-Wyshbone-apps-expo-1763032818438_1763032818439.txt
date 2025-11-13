@@ -1,0 +1,111 @@
+You are my coding assistant. Build a small Node/Express app that polls multiple Wyshbone apps’ /export/status.json endpoints and shows a live “status / ticker” dashboard.
+
+STACK
+- Node.js
+- Express
+- No front-end framework: just server-side rendered HTML with template literals.
+- Use ESM or CJS, whichever is simplest, but be consistent.
+
+FILES TO CREATE
+
+1) package.json
+   - Scripts:
+     - "start": "node server.js"
+   - Dependencies:
+     - "express"
+     - "node-fetch" (or use built-in fetch if supported)
+   - DevDeps: none needed.
+
+2) config/sources.json
+   - Example structure:
+     [
+       {
+         "name": "Wyshbone UI",
+         "baseUrl": "https://<UI-REPL-URL>",      // e.g. https://wyshbone-ui.phil.repl.co
+         "exportKey": "REPLACE_WITH_EXPORT_KEY"
+       },
+       {
+         "name": "Wyshbone Supervisor",
+         "baseUrl": "https://<SUP-REPL-URL>",
+         "exportKey": "REPLACE_WITH_EXPORT_KEY"
+       }
+     ]
+   - Leave placeholders for now; I will edit them manually later.
+
+3) src/poller.js (or lib/poller.js)
+   - In-memory storage only (no database).
+   - Load config/sources.json.
+   - For each source, maintain:
+     - an array of the last N snapshots (N ~ 50).
+     - each snapshot is the JSON returned from /export/status.json plus:
+       {
+         fetchedAt: ISO string,
+         success: boolean,
+         error?: string
+       }
+   - Polling:
+     - Every POLL_INTERVAL_MS (e.g. 120000 ms = 2 minutes):
+       - For each source:
+         - Do a GET to `${baseUrl}/export/status.json` with header:
+           X-EXPORT-KEY: source.exportKey
+         - On success:
+           - Parse JSON.
+           - Push snapshot into that source’s history (limit to last N).
+         - On failure:
+           - Push a snapshot with success=false and error message.
+   - Export from poller.js:
+     - startPolling(): starts the interval.
+     - getState(): returns a structured object summarising:
+       - per-source: latest snapshot, and optionally previous one to compute deltas.
+
+   - Deltas:
+     - For each source, compute between latest and previous snapshot (if both exist):
+       - clevernessDelta = latest.quality.clevernessIndex - previous.quality.clevernessIndex
+       - locDelta = latest.totals.loc - previous.totals.loc
+       - todoDelta = latest.totals.todo - previous.totals.todo
+       - fixmeDelta = latest.totals.fixme - previous.totals.fixme
+
+4) server.js
+   - Imports Express and the poller.
+   - Reads an environment variable PORT (default 3000).
+   - On startup:
+     - Start polling via poller.startPolling().
+   - Routes:
+     - GET /status.json
+       - Returns the full aggregate state from poller.getState().
+     - GET /status
+       - Renders a simple HTML dashboard:
+         - For each source:
+           - Name
+           - Last fetchedAt (relative or plain ISO)
+           - clevernessIndex + Δ since previous
+           - LOC + Δ
+           - TODO/FIXME counts + Δ
+           - A small “status” indicator (OK/ERROR based on last success flag).
+         - A “ticker” section at the top that shows a few recent notable events, for example:
+           - “Wyshbone UI: cleverness +5, LOC +120, TODO +1”
+           - “Supervisor: cleverness -2, TODO -3 (clean-up)”
+         - Auto-refresh:
+           - Add `<meta http-equiv="refresh" content="60">` so the page refreshes every 60 seconds.
+     - GET /proxy/file
+       - Query params: src (source name), path (file path)
+       - Finds that source in config/sources.json.
+       - Issues a GET to `${baseUrl}/export/file?path=<encoded path>` with header X-EXPORT-KEY.
+       - On success: return { path, content } as JSON.
+       - On error: forward a JSON error.
+
+   - The HTML does NOT need to be fancy. Just:
+     - <h1>Wyshbone Status</h1>
+     - Then a card per source.
+     - Then a section like “Recent changes (last 10 events)”.
+
+GENERAL NOTES
+- Gracefully handle fetch errors (network, 403, etc) without crashing the server.
+- If config/sources.json is missing or invalid, log a clear error.
+- Make it easy for me to later update config/sources.json with real baseUrl + exportKey values.
+
+After implementing, print instructions to the console on how to:
+- Update config/sources.json with my real URLs and keys.
+- Start the server via: npm install && npm start
+- Access the dashboard at: http://localhost:<PORT>/status
+- Use /status.json as a machine-readable feed for other AIs.
