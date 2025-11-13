@@ -1,0 +1,77 @@
+[
+  {
+    "id": "UI-001",
+    "app": "ui",
+    "title": "Capture user goal at start of chat",
+    "description": "When a new chat session starts, the agent should ask the user to describe their high-level goal before diving into implementation. This helps ensure the solution aligns with actual needs.",
+    "status": "planned",
+    "priority": "high",
+    "type": "replit_prompt",
+    "replitPrompt": "Add a check at the start of new chat sessions: Before taking any action, ask the user \"What's your main goal for this session?\" and use that to guide your approach. Update the system prompt or add logic to enforce this.",
+    "acceptanceCheck": {
+      "type": "fileContains",
+      "file": "server/routes.ts",
+      "mustContain": "userGoal"
+    },
+    "createdAt": "2025-11-13T15:00:00.000Z",
+    "updatedAt": "2025-11-13T15:00:00.000Z"
+  },
+  {
+    "id": "UI-002",
+    "app": "ui",
+    "title": "Ask clarifying questions before running tools",
+    "description": "The agent should pause and ask for confirmation or clarification before executing potentially expensive or destructive operations (API calls, database mutations, file deletions).",
+    "status": "in_progress",
+    "priority": "high",
+    "type": "replit_prompt",
+    "replitPrompt": "Before calling any tool that could be expensive (API calls) or destructive (database writes, file deletion), add a confirmation step: Ask the user \"This will [describe action]. Should I proceed?\" Wait for explicit approval before continuing.",
+    "createdAt": "2025-11-13T14:30:00.000Z",
+    "updatedAt": "2025-11-13T15:30:00.000Z"
+  },
+  {
+    "id": "SUPERVISOR-001",
+    "app": "supervisor",
+    "title": "Monitor agent token usage per session",
+    "description": "Track and display total tokens consumed per chat session. Alert when approaching limits to prevent mid-conversation cutoffs.",
+    "status": "planned",
+    "priority": "medium",
+    "type": "replit_prompt",
+    "replitPrompt": "Add session-level token tracking: Keep a running count of tokens used in each conversation. Display this in the UI and warn the user when approaching 80% of the context limit.",
+    "acceptanceCheck": {
+      "type": "fileContains",
+      "file": "server/memory.ts",
+      "mustContain": "tokenCount"
+    },
+    "createdAt": "2025-11-13T13:00:00.000Z",
+    "updatedAt": "2025-11-13T13:00:00.000Z"
+  },
+  {
+    "id": "SUPERVISOR-002",
+    "app": "supervisor",
+    "title": "Add logging for all external API calls",
+    "description": "Implement structured logging for every external API request (OpenAI, Google Places, etc.) including timestamp, endpoint, response time, and status. This helps debug issues and monitor costs.",
+    "status": "done",
+    "priority": "medium",
+    "type": "bug",
+    "replitPrompt": "Add console.log statements before and after each fetch() call to external APIs. Log: timestamp, URL, method, response status, duration. Format consistently for easy parsing.",
+    "acceptanceCheck": {
+      "type": "fileContains",
+      "file": "server/openai.ts",
+      "mustContain": "console.log"
+    },
+    "createdAt": "2025-11-10T10:00:00.000Z",
+    "updatedAt": "2025-11-13T12:00:00.000Z"
+  },
+  {
+    "id": "POLLER-001",
+    "app": "poller",
+    "title": "Add health check endpoint",
+    "description": "Create a simple /health endpoint that returns uptime, last poll time, and source statuses. Useful for monitoring.",
+    "status": "planned",
+    "priority": "low",
+    "type": "replit_prompt",
+    "replitPrompt": "Add GET /health route that returns JSON with: uptime, lastPollTime, sources array with each source's status and last successful fetch time.",
+    "createdAt": "2025-11-13T15:45:00.000Z",
+    "updatedAt": "2025-11-13T15:45:00.000Z"
+  }
+]

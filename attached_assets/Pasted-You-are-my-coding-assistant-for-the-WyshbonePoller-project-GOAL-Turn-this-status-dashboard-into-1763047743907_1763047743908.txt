@@ -1,0 +1,154 @@
+You are my coding assistant for the WyshbonePoller project.
+
+GOAL
+Turn this status dashboard into a lightweight "control tower" with a persistent backlog / to-do system for each Wyshbone app (UI, Supervisor, Poller). The dashboard should show tasks under each source card, and some tasks should be auto-marked as "done" when the corresponding code exists in the target app (checked via /export/file).
+
+HIGH-LEVEL FEATURES
+
+1. Persistent task store
+   - New file: config/tasks.json
+   - New module: lib/tasks.js
+   - Tasks are grouped by app (ui, supervisor, poller)
+
+2. Task schema
+   - Each task object should look like:
+
+     {
+       "id": "UI-001",
+       "app": "ui",                      // ui | supervisor | poller
+       "title": "Short label",
+       "description": "Longer explanation of what this work does.",
+       "status": "planned",             // planned | in_progress | done | blocked
+       "priority": "high",              // low | medium | high
+       "type": "replit_prompt",         // e.g. replit_prompt | bug | refactor | experiment
+       "replitPrompt": "Copy-paste text I can give to the UI or Supervisor Replit agent.",
+       "acceptanceCheck": {
+         "type": "fileContains",        // for now just this type
+         "file": "path/inside/app.ts",  // path to fetch via /export/file
+         "mustContain": "someSignature" // string that must appear in the file
+       },
+       "createdAt": "ISO string",
+       "updatedAt": "ISO string"
+     }
+
+   - acceptanceCheck is optional; if omitted, the task is purely manual.
+
+3. Tasks module (lib/tasks.js)
+   - Responsibilities:
+     - Load tasks from config/tasks.json on startup.
+     - Provide getters:
+       - getAllTasks()
+       - getTasksByApp(appKey) where appKey is 'ui', 'supervisor', or 'poller'.
+     - Provide mutators:
+       - updateTaskStatus(id, newStatus)
+       - updateTask(id, partialUpdate)  // to update updatedAt and fields like acceptanceCheck
+       - saveTasks() to persist back to config/tasks.json.
+     - Ensure it never crashes if the file is missing or malformed:
+       - If config/tasks.json does not exist, create it with a default structure:
+
+         [
+           {
+             "id": "UI-EXAMPLE-1",
+             "app": "ui",
+             "title": "Example task: capture user goal at start of chat",
+             "description": "This is an example; Phil will replace with real tasks.",
+             "status": "planned",
+             "priority": "medium",
+             "type": "replit_prompt",
+             "replitPrompt": "Example placeholder prompt for the Wyshbone UI repl.",
+             "createdAt": "<now>",
+             "updatedAt": "<now>"
+           }
+         ]
+
+4. Hooking tasks into the poller (lib/poller.js)
+   - Import the tasks module.
+   - For now, we want a simple acceptance-check loop that runs during the existing poll interval.
+   - Implementation idea:
+     - We already have the list of sources from config/sources.json (Wyshbone UI and Wyshbone Supervisor).
+     - Define a small mapping from task.app to source name:
+       - 'ui' -> the source whose name === "Wyshbone UI"
+       - 'supervisor' -> the source whose name === "Wyshbone Supervisor"
+       - 'poller' -> handled locally (no export API call).
+     - During each poll cycle (after we fetch /export/status.json from each source):
+       - For each task with:
+         - status !== 'done'
+         - and an acceptanceCheck of type "fileContains"
+       - If task.app is 'ui' or 'supervisor':
+         - Find the matching source (as described above) to get baseUrl and exportKey.
+         - Call `${baseUrl}/export/file?path=<encoded file>` with header X-EXPORT-KEY: exportKey.
+         - If the response is OK and `mustContain` appears in the returned `content` string:
+           - updateTaskStatus(id, 'done')
+           - updateTask(id, { updatedAt: new Date().toISOString() })
+           - saveTasks()
+       - If task.app is 'poller':
+         - For now, do nothing automatically (we'll mark those manually).
+       - Do this work in a safe, error-handled way:
+         - Never let a single failing task check crash the poll loop.
+         - Log failures with a clear message (app, id, reason).
+   - Extend getState() (if needed) or export a new function from lib/poller.js:
+     - getTasksState() that simply returns the current list of tasks grouped by app:
+
+       {
+         "ui": [...tasks...],
+         "supervisor": [...tasks...],
+         "poller": [...tasks...]
+       }
+
+5. Server integration (server.js)
+   - Import the tasks module (and/or getTasksState() from poller if that’s simpler).
+   - Extend the existing /status route so the HTML dashboard includes tasks.
+
+   - New API routes:
+     - GET /tasks.json
+       - Returns all tasks as JSON, grouped by app:
+
+         {
+           "ui": [...],
+           "supervisor": [...],
+           "poller": [...]
+         }
+
+     - Optional (but helpful) route:
+       - POST /tasks/:id/status
+         - Body: { "status": "planned" | "in_progress" | "done" | "blocked" }
+         - Updates the task, sets updatedAt, saves to tasks.json.
+         - For now this can be a simple JSON API; we may hit it manually later or via a small UI.
+
+6. Dashboard HTML changes (/status page)
+   - Under each source card ("Wyshbone UI", "Wyshbone Supervisor"), add a simple "Tasks" section.
+   - For each app, show up to ~5 tasks grouped by status:
+     - planned
+     - in_progress
+     - blocked
+     - done (maybe collapsed or last).
+   - A simple layout is fine, e.g.:
+
+     <h3>Tasks</h3>
+     <ul>
+       <li>[PLANNED] UI-001 – Capture user goal at start of chat</li>
+       <li>[IN PROGRESS] UI-002 – Ask clarifying questions before running tools</li>
+       <li>[DONE] UI-000 – Example task…</li>
+     </ul>
+
+   - You do NOT need a full CRUD UI; just read-only display is fine for now, based on tasks.json.
+
+   - Make sure the tasks visible under “Wyshbone UI” are those with app === 'ui', and under “Wyshbone Supervisor” those with app === 'supervisor'. Optionally also add a separate "Wyshbone Poller" section somewhere for tasks with app === 'poller'.
+
+7. Wiring everything together
+   - Ensure the poller starts as it already does.
+   - Ensure tasks are loaded on startup and the acceptanceCheck loop runs during normal polls.
+   - Ensure /status uses both:
+     - the existing status state (cleverness, LOC, etc.)
+     - the tasks data so each card gets its tasks list.
+   - Ensure /tasks.json works and returns current data (so I can use it from ChatGPT/Grok later).
+
+8. After implementation
+   - Please:
+     - Show me the final shape of config/tasks.json (with 2–3 example tasks).
+     - Confirm:
+       - /status shows tasks under each app card.
+       - /tasks.json returns tasks grouped by app.
+       - A sample acceptanceCheck has been wired for at least one task (even if it’s just a placeholder example I will change).
+
+Please implement all of the above following the existing coding style and file structure of this repo.
