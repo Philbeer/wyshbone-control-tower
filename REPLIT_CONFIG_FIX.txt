@@ -1,0 +1,35 @@
+═══════════════════════════════════════════════════════════════════
+  FIX FOR EADDRINUSE - COMPLETE .replit FILE CONTENTS
+═══════════════════════════════════════════════════════════════════
+
+COPY EVERYTHING BELOW THIS LINE INTO YOUR .replit FILE:
+
+modules = ["nodejs-20", "web"]
+run = "node server.js"
+hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
+
+[nix]
+channel = "stable-24_05"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[env]
+PORT = "5000"
+
+═══════════════════════════════════════════════════════════════════
+  THAT'S IT - NOTHING ELSE SHOULD BE IN THE FILE
+═══════════════════════════════════════════════════════════════════
+
+HOW TO APPLY:
+1. Open .replit file (in file tree on left)
+2. Select ALL text (Ctrl+A or Cmd+A)
+3. Delete it
+4. Paste the content above
+5. Save (Ctrl+S or Cmd+S)
+6. Click STOP button in console
+7. Click RUN button
+
+YOUR DASHBOARD WILL BE AT: /status endpoint
+═══════════════════════════════════════════════════════════════════

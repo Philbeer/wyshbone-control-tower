@@ -1,0 +1,89 @@
+╔══════════════════════════════════════════════════════════════╗
+║   QUICK FIX FOR EADDRINUSE ERROR - 3 SIMPLE STEPS          ║
+╚══════════════════════════════════════════════════════════════╝
+
+The problem: Two servers running on port 5000 at the same time.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 1: STOP THE CURRENT SERVER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+In the Replit Console (bottom panel), click the STOP button (■ square icon).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 2: EDIT .replit FILE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Open .replit file in the file tree (left sidebar)
+
+2. Find this line near the top:
+   run = "npm run dev"
+
+3. Change it to:
+   run = "node server.js"
+
+4. Delete these sections (scroll down to find them):
+   - Everything from [workflows] to the end
+   - The [deployment] section
+   - Remove "postgresql-16" from modules line
+
+5. Save the file (Ctrl+S or Cmd+S)
+
+Your .replit should look like this at the end:
+
+   modules = ["nodejs-20", "web"]
+   run = "node server.js"
+   hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
+
+   [nix]
+   channel = "stable-24_05"
+
+   [[ports]]
+   localPort = 5000
+   externalPort = 80
+
+   [env]
+   PORT = "5000"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 3: CLICK THE RUN BUTTON
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Click the green RUN button at the top of your workspace.
+
+You should see:
+  ✓ Loaded 2 source(s) from config/sources.json
+  ✓ Polling started
+  ✓ Server running on http://localhost:5000
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ACCESSING YOUR DASHBOARD
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+After starting, open:
+  https://[your-repl-url]/status
+
+The URL will be shown in the Replit webview (right panel).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ALTERNATIVE: USE SHELL DIRECTLY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If you prefer to skip editing .replit:
+
+1. Open Shell (Tools → Shell)
+2. Run: ./run.sh
+   (or just: node server.js)
+
+This bypasses the RUN button entirely.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Need the detailed version? See: FIX_REPLIT_CONFIG.md
+
+╚══════════════════════════════════════════════════════════════╝
