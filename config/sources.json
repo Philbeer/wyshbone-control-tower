@@ -1,0 +1,12 @@
+[
+  {
+    "name": "Wyshbone UI",
+    "baseUrl": "https://REPLACE-WITH-UI-REPL-URL",
+    "exportKey": "REPLACE_WITH_EXPORT_KEY"
+  },
+  {
+    "name": "Wyshbone Supervisor",
+    "baseUrl": "https://REPLACE-WITH-SUP-REPL-URL",
+    "exportKey": "REPLACE_WITH_EXPORT_KEY"
+  }
+]

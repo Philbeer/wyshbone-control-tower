@@ -1,0 +1,138 @@
+================================================================================
+WYSHBONE STATUS DASHBOARD - SETUP INSTRUCTIONS
+================================================================================
+
+Thank you for using the Wyshbone Status Dashboard! Follow these simple steps
+to get started monitoring your Wyshbone applications.
+
+================================================================================
+STEP 1: UPDATE CONFIGURATION
+================================================================================
+
+Open the file: config/sources.json
+
+Replace the placeholder values with your actual Wyshbone app information:
+
+  - "baseUrl": Replace with your Wyshbone app's full URL
+    Example: "https://wyshbone-ui-yourname.repl.co"
+    
+  - "exportKey": Replace with your app's export authentication key
+    Example: "sk_abc123xyz456..."
+
+You can add more sources by adding additional objects to the JSON array.
+
+EXAMPLE:
+--------
+[
+  {
+    "name": "My Wyshbone UI",
+    "baseUrl": "https://wyshbone-ui-john.repl.co",
+    "exportKey": "sk_live_abc123"
+  },
+  {
+    "name": "My Supervisor",
+    "baseUrl": "https://wyshbone-supervisor-john.repl.co",
+    "exportKey": "sk_live_xyz789"
+  }
+]
+
+================================================================================
+STEP 2: START THE SERVER
+================================================================================
+
+Run this command in your terminal:
+
+    node server.js
+
+The server will:
+  ✓ Load your configuration
+  ✓ Start polling your Wyshbone apps every 2 minutes
+  ✓ Display the dashboard URL
+
+================================================================================
+STEP 3: ACCESS THE DASHBOARD
+================================================================================
+
+Once started, you'll see output like:
+
+    ✓ Server running on http://localhost:3000
+
+Open your browser to:
+
+    http://localhost:3000/status
+
+The dashboard will show:
+  - Status of each configured Wyshbone app
+  - Current metrics (cleverness, LOC, TODO/FIXME counts)
+  - Changes since the last check (deltas)
+  - Recent activity across all apps
+  - Auto-refreshes every 60 seconds
+
+================================================================================
+ADDITIONAL ENDPOINTS
+================================================================================
+
+JSON API (for programmatic access):
+    http://localhost:3000/status.json
+
+File Proxy (fetch individual files):
+    http://localhost:3000/proxy/file?src=SOURCE_NAME&path=FILE_PATH
+
+================================================================================
+CUSTOMIZATION
+================================================================================
+
+All configuration is in easy-to-edit files:
+
+  • Polling interval:    lib/poller.js → POLL_INTERVAL_MS
+  • History size:         lib/poller.js → MAX_SNAPSHOTS
+  • Auto-refresh rate:    server.js → meta refresh content
+  • Server port:          PORT environment variable
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+If you see errors:
+
+  1. "Error loading config/sources.json"
+     → Check that config/sources.json exists and has valid JSON
+
+  2. "fetch failed" or "HTTP 403"
+     → Verify your baseUrl and exportKey are correct
+     → Ensure the Wyshbone app is running and accessible
+
+  3. Dashboard shows "NO DATA"
+     → Wait up to 2 minutes for the first polling cycle
+     → Check console for error messages
+
+================================================================================
+DOCUMENTATION
+================================================================================
+
+For more details, see:
+  - README.md   - Architecture and API documentation
+  - USAGE.md    - Comprehensive usage guide
+  - replit.md   - Project overview
+
+================================================================================
+QUICK REFERENCE
+================================================================================
+
+Start Server:       node server.js
+Stop Server:        Ctrl+C
+Edit Config:        config/sources.json
+View Dashboard:     http://localhost:PORT/status
+View JSON:          http://localhost:PORT/status.json
+
+Polling Interval:   120 seconds (2 minutes)
+Auto-Refresh:       60 seconds
+History Retention:  50 snapshots per source
+
+================================================================================
+
+Questions or issues? Check the console output for detailed error messages.
+
+Happy monitoring! 🚀
+
+================================================================================
