@@ -71,13 +71,14 @@ Server runs on port defined by `PORT` environment variable (default: 3000).
 
 ## Recent Changes
 
-- 2025-11-13: Automated task acceptance via status JSON flags
-  - Added `acceptanceKey` mechanism for lightweight status-based acceptance checking
-  - Tasks can now be marked complete when Wyshbone apps expose boolean flags in their status JSON
-  - UI-001 now uses `acceptanceKey: "ui001_goalCaptureEnabled"` to auto-detect implementation
-  - When Wyshbone UI exports `ui001_goalCaptureEnabled: true`, Control Tower automatically marks UI-001 as DONE
-  - Acceptance checks prioritize `acceptanceKey` (instant) over `fileContains` (requires file fetch)
-  - No file scanning or repo cloning needed - purely JSON-based lightweight checks
+- 2025-11-14: Convention-based task acceptance
+  - Implemented automatic task completion detection using naming convention
+  - UI-XXX tasks check for `uiXXX_done` flag (e.g., UI-001 → ui001_done)
+  - SUP-XXX tasks check for `supXXX_done` flag (e.g., SUP-001 → sup001_done)
+  - Zero configuration required - works automatically for all UI/SUP tasks
+  - Falls back to `acceptanceKey` for custom flags, then `fileContains` for file-based checking
+  - Properly persists to tasks.json during polling to maintain state across restarts
+  - UI-001 and UI-002 now auto-detected as complete via ui001_done and ui002_done flags
 
 - 2025-11-13: Phase 2 visual indicators
   - Added bold "Phase 2" badges to all tasks with layer >= 5

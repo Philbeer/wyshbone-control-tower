@@ -27,7 +27,7 @@
     "app": "ui",
     "title": "Clarifying question step before running tools",
     "description": "Before Wyshbone UI runs any heavy tool calls (lead search, monitoring, outreach), it should ask 1–3 clarifying questions if the goal or parameters are underspecified, instead of jumping straight to actions.",
-    "status": "planned",
+    "status": "done",
     "priority": "high",
     "type": "replit_prompt",
     "replitPrompt": "You are my coding assistant for the Wyshbone UI repl. Modify the tool-calling logic so that when the user asks for something that will trigger tools (lead search, monitoring, outreach), the chat first checks whether it has enough information: target region, target persona, volume and timing. If these are missing or ambiguous, ask up to 3 clarifying questions to fill the gaps before calling any tools. Keep questions short and practical for salespeople. Once clarified, proceed to call tools with the enriched parameters.",
@@ -37,7 +37,7 @@
       "mustContain": "clarifyingQuestions"
     },
     "createdAt": "2025-11-13T00:00:00.000Z",
-    "updatedAt": "2025-11-13T00:00:00.000Z",
+    "updatedAt": "2025-11-14T01:32:16.593Z",
     "layer": 1,
     "group": "Layer 1 – Agentic Core",
     "complexity": "M",

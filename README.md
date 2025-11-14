@@ -116,11 +116,32 @@ GET /proxy/file?src=Wyshbone%20UI&path=src/components/Button.tsx
 
 ## Task Acceptance Checking
 
-The dashboard automatically monitors task completion through two mechanisms:
+The dashboard automatically monitors task completion through three mechanisms (checked in priority order):
 
-### 1. Status JSON Flags (acceptanceKey)
+### 1. Convention-Based Flags (Recommended)
 
-The lightweight, preferred method. Tasks can specify an `acceptanceKey` in their definition:
+The simplest method - **zero configuration required**. Tasks are automatically checked based on naming convention:
+
+- **UI tasks**: `UI-001` → checks for `ui001_done: true`
+- **UI tasks**: `UI-002` → checks for `ui002_done: true`
+- **SUP tasks**: `SUP-001` → checks for `sup001_done: true`
+- **SUP tasks**: `SUP-050` → checks for `sup050_done: true`
+
+When the Wyshbone app exports these flags in its `/export/status.json`:
+
+```json
+{
+  "ui001_done": true,
+  "ui002_done": true,
+  "ui003_done": false
+}
+```
+
+Control Tower automatically marks UI-001 and UI-002 as **DONE**. No additional configuration needed!
+
+### 2. Custom Status Flags (acceptanceKey)
+
+For non-standard flag names, tasks can specify an `acceptanceKey`:
 
 ```json
 {
@@ -130,20 +151,11 @@ The lightweight, preferred method. Tasks can specify an `acceptanceKey` in their
 }
 ```
 
-When the Wyshbone app exports this field as `true` in its `/export/status.json`:
+When the Wyshbone app exports this custom field as `true`, the task is marked complete.
 
-```json
-{
-  "ui001_goalCaptureEnabled": true,
-  ...
-}
-```
+### 3. File Contents Check (fileContains)
 
-The dashboard automatically marks the task as **DONE**. No file fetching or scanning required!
-
-### 2. File Contents Check (fileContains)
-
-Fallback method when `acceptanceKey` is not available:
+Fallback method when status flags aren't available:
 
 ```json
 {
@@ -158,7 +170,7 @@ Fallback method when `acceptanceKey` is not available:
 
 The dashboard fetches the specified file and checks if it contains the required string.
 
-**Priority**: `acceptanceKey` is checked first (instant), then falls back to `fileContains` (requires file fetch).
+**Check Priority**: Convention flags → acceptanceKey → fileContains (most efficient first)
 
 ## Configuration
 
