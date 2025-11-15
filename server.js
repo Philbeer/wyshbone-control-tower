@@ -1178,8 +1178,10 @@ let createInvestigationForRun;
 
 // Run tracking modules - loaded at startup
 let listRecentRuns;
+let listLiveUserRuns;  // EVAL-008
 let getRunById;
 let createRun;
+let createLiveUserRun;  // EVAL-008
 
 // Behaviour test modules - loaded at startup
 let runBehaviourTest;
@@ -1189,6 +1191,7 @@ let recordBehaviourTestRun;
 let ensureBehaviourTestsSeeded;
 let autoDetectAndTriggerInvestigation;
 let ensureBehaviourInvestigationForRun;  // EVAL-007
+let ensureLiveUserInvestigationForRun;  // EVAL-008
 let getAllBehaviourTestDefinitions;  // EVAL-007
 
 // Runs API routes
@@ -1200,6 +1203,18 @@ app.get('/tower/runs', async (req, res) => {
   } catch (err) {
     console.error('Error listing runs', err);
     res.status(500).json({ error: 'Failed to list runs: ' + err.message });
+  }
+});
+
+// EVAL-008: Live user runs endpoint (must come before /:id route)
+app.get('/tower/runs/live', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 20;
+    const runs = await listLiveUserRuns(limit);
+    res.status(200).json(runs);
+  } catch (err) {
+    console.error('Error listing live user runs', err);
+    res.status(500).json({ error: 'Failed to list live user runs: ' + err.message });
   }
 });
 
@@ -1373,6 +1388,109 @@ app.post('/tower/behaviour-tests/:testId/investigate', async (req, res) => {
   }
 });
 
+// EVAL-008: Live User Run Logging & Investigation Bridge
+
+// Log a new live user run from Wyshbone UI
+app.post('/tower/runs/log', async (req, res) => {
+  try {
+    const payload = req.body;
+    
+    // Enhanced validation
+    if (!payload.source || payload.source !== 'live_user') {
+      return res.status(400).json({ 
+        error: 'Invalid payload: source must be "live_user"' 
+      });
+    }
+    
+    if (!payload.request?.inputText || !payload.response?.outputText) {
+      return res.status(400).json({ 
+        error: 'Invalid payload: request.inputText and response.outputText are required' 
+      });
+    }
+    
+    if (!['success', 'error', 'timeout', 'fail'].includes(payload.status)) {
+      return res.status(400).json({ 
+        error: 'Invalid status: must be one of success, error, timeout, or fail' 
+      });
+    }
+    
+    if (typeof payload.durationMs !== 'number' || !Number.isFinite(payload.durationMs) || payload.durationMs <= 0) {
+      return res.status(400).json({ 
+        error: 'Invalid durationMs: must be a positive finite number greater than zero' 
+      });
+    }
+    
+    const result = await createLiveUserRun(payload);
+    
+    // EVAL-008: Auto-detection for live runs (conservative triggers only)
+    if (ensureLiveUserInvestigationForRun && payload.status === 'error') {
+      try {
+        console.log(`[EVAL-008] Auto-investigating error run ${result.id}`);
+        await ensureLiveUserInvestigationForRun({
+          runId: result.id,
+          userId: payload.userId,
+          sessionId: payload.sessionId,
+          inputText: payload.request.inputText,
+          triggerReason: 'Auto-detected error from live user run',
+          seriousness: 'error',
+        });
+      } catch (autoDetectErr) {
+        console.error('[EVAL-008 AutoDetect] Error during auto-detection:', autoDetectErr.message);
+        // Don't fail the request if auto-detection fails
+      }
+    }
+    
+    res.status(200).json(result);
+  } catch (err) {
+    console.error('Error logging live user run', err);
+    res.status(500).json({ error: 'Failed to log run: ' + err.message });
+  }
+});
+
+// Manual investigation trigger for live runs
+app.post('/tower/runs/:runId/investigate', async (req, res) => {
+  try {
+    const { runId } = req.params;
+    
+    // Fetch the run
+    const run = await getRunById(runId);
+    if (!run) {
+      return res.status(404).json({ error: `Run not found: ${runId}` });
+    }
+    
+    // Only allow investigation of live_user runs
+    if (run.source !== 'live_user') {
+      return res.status(400).json({ 
+        error: 'Only live_user runs can be investigated via this endpoint' 
+      });
+    }
+    
+    // Extract run metadata
+    const inputText = run.meta?.requestText || run.goalSummary || 'Unknown input';
+    const userId = run.userIdentifier;
+    const sessionId = run.meta?.sessionId;
+    
+    const triggerReason = `Manual investigation from dashboard. Status: ${run.status.toUpperCase()}`;
+    
+    // Create or reuse investigation
+    const investigation = await ensureLiveUserInvestigationForRun({
+      runId,
+      userId,
+      sessionId,
+      inputText,
+      triggerReason,
+      seriousness: run.status === 'error' || run.status === 'fail' ? 'error' : 'info',
+    });
+    
+    res.status(200).json(investigation);
+  } catch (err) {
+    console.error('Error creating investigation for live run', err);
+    res.status(500).json({ 
+      error: 'Failed to create investigation: ' + err.message 
+    });
+  }
+});
+
 // Note: Vite middleware will handle React app routes (/, /dashboard, etc.)
 
 // Start server
@@ -1395,8 +1513,10 @@ async function start() {
     createInvestigationForRun = investigateRunModule.createInvestigationForRun;
     
     listRecentRuns = runStoreModule.listRecentRuns;
+    listLiveUserRuns = runStoreModule.listLiveUserRuns;  // EVAL-008
     getRunById = runStoreModule.getRunById;
     createRun = runStoreModule.createRun;
+    createLiveUserRun = runStoreModule.createLiveUserRun;  // EVAL-008
     
     // Load behaviour test modules
     const behaviourTestsModule = await import('./src/evaluator/behaviourTests.ts');
@@ -1415,6 +1535,10 @@ async function start() {
     const behaviourInvestigationsModule = await import('./src/evaluator/behaviourInvestigations.ts');
     ensureBehaviourInvestigationForRun = behaviourInvestigationsModule.ensureBehaviourInvestigationForRun;
     getAllBehaviourTestDefinitions = behaviourTestsModule.getAllBehaviourTestDefinitions;
+    
+    // EVAL-008: Load live user investigation module
+    const liveUserInvestigationsModule = await import('./src/evaluator/liveUserInvestigations.ts');
+    ensureLiveUserInvestigationForRun = liveUserInvestigationsModule.ensureLiveUserInvestigationForRun;
     
     // EVAL-007: Backfill legacy behaviour test investigations (one-time migration)
     try {

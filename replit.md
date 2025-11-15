@@ -58,7 +58,7 @@ A sophisticated evaluation system is integrated to automate testing, diagnosis, 
     *   24-hour deduplication prevents investigation spam for repeated test failures.
     *   Investigation metadata stored in `run_meta` jsonb field includes `testId`, `testName`, and `source: "behaviour_test"`.
     *   REST API endpoint: `POST /tower/behaviour-tests/:testId/investigate` for manual investigation creation.
-*   **Single-Test Scoped Behaviour Auto-Patch Flow (EVAL-008):**
+*   **Single-Test Scoped Behaviour Auto-Patch Flow (EVAL-008 - deprecated naming, see below):**
     *   Surgical patch generation focused on fixing a single behaviour test at a time.
     *   Every behaviour test investigation includes explicit `focus` metadata in `run_meta`:
         *   `type: "behaviour-single-test"`
@@ -72,6 +72,23 @@ A sophisticated evaluation system is integrated to automate testing, diagnosis, 
     *   Patch suggestions tagged with focus metadata for observability.
     *   Patch evaluations log focus in `evaluationMeta` for human-readable summaries.
     *   Gatekeeper pipeline (EVAL-004) remains strict and unchanged, but patches are more surgical and likely to pass.
+*   **Live User Run Logging & Investigation Bridge (EVAL-008):**
+    *   Logs real Wyshbone UI user conversations into Tower for observability and debugging.
+    *   API endpoint `POST /tower/runs/log` accepts live user run data from Wyshbone UI:
+        *   User input text, assistant response, status (success/error/timeout/fail)
+        *   Duration, user/session identifiers, tool calls, and custom metadata
+        *   Validated and stored in the `runs` table with `source: "live_user"`
+    *   Dashboard displays "Recent Live Runs" panel showing the last 20 user interactions:
+        *   Input/output previews, status badges, duration, user/session info
+        *   Click rows to see full conversation details in a modal
+        *   "Investigate" button creates or reuses investigations for debugging
+    *   Investigation bridge (`ensureLiveUserInvestigationForRun`) with 24-hour deduplication:
+        *   Creates investigations with live run context, user/session metadata
+        *   Stores `source: "live_user"` in `run_meta` for filtering
+        *   Manual trigger via dashboard or API `POST /tower/runs/:runId/investigate`
+    *   Conservative auto-detection (currently logs errors only, future: repeated errors, timeouts, quality issues)
+    *   Separate query endpoint `GET /tower/runs/live` for filtering live user runs only
+    *   Integration guide at `docs/EVAL-008_UI_INTEGRATION.md` for Wyshbone UI team
 
 **UI/UX:**
 
