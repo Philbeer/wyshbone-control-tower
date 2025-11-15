@@ -1,0 +1,253 @@
+You are my coding assistant for the Wyshbone Control Tower repl.
+Implement EVAL-003: Automated detection (timeouts, errors, poor scores).
+
+This task MUST be implemented with full, exact code changes, not instructions.
+All work must integrate cleanly with EVAL-001 (logging + investigations) and EVAL-002 (behaviour tests).
+
+Your goal is to make Tower automatically detect failures, timeouts, and low-quality responses, and then automatically open Investigations using the existing investigator pipeline.
+
+ARCHITECTURE YOU MUST FOLLOW
+
+Tower already has:
+
+/tower/behaviour-tests/run – runs a single test or all tests
+
+/tower/investigations/* – investigation creation API
+
+src/evaluator/behaviourTests.ts – definitions + heuristics
+
+src/evaluator/runLogger.ts – logs behaviour test runs
+
+src/evaluator/investigator.ts – GPT analysis + diagnosis
+
+DB tables:
+
+test_runs
+
+investigations
+
+investigation_events (if present)
+
+A UI dashboard that reads:
+
+Active runs
+
+Past runs
+
+Investigations
+
+Status/errors
+
+Do NOT change any UI or existing DB schemas unless required for EVAL-003.
+If needed, add one table: auto_triggers or similar.
+
+WHAT EVAL-003 MUST ADD
+1. Auto-triggered investigations
+
+Whenever a behaviour test run ends with any of the following:
+
+status === 'fail'
+
+status === 'error'
+
+response is empty or nonsense (based on existing heuristics)
+
+test duration > 10 seconds (timeout)
+
+test result regresses compared with previous PASS
+
+repeated errors of same type within 5 minutes
+
+THEN Tower must automatically create an Investigation, using the same schema and process as manual investigations from EVAL-001.
+
+Investigations must include:
+
+{
+  testId,
+  runId,
+  reason,     // "fail", "timeout", "regression", "tool-error", "quality"
+  summary,    // short description
+  inputPayload,
+  response,
+  durationMs,
+  createdAt
+}
+
+
+Use the existing createInvestigation() and runInvestigatorPipeline() functions from EVAL-001.
+If they do not exist, you must implement them exactly as EVAL-001 did.
+
+2. Modify behaviour test runner
+
+File: src/evaluator/behaviourTests.ts
+
+After each test completes and returns:
+
+{ testId, status, details, rawResponse, durationMs }
+
+
+Call a new function:
+
+autoDetectAndTriggerInvestigation(result)
+
+
+Pass everything required to run the investigation pipeline.
+
+3. Implement autoDetectAndTriggerInvestigation
+
+File: src/evaluator/autoDetect.ts (new)
+
+This module must:
+
+Read the result object
+
+Decide whether to trigger
+
+Avoid duplicates (if an investigation already exists for the same run)
+
+Write the investigation row
+
+Trigger investigator
+
+Trigger conditions:
+
+if status === 'error' → trigger
+if status === 'fail' → trigger
+if durationMs > 10000 → trigger   // timeout
+if rawResponse empty → trigger
+if heuristics say quality is low → trigger
+if previous run for same testId was PASS → trigger regression investigation
+if multiple errors same testId in recent window → trigger escalation
+
+
+Everything must be implemented deterministically.
+
+4. Extend runLogger to store test results for regression checks
+
+File: src/evaluator/runLogger.ts
+
+Add helper:
+
+getLastRunForTest(testId): Promise<TestRun | null>
+
+
+Modify logger to guarantee every run stores:
+
+status
+
+error type (if any)
+
+details
+
+durationMs
+
+testId
+
+timestamp
+
+5. Investigation creation and pipeline execution
+
+Use existing investigator design from EVAL-001.
+
+If missing, create:
+
+File: src/evaluator/investigationService.ts
+
+Functions:
+
+createInvestigation(payload): Promise<Investigation>
+runInvestigatorPipeline(investigationId): Promise<void>
+
+6. REST API endpoint integration
+
+File: server/routes.ts
+
+No new public endpoints needed, but ensure:
+
+When behaviour tests run, auto investigations fire
+
+Investigations appear in /tower/investigations endpoints
+
+Add new fields to investigation JSON response:
+
+triggerReason
+
+testId
+
+runId
+
+7. Dashboard compatibility
+
+Do NOT modify dashboard UI.
+Ensure the existing endpoints automatically show new investigations.
+
+8. Logging
+
+Add logs:
+
+[AutoDetect] Triggering investigation for testId=X reason=Y
+[AutoDetect] Regression detected
+[AutoDetect] Timeout detected
+
+
+These must appear in the console.
+
+FILES YOU MUST CREATE OR UPDATE
+Must update:
+
+src/evaluator/behaviourTests.ts
+
+src/evaluator/runLogger.ts
+
+src/evaluator/investigator.ts (if needed)
+
+server/routes.ts
+
+Must create:
+
+src/evaluator/autoDetect.ts
+
+src/evaluator/investigationService.ts (if missing)
+
+Optional (only if needed):
+
+DB migration file for investigation_triggers or add fields to investigations table.
+
+ACCEPTANCE CRITERIA (MANDATORY)
+
+Running Run All behaviour tests should:
+
+produce PASS/FAIL normally
+
+automatically open new Investigations for FAIL/ERROR/timeout
+
+show them instantly in /dashboard → Investigations
+
+No investigation should trigger twice for the same test run.
+
+Regression detection must work:
+
+If a test was PASS last run and FAIL now → auto investigation.
+
+All investigations must run the GPT-based investigator pipeline.
+
+No UI changes required.
+
+FINAL OUTPUT REQUIREMENT
+
+Produce full code, including:
+
+complete file contents for new files
+
+exact diffs for modified files
+
+imports and exports
+
+DB schema additions if needed
+
+all TypeScript types
+
+all route changes
+
+No explanations.
+Only final, ready-to-paste code.

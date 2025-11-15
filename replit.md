@@ -71,6 +71,38 @@ Server runs on port defined by `PORT` environment variable (default: 3000).
 
 ## Recent Changes
 
+- 2025-11-15: EVAL-003: Automated Detection and Investigation Triggering
+  - **Auto-Detection System** (src/evaluator/autoDetect.ts):
+    - Automatically detects failures, timeouts, errors, and regressions after each behaviour test run
+    - Trigger conditions: status='error', status='fail', timeout >10s, empty response, low quality, regression, repeated errors
+    - Creates investigations automatically using existing EVAL-001 pipeline (executeInvestigation)
+    - Prevents duplicate investigations for same run ID
+    - Logs all auto-triggered investigations with reason and summary
+  - **Run Logging** (src/evaluator/runLogger.ts):
+    - getLastRunForTest(): Retrieves previous run for regression detection
+    - getRecentErrorsForTest(): Finds repeated errors within time window (5 minutes)
+    - getPreviousRunForTest(): Gets run history for comparison
+  - **Trigger Reasons**:
+    - 'fail': Test heuristic check failed
+    - 'error': Test execution error
+    - 'timeout': Test duration >10 seconds
+    - 'regression': Previous run was PASS, current is FAIL/ERROR
+    - 'quality': Empty or very short response (<10 chars)
+    - 'repeated-errors': Multiple errors in 5-minute window
+  - **Integration**:
+    - Modified POST /tower/behaviour-tests/run route to call autoDetectAndTriggerInvestigation after each test
+    - Auto-investigations appear in /tower/evaluator/investigations and /dashboard
+    - Uses existing Investigation types: 'timeout', 'tool_error', 'behaviour_flag'
+    - Detailed notes include test ID, status, duration, triggers, and response preview
+  - **No UI Changes Required**:
+    - All auto-investigations visible in existing dashboard
+    - Distinguished by trigger type and auto-generated notes starting with "🤖 AUTO-DETECTED ISSUE"
+  - Architecture:
+    - Zero schema changes (uses existing investigations table)
+    - Zero breaking changes to EVAL-001/EVAL-002
+    - Graceful error handling (auto-detect failures don't break test runs)
+    - Console logging: [AutoDetect] messages for monitoring
+
 - 2025-11-15: EVAL-002B: Streaming Test Endpoint Integration
   - **New Endpoint**: Wyshbone UI now provides `/api/tower/chat-test` for machine authentication
   - **Implementation** (src/evaluator/behaviourTests.ts):

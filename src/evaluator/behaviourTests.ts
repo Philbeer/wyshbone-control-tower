@@ -382,22 +382,30 @@ export async function runBehaviourTest(
     };
   }
 
+  let result: BehaviourTestResult;
+  
   switch (testId) {
     case "greeting-basic":
-      return await testGreeting();
+      result = await testGreeting();
+      break;
     case "personalisation-domain":
-      return await testPersonalisation();
+      result = await testPersonalisation();
+      break;
     case "lead-search-basic":
-      return await testLeadSearch();
+      result = await testLeadSearch();
+      break;
     case "monitor-setup-basic":
-      return await testMonitorSetup();
+      result = await testMonitorSetup();
+      break;
     default:
-      return {
+      result = {
         testId,
         status: "error",
         details: "Test not implemented",
       };
   }
+  
+  return result;
 }
 
 export async function runAllBehaviourTests(

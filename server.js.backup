@@ -1187,7 +1187,6 @@ let runAllBehaviourTests;
 let getTestsWithLatestRuns;
 let recordBehaviourTestRun;
 let ensureBehaviourTestsSeeded;
-let autoDetectAndTriggerInvestigation;
 
 // Runs API routes
 app.get('/tower/runs', async (req, res) => {
@@ -1301,19 +1300,9 @@ app.post('/tower/behaviour-tests/run', async (req, res) => {
       results = [result];
     }
     
-    // Persist all results and trigger auto-detection
+    // Persist all results
     for (const result of results) {
-      const savedRun = await recordBehaviourTestRun({ ...result, buildTag });
-      
-      // EVAL-003: Auto-detect failures/timeouts/regressions and trigger investigations
-      if (autoDetectAndTriggerInvestigation) {
-        try {
-          await autoDetectAndTriggerInvestigation(result, savedRun.id);
-        } catch (autoDetectErr) {
-          console.error('[AutoDetect] Error during auto-detection:', autoDetectErr.message);
-          // Don't fail the whole request if auto-detection fails
-        }
-      }
+      await recordBehaviourTestRun({ ...result, buildTag });
     }
     
     res.status(200).json({ results });
@@ -1357,9 +1346,6 @@ async function start() {
     getTestsWithLatestRuns = behaviourTestStoreModule.getTestsWithLatestRuns;
     recordBehaviourTestRun = behaviourTestStoreModule.recordBehaviourTestRun;
     ensureBehaviourTestsSeeded = behaviourTestStoreModule.ensureBehaviourTestsSeeded;
-    
-    const autoDetectModule = await import('./src/evaluator/autoDetect.ts');
-    autoDetectAndTriggerInvestigation = autoDetectModule.autoDetectAndTriggerInvestigation;
     
     // Ensure behaviour test definitions are seeded
     await ensureBehaviourTestsSeeded();
