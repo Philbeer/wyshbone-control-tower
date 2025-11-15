@@ -190,14 +190,25 @@ export async function ensureBehaviourInvestigationForRun(
 export async function backfillBehaviourTestInvestigations(): Promise<number> {
   console.log('[BehaviourInvestigations] Starting backfill of legacy investigations...');
   
-  // Find all investigations that look like behaviour test investigations but lack run_meta
+  // EVAL-008: Find all behaviour test investigations that lack focus metadata
+  // This includes both: 1) investigations with null run_meta, and 2) investigations with run_meta but missing focus
   const candidates = await db.query.investigations.findMany({
-    where: and(
-      or(
+    where: or(
+      // Legacy investigations without run_meta at all
+      and(
         isNull(investigations.run_meta),
-        sql`${investigations.run_meta}->>'source' IS NULL`
+        sql`${investigations.notes} LIKE 'Behaviour test "%'`
       ),
-      sql`${investigations.notes} LIKE 'Behaviour test "%'`
+      // Investigations with run_meta but missing source
+      and(
+        sql`${investigations.run_meta}->>'source' IS NULL`,
+        sql`${investigations.notes} LIKE 'Behaviour test "%'`
+      ),
+      // EVAL-008: Investigations with source but missing focus (EVAL-007 → EVAL-008 migration)
+      and(
+        sql`${investigations.run_meta}->>'source' = 'behaviour_test'`,
+        sql`${investigations.run_meta}->'focus' IS NULL`
+      )
     ),
   });
 
@@ -225,7 +236,7 @@ export async function backfillBehaviourTestInvestigations(): Promise<number> {
       testId = testName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
     }
     
-    // Populate run_meta
+    // Populate run_meta with EVAL-008 focus metadata
     await db
       .update(investigations)
       .set({
@@ -233,9 +244,15 @@ export async function backfillBehaviourTestInvestigations(): Promise<number> {
           agent: 'tower' as const,
           description: `Behaviour test: ${testName}`,
           source: 'behaviour_test',
+          type: 'behaviour-single-test',
           testId,
           testName,
           triggerReason: 'Backfilled from legacy investigation',
+          focus: {
+            kind: 'behaviour-test',
+            testId,
+            testName,
+          },
         } as any,
       })
       .where(eq(investigations.id, inv.id));
