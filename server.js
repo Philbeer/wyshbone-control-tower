@@ -1,8 +1,10 @@
 import express from 'express';
+import { createServer } from 'http';
 import { poller } from './lib/poller.js';
 import { tasksManager } from './lib/tasks.js';
 
 const app = express();
+const server = createServer(app);
 const PORT = process.env.PORT || 3000;
 
 // Middleware
@@ -1249,10 +1251,7 @@ app.get('/tower/evaluator/investigations/:id', async (req, res) => {
   }
 });
 
-// Root redirect
-app.get('/', (req, res) => {
-  res.redirect('/status');
-});
+// Note: Vite middleware will handle React app routes (/, /dashboard, etc.)
 
 // Start server
 async function start() {
@@ -1282,20 +1281,26 @@ async function start() {
     console.warn('⚠️  Failed to load evaluator modules:', err.message);
   }
   
+  // Setup Vite middleware for React app (development mode)
+  if (process.env.NODE_ENV !== 'production') {
+    const { setupVite } = await import('./server/vite.ts');
+    await setupVite(app, server);
+    console.log('✓ Vite middleware loaded');
+  }
+  
   // Start polling
   await poller.startPolling();
   
-  app.listen(PORT, () => {
+  server.listen(PORT, () => {
     console.log(`\n✓ Server running on http://localhost:${PORT}`);
     console.log(`\nQuick Start:`);
-    console.log(`  1. Edit config/sources.json with your Wyshbone app URLs and export keys`);
-    console.log(`  2. Access the dashboard at: http://localhost:${PORT}/status`);
+    console.log(`  1. React Dashboard: http://localhost:${PORT}/dashboard`);
+    console.log(`  2. Server-rendered status: http://localhost:${PORT}/status`);
     console.log(`  3. Machine-readable JSON feed: http://localhost:${PORT}/status.json`);
     console.log(`  4. Tasks API: http://localhost:${PORT}/tasks.json`);
-    console.log(`  5. Proxy file requests: http://localhost:${PORT}/proxy/file?src=<source-name>&path=<file-path>`);
+    console.log(`  5. Runs API: http://localhost:${PORT}/tower/runs`);
     console.log(`\nConfiguration:`);
     console.log(`  - Polling interval: ${120000 / 1000} seconds`);
-    console.log(`  - Auto-refresh: 60 seconds`);
     console.log(`  - History retained: 50 snapshots per source`);
     console.log(`  - Tasks loaded: ${tasksManager.getAllTasks().length} task(s)\n`);
   });
