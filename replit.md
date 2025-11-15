@@ -1,352 +1,63 @@
 # Wyshbone Status Dashboard
 
-A lightweight Node/Express application that polls multiple Wyshbone apps and displays a live status dashboard.
+## Overview
 
-## Project Overview
+This project is a lightweight Node/Express application designed to monitor the status and key metrics of multiple Wyshbone applications. It provides a live, server-side rendered dashboard, a JSON API, and a file proxy for authenticated access to app resources. The core purpose is to offer real-time insights into application health, performance, and code quality (e.g., LOC, TODO/FIXME counts, cleverness index), tracking changes over time. It aims to provide comprehensive observability and automated evaluation for Wyshbone applications.
 
-This is a server-side rendered monitoring dashboard that:
-- Polls configured Wyshbone app endpoints every 2 minutes
-- Tracks metrics: cleverness index, LOC, TODO/FIXME counts
-- Displays deltas between snapshots
-- Provides both HTML dashboard and JSON API
-- Proxies file requests with authentication
+## User Preferences
 
-## Architecture
+I prefer iterative development with clear, concise explanations. I want to be informed about major architectural decisions before they are implemented. Provide comprehensive context for any suggested changes or new features.
 
-### Files Structure
+## System Architecture
 
-```
-├── server.js           # Main Express server with routes
-├── lib/
-│   └── poller.js      # Polling logic and data management
-├── config/
-│   └── sources.json   # Configuration for Wyshbone apps to monitor
-└── README.md          # Comprehensive documentation
-```
+The application is built on Node.js using Express, rendering server-side HTML with template literals. It utilizes an in-memory Map-based storage for tracking historical data, leveraging the built-in fetch API for HTTP requests.
 
-### Technology Stack
+**Core Features:**
 
-- **Runtime**: Node.js (ESM modules)
-- **Framework**: Express
-- **Rendering**: Server-side HTML with template literals
-- **Storage**: In-memory (Map-based)
-- **HTTP Client**: Built-in fetch API
+*   **Automated Polling:** Configured Wyshbone app endpoints are polled every 2 minutes.
+*   **History Tracking:** Stores the last 50 snapshots per monitored source.
+*   **Delta Computation:** Calculates and displays changes in metrics between snapshots.
+*   **Auto-Refresh Dashboard:** The HTML dashboard automatically refreshes every 60 seconds.
+*   **Error Handling:** Includes graceful handling for network and configuration errors.
+*   **File Proxy:** Provides authenticated proxying of file requests from Wyshbone applications.
 
-### Key Features
+**Evaluator System (EVAL-001 to EVAL-005):**
 
-1. **Automated Polling**: Background polling every 2 minutes
-2. **History Tracking**: Last 50 snapshots per source
-3. **Delta Computation**: Calculates changes between snapshots
-4. **Auto-Refresh Dashboard**: HTML refreshes every 60 seconds
-5. **Error Handling**: Graceful handling of network/config errors
-6. **File Proxy**: Authenticated file fetching from Wyshbone apps
+A sophisticated evaluation system is integrated to automate testing, diagnosis, and patch management.
 
-## Configuration
+*   **Investigation System (EVAL-001):**
+    *   PostgreSQL database storage for investigations, triggers, and diagnostic results.
+    *   Utilizes OpenAI GPT-4o-mini for automated diagnosis, generating actionable insights and patch suggestions based on run logs and code snapshots.
+    *   Interactive dashboard at `/dashboard` and `/investigations` to manage and view investigations.
+*   **Automated Behaviour Tests (EVAL-002):**
+    *   Harness for defining and executing scenario-specific behaviour tests against Wyshbone UI endpoints (`/api/tower/chat-test`).
+    *   Uses regex heuristics to determine pass/fail based on streaming responses.
+    *   Records test runs with status (pass/fail/error), duration, and build tags.
+    *   Dashboard integration displays test statuses and allows manual execution.
+*   **Automated Detection and Investigation Triggering (EVAL-003):**
+    *   Automatically detects failures, timeouts, errors, and regressions after each behaviour test run.
+    *   Triggers new investigations automatically for issues like failed tests, errors, timeouts, regressions, or repeated errors.
+*   **Patch Quality + Regression Protection (EVAL-004):**
+    *   A CI/CD-like gatekeeper that evaluates proposed patches in an in-memory sandbox.
+    *   Applies strict rejection rules (e.g., any test fails, new errors, latency regression, quality degradation) to ensure patch quality.
+    *   Provides comprehensive diff summaries, before/after test results, and rejection reasons.
+*   **Junior Developer Agent Integration (EVAL-005):**
+    *   Manages a complete patch lifecycle from investigation to suggested patch, evaluation, approval, and application.
+    *   Includes API endpoints for generating developer briefs, creating/listing patch suggestions, and updating suggestion statuses.
+    *   Integrates with the patch evaluation pipeline for automated testing and status validation.
 
-Edit `config/sources.json` to add your Wyshbone app URLs and export keys:
+**UI/UX:**
 
-```json
-[
-  {
-    "name": "Wyshbone UI",
-    "baseUrl": "https://your-app.repl.co",
-    "exportKey": "your-export-key"
-  }
-]
-```
+*   Hybrid architecture with server-rendered routes (`/status`) and a React SPA at `/dashboard`.
+*   Interactive debugging console with run tracking.
+*   Status dashboard with a two-column layout showing Tower Status metrics, Recent Runs, and an Evaluator Console for active investigations.
+*   Roadmap visualization with tasks grouped by architectural layers, displaying completion status, and "Phase 2" indicators for advanced tasks.
+*   Interactive task modals with full details and copy-to-clipboard functionality for prompts.
 
-## Running
+## External Dependencies
 
-```bash
-node server.js
-```
-
-Server runs on port defined by `PORT` environment variable (default: 3000).
-
-## Endpoints
-
-- `GET /status` - HTML dashboard with auto-refresh
-- `GET /status.json` - Machine-readable JSON API
-- `GET /proxy/file?src=NAME&path=PATH` - Proxied file requests
-
-## Recent Changes
-
-- 2025-11-15: EVAL-005: Junior Developer Agent Integration
-  - **Complete Patch Lifecycle**: Trackable path from Investigation → suggested patch → evaluation → approval → applied change
-  - **New Modules**:
-    - src/evaluator/juniorDev.ts: Helper functions for dev briefs, patch suggestions, and evaluation
-      - buildDevBrief(): Generates comprehensive context for developers/agents
-      - createPatchSuggestion(): Records patch suggestion in database
-      - evaluatePatchSuggestion(): Evaluates using existing EVAL-004 pipeline
-      - updatePatchSuggestionStatus(): Updates status with validation
-      - getPatchSuggestionsForInvestigation(): Lists all suggestions with evaluations
-    - server/routes-junior-dev.ts: Four API endpoints for patch workflow
-  - **Database Schema**: Added patch_suggestions table
-    - Links to investigations and patch evaluations
-    - Tracks suggestion lifecycle: suggested → evaluating → approved/rejected → applied
-    - Stores source (human/agent/auto), summary, patch text, external links
-    - Maintains audit trail with created/updated timestamps
-  - **API Endpoints**:
-    - GET /tower/investigations/:id/dev-brief: Generate developer brief with investigation context
-    - POST /tower/investigations/:id/patch-suggestions: Create patch suggestion (with optional auto-evaluation)
-    - GET /tower/investigations/:id/patch-suggestions: List all suggestions for investigation
-    - POST /tower/patch-suggestions/:id/status: Update suggestion status (applied/rejected)
-  - **Dev Brief Content**:
-    - Investigation details (ID, trigger, run ID, notes, diagnosis)
-    - Run context (test ID, last status, previous status, response sample)
-    - Recent error count and duration metrics
-    - Full run logs and metadata
-  - **Status Workflow**:
-    - suggested: Initial creation
-    - evaluating: Patch being tested via EVAL-004
-    - approved/rejected: Evaluation complete (based on gatekeeper rules)
-    - applied: Human confirms patch was applied to codebase
-  - **UI Integration** (client/src/components/EvaluatorConsole.tsx):
-    - "View Dev Brief / Patch Prompt" button in investigation panel
-    - Dev brief displayed in modal dialog with copy-to-clipboard
-    - Patch suggestions section showing all suggestions with status badges
-    - Evaluation reasons summary (first 3 reasons)
-    - External links to commits/PRs when available
-  - **Status Validation**:
-    - Cannot mark rejected suggestions as applied
-    - Must evaluate before marking applied
-    - Only approved suggestions can be marked applied
-  - **Integration**:
-    - Uses EVAL-004 PatchEvaluator for automated testing
-    - Links to EVAL-001 investigations
-    - Stores evaluation results from EVAL-002 behaviour tests
-    - Respects EVAL-003 auto-detection triggers in evaluation
-  - Architecture:
-    - Zero breaking changes to EVAL-001/002/003/004
-    - Tower acts as record-keeper, Replit/Git remains source of truth
-    - Human-in-the-loop for final approval and application
-    - Complete observability with [JuniorDevRoutes] logs
-
-- 2025-11-15: EVAL-004: Patch Quality + Regression Protection (Mode C: Strict Gatekeeper)
-  - **Patch Evaluation Pipeline**: Complete CI/CD gatekeeper that evaluates patches before application
-  - **New Modules**:
-    - src/evaluator/patchSandbox.ts: In-memory patch application with file overlay system
-    - src/evaluator/patchDiff.ts: Diff pre-patch vs post-patch test results
-    - src/evaluator/patchGate.ts: Mode C strict approval rules (10 rejection conditions)
-    - src/evaluator/patchEvaluator.ts: Main orchestrator (before→sandbox→after→diff→gate→decision)
-    - server/routes-patch.ts: New API endpoints for patch submission and retrieval
-  - **Database Schema**: Added patch_evaluations table with full audit trail
-  - **API Endpoints**:
-    - POST /tower/patch/submit: Submit patch for evaluation
-    - GET /tower/patch/:id: Retrieve evaluation results
-  - **Strict Rejection Rules** (10 conditions):
-    - Rule 1: Any test FAILS after patch
-    - Rule 2: Any new ERROR appears
-    - Rule 3: Latency regression >30%
-    - Rule 4: Quality degradation detected
-    - Rule 5: Regression (PASS→FAIL)
-    - Rule 6: Investigator danger flags
-    - Rule 7: Auto-detection triggers fired
-    - Rule 8: Test suite instability
-    - Rule 9: Patch is irrelevant
-    - Rule 10: Breaks imports/exports/boot
-  - **Approval Criteria**: All tests pass, no errors, no regressions, stable/improved latency, maintained/improved quality, investigator safe, no auto-detect triggers
-  - **Performance**: 20-25 second evaluation time, <60s timeout protection, sequential execution
-  - **Integration**: Uses EVAL-002 behaviour tests, EVAL-003 auto-detection, existing investigation pipeline
-  - **Results**: Returns comprehensive diff summary, before/after test results, rejection reasons, risk level
-  - Architecture:
-    - Zero breaking changes to EVAL-001/002/003
-    - In-memory sandbox (no filesystem modifications)
-    - Deterministic decision making
-    - Complete observability with [PatchEvaluator] logs
-
-- 2025-11-15: EVAL-003: Automated Detection and Investigation Triggering
-  - **Auto-Detection System** (src/evaluator/autoDetect.ts):
-    - Automatically detects failures, timeouts, errors, and regressions after each behaviour test run
-    - Trigger conditions: status='error', status='fail', timeout >10s, empty response, low quality, regression, repeated errors
-    - Creates investigations automatically using existing EVAL-001 pipeline (executeInvestigation)
-    - Prevents duplicate investigations for same run ID
-    - Logs all auto-triggered investigations with reason and summary
-  - **Run Logging** (src/evaluator/runLogger.ts):
-    - getLastRunForTest(): Retrieves previous run for regression detection
-    - getRecentErrorsForTest(): Finds repeated errors within time window (5 minutes)
-    - getPreviousRunForTest(): Gets run history for comparison
-  - **Trigger Reasons**:
-    - 'fail': Test heuristic check failed
-    - 'error': Test execution error
-    - 'timeout': Test duration >10 seconds
-    - 'regression': Previous run was PASS, current is FAIL/ERROR
-    - 'quality': Empty or very short response (<10 chars)
-    - 'repeated-errors': Multiple errors in 5-minute window
-  - **Integration**:
-    - Modified POST /tower/behaviour-tests/run route to call autoDetectAndTriggerInvestigation after each test
-    - Auto-investigations appear in /tower/evaluator/investigations and /dashboard
-    - Uses existing Investigation types: 'timeout', 'tool_error', 'behaviour_flag'
-    - Detailed notes include test ID, status, duration, triggers, and response preview
-  - **No UI Changes Required**:
-    - All auto-investigations visible in existing dashboard
-    - Distinguished by trigger type and auto-generated notes starting with "🤖 AUTO-DETECTED ISSUE"
-  - Architecture:
-    - Zero schema changes (uses existing investigations table)
-    - Zero breaking changes to EVAL-001/EVAL-002
-    - Graceful error handling (auto-detect failures don't break test runs)
-    - Console logging: [AutoDetect] messages for monitoring
-
-- 2025-11-15: EVAL-002B: Streaming Test Endpoint Integration
-  - **New Endpoint**: Wyshbone UI now provides `/api/tower/chat-test` for machine authentication
-  - **Implementation** (src/evaluator/behaviourTests.ts):
-    - Updated callWyshboneUI() to call `/api/tower/chat-test` endpoint
-    - Added X-EXPORT-KEY header authentication using exportKey from sources.json
-    - Implemented parseStreamingResponse() to handle Server-Sent Events (SSE) streaming
-    - Accumulates all streamed chunks into single string for regex heuristic matching
-    - Supports multiple SSE data formats (content, delta.content, plain text)
-    - Graceful fallback to JSON parsing for non-streaming responses
-  - **Chat API Types** (src/evaluator/chatApiTypes.ts):
-    - ChatRequest interface with required user (id, name, email) and messages fields
-    - Optional domain field for personalization tests
-    - ChatMessage interface with role and content
-  - **Status**: 
-    - ✅ Uses correct `/api/tower/chat-test` endpoint with X-EXPORT-KEY auth
-    - ✅ Handles streaming responses and captures full text
-    - ✅ All four behaviour tests ready for real PASS/FAIL verdicts
-
-- 2025-11-15: EVAL-002: Automated Behaviour Tests
-  - **Test Harness & Definitions**: Created 4 real behaviour tests that probe Wyshbone UI:
-    - greeting-basic: Verifies welcome message and goal inquiry on new user conversation
-    - personalisation-domain: Checks domain acknowledgment and business-specific adaptation
-    - lead-search-basic: Validates lead search triggering and result delivery
-    - monitor-setup-basic: Confirms monitoring setup acknowledgment and recurring behavior
-  - **Database Schema**: Added behaviour_tests and behaviour_test_runs tables
-    - Tests table: id, name, description, category, isActive
-    - Runs table: id, createdAt, testId, status (pass/fail/error), details, rawLog, buildTag, durationMs
-  - **Test Execution Engine** (src/evaluator/behaviourTests.ts):
-    - Calls Wyshbone UI /api/chat endpoint with scenario-specific prompts
-    - Uses regex heuristics to determine pass/fail (greeting patterns, domain mentions, search indicators, monitoring language)
-    - Gracefully handles errors when UI unavailable (503) and reports as "error" status
-    - Measures execution time for performance tracking
-  - **Storage Layer** (src/evaluator/behaviourTestStore.ts):
-    - ensureBehaviourTestsSeeded() auto-populates test definitions on startup
-    - recordBehaviourTestRun() persists results with build tags
-    - getTestsWithLatestRuns() returns tests paired with most recent execution
-    - Handles text-to-boolean conversion for isActive, text-to-number for durationMs
-  - **API Endpoints**:
-    - GET /tower/behaviour-tests - Returns all tests with latest run status
-    - POST /tower/behaviour-tests/run - Executes tests (supports runAll, testId, buildTag)
-  - **Dashboard UI** (BehaviourTestsCard):
-    - Integrated into /dashboard between Tower Status and Recent Runs
-    - Shows all 4 tests with status badges (green=pass, red=fail, orange=error, gray=never run)
-    - "Run all" button executes full test suite with loading state
-    - Individual "Run" buttons per test for targeted execution
-    - Real-time updates with timestamps ("Just now", "2m ago", etc.)
-    - Displays test details, category, duration, and failure diagnostics
-  - **End-to-End Testing**: Playwright verification confirms full workflow from UI to API to database
-  - Architecture notes:
-    - Tests auto-seed on server startup
-    - Results persist with optional build tags for tracking across deployments
-    - Simple heuristic-based pass/fail (no GPT calls for smoke tests)
-    - Ready for EVAL-003 multi-run pattern analysis
-
-- 2025-11-15: EVAL-001B: Interactive Debugging Console with Runs Tracking
-  - **React Dashboard Integration**: Added Vite middleware to serve React SPA at `/dashboard`
-    - Hybrid architecture: Server-rendered routes (`/status`) + React app (`/dashboard`, `/`)
-    - Seamless hot module replacement during development
-  - **Runs Database & API**: 
-    - Created `runs` table with auto-generated IDs and source tracking
-    - POST /tower/runs auto-generates run IDs, defaults source to "MANUAL"
-    - GET /tower/runs returns recent runs (limit parameter supported)
-    - GET /tower/runs/:id retrieves specific run details
-  - **Interactive Console UI**:
-    - StatusDashboard page with two-column layout (responsive grid)
-    - Left: Tower Status metrics + Recent Runs table with real-time data
-    - Right: Sticky Evaluator Console displaying active investigations
-    - RecentRunsTable component with "Investigate" buttons for each run
-  - **Investigation Workflow**:
-    - Click "Investigate" → Dialog opens for notes entry
-    - Submit → Creates investigation linked to run (enriched context)
-    - EvaluatorConsole polls investigation endpoint every 2s
-    - Displays run context, user notes, diagnosis, and patch suggestions
-    - Polling auto-stops when diagnosis complete (max 30 attempts / 60s)
-  - **EvaluatorContext**: React context for sharing active investigation across components
-  - **End-to-End Testing**: Playwright tests confirm full workflow from UI to API
-  - **User Experience**: Chat-like bubble interface for investigation results, copy-to-clipboard for patches
-  - Architecture notes:
-    - Page title set to "Wyshbone Tower - Evaluator Console"
-    - All database operations flow through shared persistence layer (runStore, storeInvestigation)
-    - Error handling for missing API keys (graceful degradation)
-    - Ready for integration with actual run logging system
-
-- 2025-11-15: EVAL-001: Minimal Evaluator v0 implementation
-  - Created complete evaluator foundation layer in `src/evaluator/` directory
-  - Implemented investigation system with PostgreSQL database storage:
-    - TypeScript types for investigations, triggers, and diagnostic results
-    - Database schema with investigations table (id, trigger, run logs, snapshots, diagnosis, patches)
-    - Storage layer with CRUD operations (create, get all, get by ID)
-  - Integrated OpenAI GPT-4o-mini for automated diagnosis:
-    - Evaluator analyzes run logs and code snapshots to identify root causes
-    - Provides actionable diagnosis and patch suggestions
-    - Configurable via EVAL_MODEL_ID environment variable
-  - Optional code snapshot fetching from UI/Supervisor apps (fails gracefully if unavailable)
-  - Three API endpoints for investigation management:
-    - `POST /tower/evaluator/investigate` - Create and execute new investigation
-    - `GET /tower/evaluator/investigations` - List all investigations
-    - `GET /tower/evaluator/investigations/:id` - Get specific investigation details
-  - Interactive investigations dashboard at `/investigations`:
-    - Empty state with "Create Investigation" button
-    - Investigation cards showing trigger, notes, timestamps, and diagnosis previews
-    - Manual investigation creation with optional run ID and notes
-    - Link from main dashboard to investigations page
-  - Architecture notes:
-    - Modified server startup to use `tsx` for TypeScript module support
-    - Configured Neon WebSocket for serverless database connections
-    - Placeholder run log fetcher (ready for integration with actual logging system)
-  - Ready for EVAL-002 (automated behaviour detection) and EVAL-003 (multi-run analysis)
-
-- 2025-11-15: Evaluator Roadmap implementation
-  - Added 5 evaluator tasks (EVAL-001 to EVAL-005) to config/tasks.json
-  - Created Evaluator Roadmap section in dashboard with dedicated purple/violet styling
-  - Extended task modal to show evaluator-specific fields:
-    - Summary field for quick overview
-    - "Replit Build Pre-Prompt (Base)" section with copyable base prompt template
-    - Status update buttons (Not Started, In Progress, Done)
-  - Added getEvaluatorTasks() method to TasksManager
-  - Added /evaluator-tasks.json API endpoint
-  - Updated status badge rendering to support "not_started" status
-  - Tasks shown in dependency order: EVAL-001 → EVAL-002 → EVAL-003 → EVAL-004 → EVAL-005
-  - All evaluator tasks are Layer 7 (Evaluator Roadmap group)
-  - Base prompt template format follows convention from requirements
-
-- 2025-11-14: Convention-based task acceptance
-  - Implemented automatic task completion detection using naming convention
-  - UI-XXX tasks check for `uiXXX_done` flag (e.g., UI-001 → ui001_done)
-  - SUP-XXX tasks check for `supXXX_done` flag (e.g., SUP-001 → sup001_done)
-  - Zero configuration required - works automatically for all UI/SUP tasks
-  - Falls back to `acceptanceKey` for custom flags, then `fileContains` for file-based checking
-  - Properly persists to tasks.json during polling to maintain state across restarts
-  - UI-001 and UI-002 now auto-detected as complete via ui001_done and ui002_done flags
-
-- 2025-11-13: Phase 2 visual indicators
-  - Added bold "Phase 2" badges to all tasks with layer >= 5
-  - Badges appear on layer headings (e.g., "Layer 5 – Self-Improvement & Experimentation **Phase 2**")
-  - Badges also appear on individual task rows in the badge row
-  - Purple/violet styling (#7c3aed background #ede9fe) makes Phase 2 tasks stand out
-  - Applied across all task rendering locations: Critical Path, Source Status, and Poller sections
-  - 9 tasks currently marked as Phase 2 (all in Layer 5)
-
-- 2025-11-13: Interactive task modal with copy-to-clipboard
-  - Made all task rows clickable in Critical Path section and per-app task lists
-  - Added modal popup showing full task details (ID, title, description, app, layer, status, complexity)
-  - Implemented copy-to-clipboard button for `replitPrompt` field
-  - Modal closes via X button, clicking overlay, or ESC key
-  - Embedded all 51 tasks as JSON in HTML for instant modal population
-  - Added hover effects on task rows for better UX
-  - Shows helpful message for placeholder tasks without implementation prompts
-
-- 2025-11-13: Roadmap enrichment implementation
-  - Expanded roadmap from 6 to 51 tasks across 6 architectural layers
-  - Enriched tasks with layer, group, complexity (S/M/L/XL), dependencies, criticalPath
-  - Enhanced lib/tasks.js with layer grouping, critical path extraction, and topological sorting
-  - Added dependency validation that fails fast on missing dependencies
-  - Implemented critical path dashboard section showing all 27 critical tasks (scrollable)
-  - Added /critical-path.json API endpoint returning 27 critical tasks in dependency order
-  - Added scripts/enrich-tasks.js with warning about not re-running after manual edits
-
-- 2025-11-13: Initial implementation
-  - Created poller with configurable sources
-  - Built server-side rendered dashboard
-  - Implemented delta tracking
-  - Added JSON API and file proxy endpoints
+*   **Node.js:** Runtime environment.
+*   **Express:** Web application framework.
+*   **PostgreSQL:** Database for storing investigations, behaviour test runs, and other persistent data (via Neon for serverless connections).
+*   **OpenAI GPT-4o-mini:** Utilized by the evaluator for automated diagnosis and patch suggestion generation.
+*   **Vite:** Used for serving the React SPA and providing hot module replacement during development.
