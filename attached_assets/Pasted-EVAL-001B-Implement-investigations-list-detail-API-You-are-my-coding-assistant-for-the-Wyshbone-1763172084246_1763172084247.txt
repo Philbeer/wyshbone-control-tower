@@ -1,0 +1,191 @@
+EVAL-001B – Implement investigations list + detail API
+
+You are my coding assistant for the Wyshbone Control Tower repl.
+
+Implement EVAL-001B: Investigations API (list + detail).
+
+Goal:
+Right now, POST /tower/evaluator/investigate works, but there is no way to fetch investigations. The command
+
+wget -qO- https://<tower-url>/tower/evaluator/investigations
+
+
+returns an empty body, and the browser shows Cannot GET /dashboard/investigations.
+
+I need you to:
+
+Make sure investigations are persisted (they should already be from EVAL-001, but verify).
+
+Implement two GET routes:
+
+GET /tower/evaluator/investigations → return an array of investigations
+
+GET /tower/evaluator/investigations/:id → return a single investigation or 404
+
+Use the existing stack (Node/TypeScript, current router and DB utilities).
+
+Return JSON, not HTML.
+
+Do not build any frontend UI in this task — just backend API.
+
+1. Find existing investigation storage
+
+Search the repo for things like:
+
+investigations
+
+Investigation
+
+executeInvestigation
+
+storeInvestigation
+
+If there is already:
+
+a Drizzle schema (e.g. db/schema/investigations.ts), or
+
+a repository module (e.g. src/evaluator/storeInvestigation.ts),
+
+reuse it as the single source of truth.
+
+If there is no such schema/module (unlikely, but possible), create one using the existing DB setup (Drizzle + Neon, etc.) and ensure it matches whatever EVAL-001 already writes when it stores investigations.
+
+The Investigation shape should include at least:
+
+id (string, PK)
+
+created_at / createdAt
+
+trigger (string)
+
+run_id / runId (nullable)
+
+notes (nullable)
+
+run_logs / runLogs (json or jsonb)
+
+run_meta / runMeta (json, nullable)
+
+ui_snapshot / uiSnapshot (json, nullable)
+
+supervisor_snapshot / supervisorSnapshot (json, nullable)
+
+diagnosis (nullable text)
+
+patch_suggestion (nullable text)
+
+Use whatever casing and naming is already in the codebase, and provide mapping if you expose camelCase via the API.
+
+2. Implement list + detail data access helpers
+
+Create or update a module in the evaluator area, something like:
+
+src/evaluator/investigationRepo.ts (or extend storeInvestigation.ts if it already exists)
+
+Add functions:
+
+export async function listInvestigations(): Promise<Investigation[]> { ... }
+
+export async function getInvestigationById(id: string): Promise<Investigation | null> { ... }
+
+
+Implementation details:
+
+Use the existing db instance and investigations schema.
+
+Order listInvestigations by created_at DESC (newest first).
+
+Map DB rows into a clean Investigation object (camelCase fields) that is safe to JSON-serialize.
+
+3. Wire up HTTP routes
+
+Find the main server/router (e.g. src/server.ts, src/routes/index.ts, or similar).
+Look for where /status and /tower/... endpoints are defined.
+
+Create (or extend) an evaluator routes module, e.g.:
+
+src/routes/evaluatorRoutes.ts
+or
+
+src/evaluator/api.ts
+
+Then add:
+
+router.get("/tower/evaluator/investigations", async (req, res) => {
+  try {
+    const investigations = await listInvestigations();
+    res.status(200).json(investigations);
+  } catch (err) {
+    console.error("Error listing investigations", err);
+    res.status(500).json({ error: "Failed to list investigations" });
+  }
+});
+
+router.get("/tower/evaluator/investigations/:id", async (req, res) => {
+  try {
+    const investigation = await getInvestigationById(req.params.id);
+    if (!investigation) {
+      res.status(404).json({ error: "Investigation not found" });
+      return;
+    }
+    res.status(200).json(investigation);
+  } catch (err) {
+    console.error("Error loading investigation", err);
+    res.status(500).json({ error: "Failed to load investigation" });
+  }
+});
+
+
+Make sure this routes module is registered in the main server so the paths are reachable.
+
+4. JSON shape & behaviour
+
+GET /tower/evaluator/investigations must always return JSON:
+
+If there are no rows: [] (empty array).
+
+Otherwise: an array of investigations, each including at least:
+
+{
+  "id": "uuid",
+  "createdAt": "2025-11-15T01:58:00.000Z",
+  "trigger": "manual",
+  "runId": null,
+  "notes": "Test EVAL-001 from shell",
+  "diagnosis": "…",
+  "patchSuggestion": "…"
+}
+
+
+You can also include runLogs, runMeta, and snapshots, but keep it reasonably sized.
+
+GET /tower/evaluator/investigations/:id:
+
+200 + JSON object if found
+
+404 + {"error":"Investigation not found"} if not
+
+5. Basic self-test
+
+After implementing:
+
+Run the server.
+
+From the Replit shell, run:
+
+wget -qO- https://<tower-url>/tower/evaluator/investigations
+
+
+Expect: [] or a JSON array of investigations.
+
+Also test a specific ID (replace <ID> with a real id from the array):
+
+wget -qO- https://<tower-url>/tower/evaluator/investigations/<ID>
+
+
+Expect: JSON object with that investigation, or 404 if you made up the ID.
+
+Do not add any new frontend pages in this task.
+Do not change the existing /tower/evaluator/investigate POST behaviour.
+
+Return the final code with all new/updated files in full.
