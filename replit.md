@@ -71,6 +71,20 @@ Server runs on port defined by `PORT` environment variable (default: 3000).
 
 ## Recent Changes
 
+- 2025-11-15: Evaluator Roadmap implementation
+  - Added 5 evaluator tasks (EVAL-001 to EVAL-005) to config/tasks.json
+  - Created Evaluator Roadmap section in dashboard with dedicated purple/violet styling
+  - Extended task modal to show evaluator-specific fields:
+    - Summary field for quick overview
+    - "Replit Build Pre-Prompt (Base)" section with copyable base prompt template
+    - Status update buttons (Not Started, In Progress, Done)
+  - Added getEvaluatorTasks() method to TasksManager
+  - Added /evaluator-tasks.json API endpoint
+  - Updated status badge rendering to support "not_started" status
+  - Tasks shown in dependency order: EVAL-001 → EVAL-002 → EVAL-003 → EVAL-004 → EVAL-005
+  - All evaluator tasks are Layer 7 (Evaluator Roadmap group)
+  - Base prompt template format follows convention from requirements
+
 - 2025-11-14: Convention-based task acceptance
   - Implemented automatic task completion detection using naming convention
   - UI-XXX tasks check for `uiXXX_done` flag (e.g., UI-001 → ui001_done)

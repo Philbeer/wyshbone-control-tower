@@ -1091,12 +1091,12 @@
     "title": "Minimal Evaluator v0 (logging + investigations)",
     "description": "Foundation layer: log UI/Supervisor runs with run IDs, create Investigations in Tower, bundle logs and context, send them to GPT, and store diagnosis + patch suggestions. No automated tests or detection yet.",
     "summary": "Add structured run logging and manual GPT-based investigations in Tower.",
-    "status": "not_started",
+    "status": "in_progress",
     "priority": "high",
     "type": "replit_prompt",
     "replitPrompt": "You are my coding assistant for the Wyshbone Tower repl.\nImplement EVAL-001: Minimal Evaluator v0 (logging + investigations).\nFoundation layer: log UI/Supervisor runs with run IDs, create Investigations in Tower, bundle logs and context, send them to GPT, and store diagnosis + patch suggestions. No automated tests or detection yet.\nBuild on all previous EVAL tasks.\nProduce actual code, not instructions.",
     "createdAt": "2025-01-14T00:00:00.000Z",
-    "updatedAt": "2025-01-14T00:00:00.000Z",
+    "updatedAt": "2025-11-15T01:27:42.637Z",
     "layer": 7,
     "group": "Evaluator Roadmap",
     "complexity": "L",
@@ -1118,7 +1118,9 @@
     "layer": 7,
     "group": "Evaluator Roadmap",
     "complexity": "L",
-    "dependsOn": ["EVAL-001"],
+    "dependsOn": [
+      "EVAL-001"
+    ],
     "criticalPath": false
   },
   {
@@ -1136,7 +1138,10 @@
     "layer": 7,
     "group": "Evaluator Roadmap",
     "complexity": "L",
-    "dependsOn": ["EVAL-001", "EVAL-002"],
+    "dependsOn": [
+      "EVAL-001",
+      "EVAL-002"
+    ],
     "criticalPath": false
   },
   {
@@ -1154,7 +1159,10 @@
     "layer": 7,
     "group": "Evaluator Roadmap",
     "complexity": "L",
-    "dependsOn": ["EVAL-002", "EVAL-003"],
+    "dependsOn": [
+      "EVAL-002",
+      "EVAL-003"
+    ],
     "criticalPath": false
   },
   {
@@ -1172,7 +1180,10 @@
     "layer": 7,
     "group": "Evaluator Roadmap",
     "complexity": "XL",
-    "dependsOn": ["EVAL-001", "EVAL-004"],
+    "dependsOn": [
+      "EVAL-001",
+      "EVAL-004"
+    ],
     "criticalPath": false
   }
 ]

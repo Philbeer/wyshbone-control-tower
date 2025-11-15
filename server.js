@@ -606,7 +606,7 @@ function renderDashboard(state, tasksState) {
               <h2 id="modalTaskTitle" style="font-size: 20px; font-weight: 600; margin-bottom: 8px;"></h2>
               <div id="modalTaskId" style="font-size: 12px; color: #9ca3af; font-family: monospace;"></div>
             </div>
-            <button class="modal-close" onclick="closeTaskModal()">&times;</button>
+            <button class="modal-close" onclick="closeTaskModal()" aria-label="Close" data-testid="button-close-modal">&times;</button>
           </div>
           <div class="modal-body">
             <div class="task-detail-row">
@@ -885,16 +885,22 @@ Produce actual code, not instructions.\`;
         }
 
         // Close modal when clicking overlay
-        document.getElementById('taskModal').addEventListener('click', function(e) {
-          if (e.target === this) {
-            closeTaskModal();
-          }
-        });
+        const modalOverlay = document.getElementById('taskModal');
+        if (modalOverlay) {
+          modalOverlay.addEventListener('click', function(e) {
+            if (e.target === this) {
+              closeTaskModal();
+            }
+          });
+        }
 
         // Close modal with Escape key
         document.addEventListener('keydown', function(e) {
-          if (e.key === 'Escape') {
-            closeTaskModal();
+          if (e.key === 'Escape' || e.key === 'Esc') {
+            const modal = document.getElementById('taskModal');
+            if (modal && modal.classList.contains('active')) {
+              closeTaskModal();
+            }
           }
         });
       </script>
