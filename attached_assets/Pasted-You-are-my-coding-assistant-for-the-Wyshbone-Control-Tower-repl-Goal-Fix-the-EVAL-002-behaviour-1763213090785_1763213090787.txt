@@ -1,0 +1,45 @@
+You are my coding assistant for the Wyshbone Control Tower repl.
+
+Goal: Fix the EVAL-002 behaviour tests so they talk correctly to the real Wyshbone UI chat API instead of getting 400 "Invalid request format" errors.
+
+Context:
+- The behaviour tests are implemented in `src/evaluator/behaviourTests.ts`.
+- Right now they call the Wyshbone UI chat endpoint but the UI responds with a 400 ZodError complaining that `user` and `messages` are missing (and possibly other required fields).
+- We want the tests to exercise the *real* chat behaviour, using the same endpoint and schema that the Wyshbone UI uses for normal users.
+- We do NOT want to add any new GPT calls; keep the existing cheap regex heuristics for pass/fail.
+
+Tasks:
+
+1. **Find the UI chat call used by the behaviour tests**
+   - Locate the helper in `src/evaluator/behaviourTests.ts` (or nearby) that calls the Wyshbone UI API. It currently returns an "UI API returned 400" style error when the body is wrong.
+
+2. **Experiment until the request shape is valid**
+   - Build a small local helper inside Tower (or a shell script) to call the same UI endpoint with a test payload.
+   - Start with a plausible minimal body:
+     - Include a `user` object (e.g. `{ id: "tower-eval", name: "Tower Evaluator", domain: "tower.local" }`).
+     - Include a `messages` array with at least one item like `{ role: "user", content: "Test greeting from Tower evaluator" }`.
+   - Use the Replit Shell and `curl` (or `node` / `fetch`) from this repl to hit the UI endpoint and read the response.
+   - If the UI still returns 400 and Zod errors, *iteratively* add any missing fields the error mentions (e.g. `sessionId`, `goal`, etc.) until you consistently get a 200 OK and a normal chat response.
+   - Capture the final working request shape in TypeScript types so it’s clear and type-safe.
+
+3. **Update the behaviour tests to use that valid body**
+   - Refactor `src/evaluator/behaviourTests.ts` so each test (greeting-basic, personalisation-domain, lead-search-basic, monitor-setup-basic) calls a shared helper like `runUiChatScenario({ scenarioId, userOverrides?, initialMessage })` that:
+     - Builds the valid request body using the shape you just discovered.
+     - Sends the request to the Wyshbone UI URL (use the existing base URL config and don’t hardcode the host).
+     - Returns the raw text response and any metadata the heuristics need.
+   - Make sure the four tests still:
+     - Use realistic messages (greeting, domain with a fake company, lead search phrase, monitoring request).
+     - Run against the real chat behaviour, not a stub.
+
+4. **Keep the test result storage and dashboard UI unchanged**
+   - Do NOT change the behaviour test DB schema or the `/tower/behaviour-tests` endpoints.
+   - Do NOT change the BehaviourTestsCard layout or status badges.
+   - Only adjust the internals of how each test talks to the UI.
+
+5. **Verify the end-to-end flow**
+   - From this repl:
+     - Run the behaviour tests from the dashboard `/dashboard` using “Run all”.
+     - Confirm that at least some tests now return PASS or FAIL based on content, and only show ERROR when the UI is genuinely unavailable (5xx / timeout).
+   - Fix any remaining issues until the tests reliably exercise the real Wyshbone UI behaviour.
+
+Produce actual code changes (TypeScript and any small scripts), not high-level instructions. Make sure the code compiles and the existing EVAL-002 Playwright test still passes, but now with real chat calls instead of 400 errors.
