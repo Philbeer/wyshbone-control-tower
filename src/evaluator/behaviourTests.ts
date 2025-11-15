@@ -1,4 +1,4 @@
-import type { BehaviourTest } from '@shared/schema';
+import type { BehaviourTest } from '../../shared/schema';
 
 export type BehaviourTestResult = {
   testId: string;
