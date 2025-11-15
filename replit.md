@@ -45,6 +45,12 @@ A sophisticated evaluation system is integrated to automate testing, diagnosis, 
     *   Manages a complete patch lifecycle from investigation to suggested patch, evaluation, approval, and application.
     *   Includes API endpoints for generating developer briefs, creating/listing patch suggestions, and updating suggestion statuses.
     *   Integrates with the patch evaluation pipeline for automated testing and status validation.
+*   **Auto-Patch Generator (EVAL-006):**
+    *   LLM-powered automatic patch generation for investigations using GPT-4o-mini.
+    *   Generates unified diff patches from investigation context and diagnosis.
+    *   Automatically evaluates generated patches through EVAL-004 gatekeeper pipeline.
+    *   Provides "Auto patch (beta)" button in investigation UI for one-click patch generation.
+    *   Handles edge cases like NO_PATCH_POSSIBLE with appropriate user feedback.
 
 **UI/UX:**
 

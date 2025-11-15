@@ -48,6 +48,38 @@ Output format:
 - If you cannot propose a safe patch: output exactly "NO_PATCH_POSSIBLE"`;
 }
 
+function validateUnifiedDiff(text: string): boolean {
+  const lines = text.split('\n');
+  if (lines.length === 0) return false;
+  
+  const firstLine = lines[0].trim();
+  if (!/^diff --git \S+ \S+$/.test(firstLine)) {
+    return false;
+  }
+  
+  let hasMinusHeader = false;
+  let hasPlusHeader = false;
+  let hasHunkMarker = false;
+  let hasHunkContent = false;
+  
+  for (const line of lines) {
+    if (line.startsWith('---')) {
+      hasMinusHeader = true;
+    }
+    if (line.startsWith('+++')) {
+      hasPlusHeader = true;
+    }
+    if (line.startsWith('@@')) {
+      hasHunkMarker = true;
+    }
+    if (hasHunkMarker && (line.startsWith('+') || line.startsWith('-')) && !line.startsWith('+++') && !line.startsWith('---')) {
+      hasHunkContent = true;
+    }
+  }
+  
+  return hasMinusHeader && hasPlusHeader && hasHunkMarker && hasHunkContent;
+}
+
 async function generatePatchFromBrief(brief: DevBrief): Promise<string> {
   const messages = [
     { role: "system" as const, content: SYSTEM_PROMPT },
@@ -79,7 +111,8 @@ async function generatePatchFromBrief(brief: DevBrief): Promise<string> {
     }
   }
 
-  if (!extractedDiff.includes("diff --git")) {
+  if (!validateUnifiedDiff(extractedDiff)) {
+    console.error('[AutoPatch] Invalid diff format received from LLM');
     throw new Error("NO_PATCH_POSSIBLE");
   }
 
