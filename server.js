@@ -45,13 +45,15 @@ function renderTaskStatusBadge(status) {
     planned: '#3b82f6',
     in_progress: '#f59e0b',
     done: '#22c55e',
-    blocked: '#ef4444'
+    blocked: '#ef4444',
+    not_started: '#9ca3af'
   };
   const labels = {
     planned: 'PLANNED',
     in_progress: 'IN PROGRESS',
     done: 'DONE',
-    blocked: 'BLOCKED'
+    blocked: 'BLOCKED',
+    not_started: 'NOT STARTED'
   };
   const color = colors[status] || '#9ca3af';
   const label = labels[status] || status.toUpperCase();
@@ -176,6 +178,48 @@ function renderCriticalPathSection() {
         </div>
         <p style="margin: 16px 0 0 0; color: #92400e; font-size: 11px; font-style: italic;">
           💡 Scroll to view all ${criticalTasks.length} tasks. Tasks are ordered by dependencies (prerequisites first).
+        </p>
+      </div>
+    </div>
+  `;
+}
+
+function renderEvaluatorRoadmapSection() {
+  const evaluatorTasks = tasksManager.getEvaluatorTasks();
+  
+  if (!evaluatorTasks || evaluatorTasks.length === 0) {
+    return '';
+  }
+
+  const tasksHtml = evaluatorTasks.map(task => {
+    const complexity = task.complexity || 'M';
+    const summary = task.summary || task.description;
+    
+    return `
+      <div class="task-row evaluator-task" data-task-id="${task.id}" style="padding: 12px 16px; margin-bottom: 10px; background: white; border: 1px solid #e5e7eb; border-radius: 4px; cursor: pointer; transition: all 0.2s;">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+          ${renderComplexityBadge(complexity)}
+          ${renderTaskStatusBadge(task.status)}
+          <span style="font-size: 11px; color: #9ca3af; font-family: monospace; font-weight: 600;">${task.id}</span>
+        </div>
+        <div style="font-size: 14px; font-weight: 600; color: #1f2937; margin-bottom: 6px;">${task.title}</div>
+        <div style="font-size: 12px; color: #6b7280; line-height: 1.5;">${summary}</div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="section">
+      <h2 class="section-title">🔍 Evaluator Roadmap</h2>
+      <div style="border: 2px solid #7c3aed; border-radius: 8px; padding: 20px; background: #faf5ff; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        <p style="margin: 0 0 16px 0; color: #5b21b6; font-size: 13px;">
+          ${evaluatorTasks.length} evaluator tasks for building automated testing and quality assurance. Click any task to view details and copy the build prompt.
+        </p>
+        <div style="max-height: 600px; overflow-y: auto; padding-right: 8px;">
+          ${tasksHtml}
+        </div>
+        <p style="margin: 16px 0 0 0; color: #6b21a8; font-size: 11px; font-style: italic;">
+          💡 Each task includes a base Replit build prompt you can copy and customize.
         </p>
       </div>
     </div>
@@ -363,6 +407,9 @@ function renderDashboard(state, tasksState) {
   
   // Add Critical Path section
   const criticalPathHtml = renderCriticalPathSection();
+  
+  // Add Evaluator Roadmap section
+  const evaluatorRoadmapHtml = renderEvaluatorRoadmapSection();
 
   return `
     <!DOCTYPE html>
@@ -534,6 +581,8 @@ function renderDashboard(state, tasksState) {
         
         ${criticalPathHtml}
         
+        ${evaluatorRoadmapHtml}
+        
         <div class="section">
           <h2 class="section-title">Recent Changes (Last 10 Events)</h2>
           ${recentEventsHtml}
@@ -572,13 +621,34 @@ function renderDashboard(state, tasksState) {
               <div class="task-detail-label">Status</div>
               <div id="modalTaskStatus" class="task-detail-value"></div>
             </div>
+            <div id="evaluatorStatusRow" class="task-detail-row" style="display: none;">
+              <div class="task-detail-label">Update Status</div>
+              <div style="display: flex; gap: 8px; margin-top: 8px;">
+                <button class="status-btn" data-status="not_started" style="padding: 6px 12px; border: 1px solid #e5e7eb; background: white; border-radius: 4px; cursor: pointer; font-size: 12px;">Not Started</button>
+                <button class="status-btn" data-status="in_progress" style="padding: 6px 12px; border: 1px solid #e5e7eb; background: white; border-radius: 4px; cursor: pointer; font-size: 12px;">In Progress</button>
+                <button class="status-btn" data-status="done" style="padding: 6px 12px; border: 1px solid #e5e7eb; background: white; border-radius: 4px; cursor: pointer; font-size: 12px;">Done</button>
+              </div>
+              <div id="statusUpdateFeedback" style="margin-top: 8px; font-size: 12px; display: none;"></div>
+            </div>
             <div class="task-detail-row">
               <div class="task-detail-label">Complexity</div>
               <div id="modalTaskComplexity" class="task-detail-value"></div>
             </div>
+            <div id="evaluatorSummaryRow" class="task-detail-row" style="display: none;">
+              <div class="task-detail-label">Summary</div>
+              <div id="modalTaskSummary" class="task-detail-value"></div>
+            </div>
             <div class="task-detail-row">
               <div class="task-detail-label">Description</div>
               <div id="modalTaskDescription" class="task-detail-value"></div>
+            </div>
+            <div id="evaluatorPromptRow" class="task-detail-row" style="display: none;">
+              <div class="task-detail-label">Replit Build Pre-Prompt (Base)</div>
+              <div id="modalTaskEvaluatorPromptContainer"></div>
+              <div>
+                <button id="copyEvaluatorPromptBtn" class="copy-btn" onclick="copyEvaluatorPromptToClipboard()">📋 Copy base prompt</button>
+                <span id="copyEvaluatorFeedback" class="copy-feedback" style="display: none;"></span>
+              </div>
             </div>
             <div class="task-detail-row">
               <div class="task-detail-label">Implementation Prompt</div>
@@ -613,15 +683,50 @@ function renderDashboard(state, tasksState) {
           const task = tasksMap.get(taskId);
           if (!task) return;
 
-          const appLabels = { ui: 'Wyshbone UI', supervisor: 'Wyshbone Supervisor', poller: 'Wyshbone Poller', meta: 'Meta-Agent' };
+          const appLabels = { 
+            ui: 'Wyshbone UI', 
+            supervisor: 'Wyshbone Supervisor', 
+            poller: 'Wyshbone Poller', 
+            meta: 'Meta-Agent',
+            evaluator: 'Evaluator'
+          };
+          
+          const isEvaluatorTask = task.app === 'evaluator';
           
           document.getElementById('modalTaskTitle').textContent = task.title;
           document.getElementById('modalTaskId').textContent = task.id;
           document.getElementById('modalTaskApp').textContent = appLabels[task.app] || task.app;
           document.getElementById('modalTaskLayer').textContent = \`Layer \${task.layer} – \${task.group || 'Unknown'}\`;
-          document.getElementById('modalTaskStatus').textContent = (task.status || 'planned').toUpperCase();
+          document.getElementById('modalTaskStatus').textContent = (task.status || 'planned').toUpperCase().replace('_', ' ');
           document.getElementById('modalTaskComplexity').textContent = task.complexity || 'M';
           document.getElementById('modalTaskDescription').textContent = task.description || 'No description available.';
+
+          // Show/hide evaluator-specific fields
+          if (isEvaluatorTask) {
+            // Show summary
+            const summaryRow = document.getElementById('evaluatorSummaryRow');
+            summaryRow.style.display = 'block';
+            document.getElementById('modalTaskSummary').textContent = task.summary || '';
+            
+            // Show status update buttons
+            const statusRow = document.getElementById('evaluatorStatusRow');
+            statusRow.style.display = 'block';
+            
+            // Show evaluator prompt section
+            const evaluatorPromptRow = document.getElementById('evaluatorPromptRow');
+            evaluatorPromptRow.style.display = 'block';
+            const evaluatorPromptContainer = document.getElementById('modalTaskEvaluatorPromptContainer');
+            const basePrompt = \`You are my coding assistant for the Wyshbone Tower repl.
+Implement \${task.id}: \${task.title}.
+\${task.description}
+Build on all previous EVAL tasks.
+Produce actual code, not instructions.\`;
+            evaluatorPromptContainer.innerHTML = \`<div class="prompt-container">\${escapeHtml(basePrompt)}</div>\`;
+          } else {
+            document.getElementById('evaluatorSummaryRow').style.display = 'none';
+            document.getElementById('evaluatorStatusRow').style.display = 'none';
+            document.getElementById('evaluatorPromptRow').style.display = 'none';
+          }
 
           const promptContainer = document.getElementById('modalTaskPromptContainer');
           const copyBtn = document.getElementById('copyPromptBtn');
@@ -635,6 +740,8 @@ function renderDashboard(state, tasksState) {
           }
 
           document.getElementById('copyFeedback').style.display = 'none';
+          document.getElementById('copyEvaluatorFeedback').style.display = 'none';
+          document.getElementById('statusUpdateFeedback').style.display = 'none';
           document.getElementById('taskModal').classList.add('active');
         }
 
@@ -676,6 +783,100 @@ function renderDashboard(state, tasksState) {
             btn.classList.remove('success');
           }, 2000);
         }
+
+        function copyEvaluatorPromptToClipboard() {
+          const taskId = document.getElementById('modalTaskId').textContent;
+          const task = tasksMap.get(taskId);
+          
+          if (!task || task.app !== 'evaluator') {
+            showCopyEvaluatorFeedback('Not an evaluator task!', false);
+            return;
+          }
+
+          const basePrompt = \`You are my coding assistant for the Wyshbone Tower repl.
+Implement \${task.id}: \${task.title}.
+\${task.description}
+Build on all previous EVAL tasks.
+Produce actual code, not instructions.\`;
+
+          navigator.clipboard.writeText(basePrompt).then(() => {
+            showCopyEvaluatorFeedback('✓ Copied!', true);
+          }).catch(err => {
+            showCopyEvaluatorFeedback('Failed to copy', false);
+            console.error('Copy failed:', err);
+          });
+        }
+
+        function showCopyEvaluatorFeedback(message, success) {
+          const feedback = document.getElementById('copyEvaluatorFeedback');
+          const btn = document.getElementById('copyEvaluatorPromptBtn');
+          
+          feedback.textContent = message;
+          feedback.style.display = 'inline-block';
+          feedback.style.color = success ? '#22c55e' : '#ef4444';
+          
+          if (success) {
+            btn.classList.add('success');
+          }
+
+          setTimeout(() => {
+            feedback.style.display = 'none';
+            btn.classList.remove('success');
+          }, 2000);
+        }
+
+        async function updateTaskStatus(newStatus) {
+          const taskId = document.getElementById('modalTaskId').textContent;
+          const feedbackEl = document.getElementById('statusUpdateFeedback');
+          
+          try {
+            feedbackEl.textContent = 'Updating...';
+            feedbackEl.style.color = '#6b7280';
+            feedbackEl.style.display = 'block';
+
+            const response = await fetch(\`/tasks/\${taskId}/status\`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ status: newStatus })
+            });
+
+            if (!response.ok) {
+              throw new Error('Failed to update status');
+            }
+
+            const result = await response.json();
+            
+            // Update the task in the local map
+            const task = tasksMap.get(taskId);
+            if (task) {
+              task.status = newStatus;
+            }
+            
+            // Update the display
+            document.getElementById('modalTaskStatus').textContent = newStatus.toUpperCase().replace('_', ' ');
+            
+            feedbackEl.textContent = '✓ Status updated! Refresh page to see changes.';
+            feedbackEl.style.color = '#22c55e';
+            
+            setTimeout(() => {
+              feedbackEl.style.display = 'none';
+            }, 3000);
+          } catch (error) {
+            console.error('Error updating status:', error);
+            feedbackEl.textContent = '✗ Failed to update status';
+            feedbackEl.style.color = '#ef4444';
+          }
+        }
+
+        // Add status button event listeners
+        document.querySelectorAll('.status-btn').forEach(btn => {
+          btn.addEventListener('click', function() {
+            const newStatus = this.getAttribute('data-status');
+            updateTaskStatus(newStatus);
+          });
+        });
 
         function escapeHtml(text) {
           const div = document.createElement('div');
@@ -729,13 +930,21 @@ app.get('/critical-path.json', (req, res) => {
   });
 });
 
+app.get('/evaluator-tasks.json', (req, res) => {
+  const evaluatorTasks = tasksManager.getEvaluatorTasks();
+  res.json({
+    total: evaluatorTasks.length,
+    tasks: evaluatorTasks
+  });
+});
+
 app.post('/tasks/:id/status', async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  if (!status || !['planned', 'in_progress', 'done', 'blocked'].includes(status)) {
+  if (!status || !['planned', 'in_progress', 'done', 'blocked', 'not_started'].includes(status)) {
     return res.status(400).json({
-      error: 'Invalid status. Must be one of: planned, in_progress, done, blocked'
+      error: 'Invalid status. Must be one of: planned, in_progress, done, blocked, not_started'
     });
   }
 
