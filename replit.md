@@ -71,6 +71,35 @@ Server runs on port defined by `PORT` environment variable (default: 3000).
 
 ## Recent Changes
 
+- 2025-11-15: EVAL-001B: Interactive Debugging Console with Runs Tracking
+  - **React Dashboard Integration**: Added Vite middleware to serve React SPA at `/dashboard`
+    - Hybrid architecture: Server-rendered routes (`/status`) + React app (`/dashboard`, `/`)
+    - Seamless hot module replacement during development
+  - **Runs Database & API**: 
+    - Created `runs` table with auto-generated IDs and source tracking
+    - POST /tower/runs auto-generates run IDs, defaults source to "MANUAL"
+    - GET /tower/runs returns recent runs (limit parameter supported)
+    - GET /tower/runs/:id retrieves specific run details
+  - **Interactive Console UI**:
+    - StatusDashboard page with two-column layout (responsive grid)
+    - Left: Tower Status metrics + Recent Runs table with real-time data
+    - Right: Sticky Evaluator Console displaying active investigations
+    - RecentRunsTable component with "Investigate" buttons for each run
+  - **Investigation Workflow**:
+    - Click "Investigate" → Dialog opens for notes entry
+    - Submit → Creates investigation linked to run (enriched context)
+    - EvaluatorConsole polls investigation endpoint every 2s
+    - Displays run context, user notes, diagnosis, and patch suggestions
+    - Polling auto-stops when diagnosis complete (max 30 attempts / 60s)
+  - **EvaluatorContext**: React context for sharing active investigation across components
+  - **End-to-End Testing**: Playwright tests confirm full workflow from UI to API
+  - **User Experience**: Chat-like bubble interface for investigation results, copy-to-clipboard for patches
+  - Architecture notes:
+    - Page title set to "Wyshbone Tower - Evaluator Console"
+    - All database operations flow through shared persistence layer (runStore, storeInvestigation)
+    - Error handling for missing API keys (graceful degradation)
+    - Ready for integration with actual run logging system
+
 - 2025-11-15: EVAL-001: Minimal Evaluator v0 implementation
   - Created complete evaluator foundation layer in `src/evaluator/` directory
   - Implemented investigation system with PostgreSQL database storage:
