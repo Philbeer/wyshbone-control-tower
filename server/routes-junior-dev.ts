@@ -1,12 +1,12 @@
 import express from 'express';
-import { PatchEvaluator } from '../src/evaluator/patchEvaluator';
+import { PatchEvaluator } from '../src/evaluator/patchEvaluator.ts';
 import {
   buildDevBrief,
   createPatchSuggestion,
   evaluatePatchSuggestion,
   updatePatchSuggestionStatus,
   getPatchSuggestionsForInvestigation,
-} from '../src/evaluator/juniorDev';
+} from '../src/evaluator/juniorDev.ts';
 
 const router = express.Router();
 

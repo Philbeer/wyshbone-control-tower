@@ -132,6 +132,12 @@ export function EvaluatorConsole() {
   useEffect(() => {
     if (activeInvestigationId) {
       loadPatchSuggestions();
+      
+      const pollInterval = setInterval(() => {
+        loadPatchSuggestions();
+      }, 5000);
+      
+      return () => clearInterval(pollInterval);
     } else {
       setPatchSuggestions([]);
     }

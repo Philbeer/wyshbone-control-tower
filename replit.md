@@ -71,6 +71,57 @@ Server runs on port defined by `PORT` environment variable (default: 3000).
 
 ## Recent Changes
 
+- 2025-11-15: EVAL-005: Junior Developer Agent Integration
+  - **Complete Patch Lifecycle**: Trackable path from Investigation → suggested patch → evaluation → approval → applied change
+  - **New Modules**:
+    - src/evaluator/juniorDev.ts: Helper functions for dev briefs, patch suggestions, and evaluation
+      - buildDevBrief(): Generates comprehensive context for developers/agents
+      - createPatchSuggestion(): Records patch suggestion in database
+      - evaluatePatchSuggestion(): Evaluates using existing EVAL-004 pipeline
+      - updatePatchSuggestionStatus(): Updates status with validation
+      - getPatchSuggestionsForInvestigation(): Lists all suggestions with evaluations
+    - server/routes-junior-dev.ts: Four API endpoints for patch workflow
+  - **Database Schema**: Added patch_suggestions table
+    - Links to investigations and patch evaluations
+    - Tracks suggestion lifecycle: suggested → evaluating → approved/rejected → applied
+    - Stores source (human/agent/auto), summary, patch text, external links
+    - Maintains audit trail with created/updated timestamps
+  - **API Endpoints**:
+    - GET /tower/investigations/:id/dev-brief: Generate developer brief with investigation context
+    - POST /tower/investigations/:id/patch-suggestions: Create patch suggestion (with optional auto-evaluation)
+    - GET /tower/investigations/:id/patch-suggestions: List all suggestions for investigation
+    - POST /tower/patch-suggestions/:id/status: Update suggestion status (applied/rejected)
+  - **Dev Brief Content**:
+    - Investigation details (ID, trigger, run ID, notes, diagnosis)
+    - Run context (test ID, last status, previous status, response sample)
+    - Recent error count and duration metrics
+    - Full run logs and metadata
+  - **Status Workflow**:
+    - suggested: Initial creation
+    - evaluating: Patch being tested via EVAL-004
+    - approved/rejected: Evaluation complete (based on gatekeeper rules)
+    - applied: Human confirms patch was applied to codebase
+  - **UI Integration** (client/src/components/EvaluatorConsole.tsx):
+    - "View Dev Brief / Patch Prompt" button in investigation panel
+    - Dev brief displayed in modal dialog with copy-to-clipboard
+    - Patch suggestions section showing all suggestions with status badges
+    - Evaluation reasons summary (first 3 reasons)
+    - External links to commits/PRs when available
+  - **Status Validation**:
+    - Cannot mark rejected suggestions as applied
+    - Must evaluate before marking applied
+    - Only approved suggestions can be marked applied
+  - **Integration**:
+    - Uses EVAL-004 PatchEvaluator for automated testing
+    - Links to EVAL-001 investigations
+    - Stores evaluation results from EVAL-002 behaviour tests
+    - Respects EVAL-003 auto-detection triggers in evaluation
+  - Architecture:
+    - Zero breaking changes to EVAL-001/002/003/004
+    - Tower acts as record-keeper, Replit/Git remains source of truth
+    - Human-in-the-loop for final approval and application
+    - Complete observability with [JuniorDevRoutes] logs
+
 - 2025-11-15: EVAL-004: Patch Quality + Regression Protection (Mode C: Strict Gatekeeper)
   - **Patch Evaluation Pipeline**: Complete CI/CD gatekeeper that evaluates patches before application
   - **New Modules**:

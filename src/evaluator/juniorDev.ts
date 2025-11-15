@@ -5,7 +5,8 @@ import {
   patchEvaluations,
   behaviourTestRuns,
   type PatchSuggestion,
-  type Investigation
+  type Investigation,
+  type PatchEvaluation
 } from "../../shared/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { getLastRunForTest, getRecentErrorsForTest } from "./runLogger";
@@ -77,13 +78,15 @@ export async function buildDevBrief(investigationId: string): Promise<DevBrief> 
         ? String(testRun.rawLog.response)
         : '';
 
+      const parsedDuration = testRun.durationMs ? parseInt(testRun.durationMs, 10) : null;
+      
       brief.runContext = {
         testId,
         lastStatus: testRun.status,
         previousStatus,
         lastResponseSample: responseText ? responseText.substring(0, 200) : undefined,
         recentErrors: recentErrors.length,
-        durationMs: testRun.durationMs ? parseInt(testRun.durationMs, 10) : undefined,
+        durationMs: parsedDuration !== null && !isNaN(parsedDuration) ? parsedDuration : undefined,
       };
     }
   }
@@ -141,25 +144,41 @@ export async function evaluatePatchSuggestion(
     .set({ status: "evaluating", updatedAt: new Date() })
     .where(eq(patchSuggestions.id, suggestionId));
 
-  const evalResult = await patchEvaluator.evaluatePatch({
-    patch: suggestion.patchText,
-  });
+  try {
+    const evalResult = await patchEvaluator.evaluatePatch({
+      patch: suggestion.patchText,
+    });
 
-  await db
-    .update(patchSuggestions)
-    .set({
-      status: evalResult.status === "approved" ? "approved" : "rejected",
-      patchEvaluationId: evalResult.id,
-      meta: {
-        ...(suggestion.meta ?? {}),
-        evaluationReasons: evalResult.reasons,
-        riskLevel: evalResult.riskLevel,
-      },
-      updatedAt: new Date(),
-    })
-    .where(eq(patchSuggestions.id, suggestionId));
+    await db
+      .update(patchSuggestions)
+      .set({
+        status: evalResult.status === "approved" ? "approved" : "rejected",
+        patchEvaluationId: evalResult.id,
+        meta: {
+          ...(suggestion.meta ?? {}),
+          evaluationReasons: evalResult.reasons,
+          riskLevel: evalResult.riskLevel,
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(patchSuggestions.id, suggestionId));
 
-  return { suggestionId, evaluation: evalResult };
+    return { suggestionId, evaluation: evalResult };
+  } catch (error) {
+    await db
+      .update(patchSuggestions)
+      .set({
+        status: "suggested",
+        meta: {
+          ...(suggestion.meta ?? {}),
+          evaluationError: error instanceof Error ? error.message : 'Unknown error',
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(patchSuggestions.id, suggestionId));
+    
+    throw error;
+  }
 }
 
 export async function updatePatchSuggestionStatus(
@@ -217,7 +236,7 @@ export async function updatePatchSuggestionStatus(
 
 export async function getPatchSuggestionsForInvestigation(
   investigationId: string
-): Promise<Array<PatchSuggestion & { evaluation?: any }>> {
+): Promise<Array<PatchSuggestion & { evaluation?: PatchEvaluation | null }>> {
   const suggestions = await db
     .select()
     .from(patchSuggestions)
@@ -227,12 +246,14 @@ export async function getPatchSuggestionsForInvestigation(
   const enrichedSuggestions = await Promise.all(
     suggestions.map(async (suggestion) => {
       if (suggestion.patchEvaluationId) {
-        const evaluation = await db.query.patchEvaluations.findFirst({
-          where: eq(patchEvaluations.id, suggestion.patchEvaluationId),
-        });
-        return { ...suggestion, evaluation };
+        const [evaluation] = await db
+          .select()
+          .from(patchEvaluations)
+          .where(eq(patchEvaluations.id, suggestion.patchEvaluationId))
+          .limit(1);
+        return { ...suggestion, evaluation: evaluation || null };
       }
-      return suggestion;
+      return { ...suggestion, evaluation: null };
     })
   );
 
