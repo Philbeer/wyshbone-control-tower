@@ -70,10 +70,11 @@ async function callWyshboneUI(
     ],
   };
 
-  const response = await fetch(`${uiSource.baseUrl}/api/chat`, {
+  const response = await fetch(`${uiSource.baseUrl}/api/tower/chat-test`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'X-EXPORT-KEY': uiSource.exportKey,
     },
     body: JSON.stringify(chatRequest),
   });
@@ -83,6 +84,13 @@ async function callWyshboneUI(
     throw new Error(`UI API returned ${response.status}: ${errorText}`);
   }
 
+  // Handle streaming event-stream response
+  const contentType = response.headers.get('content-type');
+  if (contentType && contentType.includes('text/event-stream')) {
+    return await parseStreamingResponse(response);
+  }
+
+  // Fallback for non-streaming responses
   const data = await response.json();
   
   if (typeof data === 'string') {
@@ -98,6 +106,61 @@ async function callWyshboneUI(
   }
   
   return JSON.stringify(data);
+}
+
+async function parseStreamingResponse(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('Response body is not readable');
+  }
+
+  const decoder = new TextDecoder();
+  let fullText = '';
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      
+      // Process complete SSE events
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6); // Remove 'data: ' prefix
+          
+          if (data === '[DONE]') {
+            continue;
+          }
+
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.content) {
+              fullText += parsed.content;
+            } else if (parsed.delta?.content) {
+              fullText += parsed.delta.content;
+            } else if (typeof parsed === 'string') {
+              fullText += parsed;
+            }
+          } catch {
+            // If not JSON, treat as plain text
+            fullText += data;
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return fullText.trim();
 }
 
 async function testGreeting(): Promise<BehaviourTestResult> {
