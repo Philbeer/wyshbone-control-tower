@@ -3,13 +3,18 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { fetchBehaviourTests, runAllBehaviourTests, runSingleBehaviourTest, type BehaviourTestSummary } from '@/api/behaviourTests';
-import { Play, RotateCw } from 'lucide-react';
+import { useEvaluator } from '@/contexts/EvaluatorContext';
+import { useToast } from '@/hooks/use-toast';
+import { Play, RotateCw, Search } from 'lucide-react';
 
 export function BehaviourTestsCard() {
   const [tests, setTests] = useState<BehaviourTestSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [runningAll, setRunningAll] = useState(false);
   const [runningTests, setRunningTests] = useState<Set<string>>(new Set());
+  const [investigatingTests, setInvestigatingTests] = useState<Set<string>>(new Set());
+  const { setActiveInvestigationId } = useEvaluator();
+  const { toast } = useToast();
 
   const loadTests = async () => {
     try {
@@ -48,6 +53,43 @@ export function BehaviourTestsCard() {
       console.error(`Failed to run test ${testId}:`, error);
     } finally {
       setRunningTests(prev => {
+        const next = new Set(prev);
+        next.delete(testId);
+        return next;
+      });
+    }
+  };
+
+  const handleInvestigate = async (testId: string) => {
+    try {
+      setInvestigatingTests(prev => new Set(prev).add(testId));
+      
+      const response = await fetch(`/tower/behaviour-tests/${testId}/investigate`, {
+        method: 'POST',
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to create investigation');
+      }
+      
+      const investigation = await response.json();
+      
+      setActiveInvestigationId(investigation.id);
+      
+      toast({
+        title: "Investigation created",
+        description: `Investigation for "${investigation.runMeta?.testName || testId}" is now active`,
+      });
+    } catch (error) {
+      console.error(`Failed to investigate test ${testId}:`, error);
+      toast({
+        title: "Investigation failed",
+        description: error instanceof Error ? error.message : "Failed to create investigation",
+        variant: "destructive",
+      });
+    } finally {
+      setInvestigatingTests(prev => {
         const next = new Set(prev);
         next.delete(testId);
         return next;
@@ -127,6 +169,7 @@ export function BehaviourTestsCard() {
         <div className="space-y-3">
           {tests.map((item) => {
             const isRunning = runningTests.has(item.test.id);
+            const isInvestigating = investigatingTests.has(item.test.id);
             return (
               <div
                 key={item.test.id}
@@ -166,19 +209,34 @@ export function BehaviourTestsCard() {
                     </p>
                   )}
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleRunSingle(item.test.id)}
-                  disabled={isRunning}
-                  data-testid={`button-run-test-${item.test.id}`}
-                >
-                  {isRunning ? (
-                    <RotateCw className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Play className="h-4 w-4" />
-                  )}
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleInvestigate(item.test.id)}
+                    disabled={isInvestigating}
+                    data-testid={`button-investigate-test-${item.test.id}`}
+                  >
+                    {isInvestigating ? (
+                      <RotateCw className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Search className="h-4 w-4" />
+                    )}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleRunSingle(item.test.id)}
+                    disabled={isRunning}
+                    data-testid={`button-run-test-${item.test.id}`}
+                  >
+                    {isRunning ? (
+                      <RotateCw className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Play className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
               </div>
             );
           })}
