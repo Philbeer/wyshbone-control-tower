@@ -29,6 +29,13 @@ export type DevBrief = {
     recentErrors?: number;
     durationMs?: number;
   };
+  // EVAL-008: Single-test focus for surgical patches
+  focusedScope?: {
+    kind: 'behaviour-test';
+    testId: string;
+    testName: string;
+    scopeNote: string;
+  };
 };
 
 export async function buildDevBrief(investigationId: string): Promise<DevBrief> {
@@ -51,7 +58,52 @@ export async function buildDevBrief(investigationId: string): Promise<DevBrief> 
     runMeta: inv.run_meta || {},
   };
 
-  if (inv.run_id) {
+  // EVAL-008: Check for single-test focus in run_meta
+  const runMeta = inv.run_meta as any;
+  const hasSingleTestFocus = runMeta?.focus?.kind === 'behaviour-test';
+  
+  if (hasSingleTestFocus) {
+    const focusTestId = runMeta.focus.testId;
+    const focusTestName = runMeta.focus.testName || focusTestId;
+    
+    brief.focusedScope = {
+      kind: 'behaviour-test',
+      testId: focusTestId,
+      testName: focusTestName,
+      scopeNote: `Scope: Single behaviour test "${focusTestName}". Your job is to fix ONLY this test and avoid changing unrelated behaviours.`,
+    };
+    
+    // When focused on a single test, fetch ONLY that test's run context
+    const focusedTestRuns = await db
+      .select()
+      .from(behaviourTestRuns)
+      .where(eq(behaviourTestRuns.testId, focusTestId))
+      .orderBy(desc(behaviourTestRuns.createdAt))
+      .limit(5);
+    
+    if (focusedTestRuns.length > 0) {
+      const testRun = focusedTestRuns[0];
+      const lastRun = await getLastRunForTest(focusTestId);
+      const recentErrors = await getRecentErrorsForTest(focusTestId, 5);
+      const previousStatus = focusedTestRuns.length > 1 ? focusedTestRuns[1].status : undefined;
+
+      const responseText = testRun.rawLog && typeof testRun.rawLog === 'object' && 'response' in testRun.rawLog
+        ? String(testRun.rawLog.response)
+        : '';
+
+      const parsedDuration = testRun.durationMs ? parseInt(testRun.durationMs, 10) : null;
+      
+      brief.runContext = {
+        testId: focusTestId,
+        lastStatus: testRun.status,
+        previousStatus,
+        lastResponseSample: responseText ? responseText.substring(0, 200) : undefined,
+        recentErrors: recentErrors.length,
+        durationMs: parsedDuration !== null && !isNaN(parsedDuration) ? parsedDuration : undefined,
+      };
+    }
+  } else if (inv.run_id) {
+    // Legacy path: use run_id to fetch test context
     const testRuns = await db
       .select()
       .from(behaviourTestRuns)
@@ -110,6 +162,19 @@ export async function createPatchSuggestion(params: {
     throw new Error(`Investigation ${params.investigationId} not found`);
   }
 
+  // EVAL-008: Copy focus metadata from investigation to patch suggestion
+  const runMeta = inv.run_meta as any;
+  const meta: any = {};
+  
+  if (runMeta?.focus?.kind === 'behaviour-test') {
+    meta.focus = {
+      kind: runMeta.focus.kind,
+      testId: runMeta.focus.testId,
+      testName: runMeta.focus.testName,
+    };
+    meta.scopeNote = `Scoped to single behaviour test: ${runMeta.focus.testName} (${runMeta.focus.testId})`;
+  }
+
   const [row] = await db
     .insert(patchSuggestions)
     .values({
@@ -120,7 +185,7 @@ export async function createPatchSuggestion(params: {
       summary: params.summary ?? null,
       externalLink: params.externalLink ?? null,
       status: "suggested",
-      meta: {},
+      meta,
     })
     .returning();
 
@@ -145,8 +210,18 @@ export async function evaluatePatchSuggestion(
     .where(eq(patchSuggestions.id, suggestionId));
 
   try {
+    // EVAL-008: Pass focus metadata to evaluator for logging
+    const suggestionMeta = suggestion.meta as any;
+    const focusMeta = suggestionMeta?.focus ? {
+      kind: suggestionMeta.focus.kind,
+      testId: suggestionMeta.focus.testId,
+      testName: suggestionMeta.focus.testName,
+      scopeNote: suggestionMeta.scopeNote,
+    } : undefined;
+    
     const evalResult = await patchEvaluator.evaluatePatch({
       patch: suggestion.patchText,
+      focusMeta,
     });
 
     await db

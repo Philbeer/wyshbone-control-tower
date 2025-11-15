@@ -33,15 +33,37 @@ function buildUserPrompt(brief: DevBrief): string {
     runMeta: brief.runMeta,
   }, null, 2);
 
+  // EVAL-008: Add single-test focus instructions when applicable
+  const isSingleTestFocused = brief.focusedScope?.kind === 'behaviour-test';
+  
+  let taskInstructions = '';
+  if (isSingleTestFocused) {
+    const testName = brief.focusedScope!.testName;
+    const testId = brief.focusedScope!.testId;
+    taskInstructions = `CRITICAL - SINGLE TEST SCOPE:
+${brief.focusedScope!.scopeNote}
+
+Your task:
+- Fix ONLY the behaviour test "${testName}" (${testId})
+- Make the SMALLEST possible change to make this single test pass
+- Do NOT refactor or touch unrelated behaviour tests or modules
+- Do NOT make changes that affect other behaviour tests
+- Prefer small, local edits over large structural changes
+- Assume the rest of the system is correct unless absolutely required to fix "${testName}"
+- Only change the parts of Wyshbone UI or Supervisor that determine THIS test's behaviour and responses`;
+  } else {
+    taskInstructions = `Your task:
+- Produce a minimal unified diff that fixes this behaviour failure
+- Only change the parts of Wyshbone UI or Supervisor that determine the assistant's behaviour and responses
+- Keep the diff as small and safe as possible
+- Focus on the specific issue mentioned in the diagnosis`;
+  }
+
   return `Here is an investigation brief for a failing behaviour test:
 
 ${briefJson}
 
-Your task:
-- Produce a minimal unified diff that fixes this behaviour failure
-- Only change the parts of Wyshbone UI or Supervisor that determine the assistant's behaviour and responses
-- Keep the diff as small and safe as possible
-- Focus on the specific issue mentioned in the diagnosis
+${taskInstructions}
 
 Output format:
 - If you can propose a patch: output ONLY the unified diff (starting with "diff --git ...")

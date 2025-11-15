@@ -69,14 +69,21 @@ export async function ensureBehaviourInvestigationForRun(
     }`;
 
     // Ensure run_meta is always populated with behaviour test metadata
+    // EVAL-008: Include single-test focus for surgical patch generation
     const ensuredRunMeta = {
       ...(existing.run_meta || {}),
       agent: 'tower' as const,
       description: `Behaviour test: ${opts.testName}`,
       source: 'behaviour_test',
+      type: 'behaviour-single-test',
       testId: opts.testId,
       testName: opts.testName,
       triggerReason: opts.triggerReason,
+      focus: {
+        kind: 'behaviour-test',
+        testId: opts.testId,
+        testName: opts.testName,
+      },
     };
 
     await db
@@ -135,6 +142,7 @@ export async function ensureBehaviourInvestigationForRun(
   const investigation = await executeInvestigation(trigger, opts.runId, notes);
 
   // Update run_meta to include behaviour test source information
+  // EVAL-008: Include single-test focus for surgical patch generation
   await db
     .update(investigations)
     .set({
@@ -142,9 +150,15 @@ export async function ensureBehaviourInvestigationForRun(
         agent: 'tower' as const,
         description: `Behaviour test: ${opts.testName}`,
         source: 'behaviour_test',
+        type: 'behaviour-single-test',
         testId: opts.testId,
         testName: opts.testName,
         triggerReason: opts.triggerReason,
+        focus: {
+          kind: 'behaviour-test',
+          testId: opts.testId,
+          testName: opts.testName,
+        },
       } as any, // Cast to any because we're adding extra fields beyond the base type
     })
     .where(eq(investigations.id, investigation.id));

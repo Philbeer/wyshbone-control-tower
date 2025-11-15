@@ -10,6 +10,13 @@ import { eq } from "drizzle-orm";
 
 export type PatchEvaluationRequest = {
   patch: string;
+  // EVAL-008: Optional focus metadata for single-test scoped patches
+  focusMeta?: {
+    kind: 'behaviour-test';
+    testId: string;
+    testName: string;
+    scopeNote?: string;
+  };
 };
 
 export type PatchEvaluationResult = {
@@ -106,6 +113,18 @@ export class PatchEvaluator {
 
       const finalStatus = gateDecision.status === 'approved' ? 'approved' : 'rejected';
 
+      // EVAL-008: Include focus metadata in evaluation for observability
+      const evalMeta: any = {
+        latencyRegressions: diff.latencyRegressions,
+        autoDetectTriggers: autoDetectTriggers.map(t => `${t.testId}: ${t.reason}`),
+        riskLevel: gateDecision.riskLevel,
+      };
+      
+      if (request.focusMeta) {
+        evalMeta.focus = request.focusMeta;
+        console.log(`[PatchEvaluator] Evaluated patch for scoped behaviour test: ${request.focusMeta.testName} (${request.focusMeta.testId})`);
+      }
+      
       await db
         .update(patchEvaluations)
         .set({
@@ -115,11 +134,7 @@ export class PatchEvaluator {
           testResultsBefore: beforeResults as any,
           testResultsAfter: afterResults as any,
           investigationIds,
-          evaluationMeta: {
-            latencyRegressions: diff.latencyRegressions,
-            autoDetectTriggers: autoDetectTriggers.map(t => `${t.testId}: ${t.reason}`),
-            riskLevel: gateDecision.riskLevel,
-          },
+          evaluationMeta: evalMeta,
         })
         .where(eq(patchEvaluations.id, evaluationId));
 
