@@ -1,6 +1,7 @@
 import { EvaluatorProvider } from "@/contexts/EvaluatorContext";
 import { EvaluatorConsole } from "@/components/EvaluatorConsole";
 import { RecentRunsTable } from "@/components/RecentRunsTable";
+import { BehaviourTestsCard } from "@/components/BehaviourTestsCard";
 import { TowerNavTabs } from "@/components/TowerNavTabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -51,6 +52,9 @@ export default function StatusDashboard() {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Behaviour Tests */}
+              <BehaviourTestsCard />
 
               {/* Recent Runs Table */}
               <RecentRunsTable />
