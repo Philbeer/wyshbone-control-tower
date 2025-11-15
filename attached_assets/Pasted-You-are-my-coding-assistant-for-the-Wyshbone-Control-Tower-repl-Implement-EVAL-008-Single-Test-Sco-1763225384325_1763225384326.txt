@@ -1,0 +1,179 @@
+You are my coding assistant for the Wyshbone Control Tower repl.
+Implement EVAL-008: Single-Test Scoped Behaviour Auto-Patch Flow.
+
+Context
+
+We already have:
+
+Behaviour tests with Run + Investigate buttons (EVAL-002 + EVAL-007).
+
+Investigations created for behaviour tests, with dedup + run_meta backfill.
+
+Junior Developer + Auto patch (beta) pipeline:
+
+Dev brief (EVAL-005)
+
+Auto patch generator with LLM (EVAL-006)
+
+Patch quality gatekeeper (EVAL-004)
+
+This all works, but patches are still too “global” and often touch multiple behaviours, causing the gatekeeper to reject them.
+
+Goal
+
+When I click Investigate on a specific behaviour test (e.g. greeting-basic) and then click Auto patch (beta) on that investigation:
+
+The investigation is clearly scoped to that single behaviour test.
+
+The dev brief only describes that test and its failures.
+
+The LLM auto-patch generator is instructed to:
+
+Fix only that test.
+
+Make the smallest possible patch.
+
+Avoid changing unrelated behaviour tests or large parts of the code.
+
+The patch still goes through the existing EVAL-004 gatekeeper unchanged, but it’s much more likely to be surgical and acceptable.
+
+1. Encode explicit single-test scope on investigations
+
+We already have behaviour investigations from EVAL-007. Extend them so that each behaviour test investigation includes a clear scope marker in run_meta (or equivalent metadata field):
+
+{
+  type: "behaviour-single-test",
+  behaviourTestId: "<testId>",     // e.g. "greeting-basic"
+  behaviourTestName: "<readable>", // if available
+  focus: {
+    kind: "behaviour-test",
+    testId: "<testId>"
+  }
+}
+
+
+If this already partially exists, standardise it:
+
+Ensure every behaviour-test investigation created from the dashboard always has:
+
+focus.kind === "behaviour-test"
+
+focus.testId set to the current test’s ID.
+
+Update the creation helper for behaviour investigations so this scope is set in one place.
+
+2. Make buildDevBrief() respect the focus
+
+In src/evaluator/juniorDev.ts (or wherever buildDevBrief lives):
+
+Detect when investigation.meta.focus?.kind === "behaviour-test" (or the exact shape you chose).
+
+In that case:
+
+Filter any behaviour test results down to the single test with that testId.
+
+Only include that test’s:
+
+name / id
+
+last status
+
+failure reason
+
+relevant logs
+
+Add a prominent note in the brief, e.g.:
+
+Scope: Single behaviour test <testId>. Your job is to fix this test only and avoid changing unrelated behaviours.
+
+Do not include other behaviour tests in the problem description when a focus is set.
+
+3. Make the auto-patch generator prompt single-test aware
+
+Find the code that builds the LLM prompt for EVAL-006 (auto-patch generator). Extend it:
+
+If investigation.meta.focus?.kind === "behaviour-test":
+
+Add explicit instructions such as:
+
+“Only modify the minimum code necessary to make behaviour test <testId> pass.”
+
+“Do not refactor or touch unrelated behaviours, tests or modules.”
+
+“Prefer small, local edits over large structural changes.”
+
+“Assume the rest of the system is correct unless required to fix <testId>.”
+
+Keep all existing unified-diff validation rules and safety checks intact:
+
+valid diff --git header
+
+@@ hunk markers
+
+/ - content lines, etc.
+
+We are only tightening the scope of what the LLM is asked to do, not weakening validation.
+
+4. Ensure UI really starts from the single test
+
+Behaviour Tests UI already has an Investigate button per test. Confirm / adjust:
+
+Clicking Investigate on a behaviour test:
+
+Creates or reuses a behaviour investigation with the single-test focus metadata above.
+
+Selects that investigation in the Evaluator Console on the right.
+
+In the console, when I click Auto patch (beta):
+
+The patch suggestion created for this investigation is automatically tagged with:
+
+source: "behaviour-auto"
+
+focus copied from the investigation meta.
+
+You don’t need a new button here – just make sure the existing buttons are wired to the scoped metadata.
+
+5. Gatekeeper stays strict, but log the scope
+
+The EVAL-004 patch evaluator should remain unchanged in terms of rules and execution.
+
+Just extend the stored patch evaluation metadata so that:
+
+evaluation.meta.focus mirrors the investigation’s focus (if present).
+
+Human-readable summary mentions, e.g.:
+
+Evaluated patch for scoped behaviour test: greeting-basic.
+
+No behavioural change, just better observability.
+
+6. Acceptance checklist
+
+Before marking EVAL-008 complete, verify:
+
+Creating a behaviour investigation from the dashboard sets focus.kind: "behaviour-test" with the correct testId.
+
+The dev brief for such an investigation talks only about that specific test.
+
+Running Auto patch (beta) on that investigation:
+
+Produces a patch suggestion tagged with the same focus.
+
+Uses a prompt that explicitly tells the LLM to fix only that test.
+
+Gatekeeper still:
+
+Executes all behaviour tests before/after.
+
+Rejects patches that cause new failures or regressions.
+
+Existing global / legacy investigations and patch flows still work and are not broken.
+
+replit.md (and, if used, an EVAL-008_COMPLETE.md) are updated to describe:
+
+The single-test focus metadata.
+
+How dev briefs and auto-patch now respect that scope.
+
+Please implement EVAL-008 with real, production-ready code (no pseudocode).
