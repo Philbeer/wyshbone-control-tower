@@ -1,0 +1,312 @@
+🔧 EVAL-007 Prompt for Replit (Tower repl)
+
+You are my coding assistant for the Wyshbone Tower repl.
+Implement EVAL-007: Behaviour Test → Investigation bridge.
+
+Goal:
+When a behaviour test fails (or times out / errors) the system should be able to create a proper Investigation that flows through the existing junior-dev + auto-patch pipeline. I also need a manual “Investigate” button on each behaviour test row so I can explicitly open an investigation from the dashboard.
+
+This must build on EVAL-001…EVAL-006 without breaking any of them:
+
+EVAL-001: investigations + diagnosis
+
+EVAL-002: behaviour tests harness
+
+EVAL-003: auto-detection rules
+
+EVAL-004: patch gatekeeper
+
+EVAL-005: junior developer suggestions
+
+EVAL-006: LLM auto-patch generator
+
+Please produce real, working code (no pseudo-code or instructions), and keep the implementation as small and local as possible.
+
+1. High-level behaviour
+
+A. Automatic investigations for “serious” behaviour test failures
+
+When /tower/behaviour-tests/run is called and a behaviour test result has:
+
+status === 'fail' or status === 'error' or a timeout as defined by EVAL-003
+AND the run triggers EVAL-003 auto-detection (regression, repeated failure, quality issue, etc.),
+
+then:
+
+Create (or reuse) an Investigation that records:
+
+source: "behaviour-test"
+
+testId: e.g. "greeting-basic"
+
+latestRunId: the id of the behaviour-test run record
+
+status: "open"
+
+title: e.g. Behaviour test "Greeting / onboarding" is failing
+
+summary: short plain-English summary of what went wrong (use existing auto-detection message where possible)
+
+Ensure we don’t spam repeat investigations:
+
+If there’s already an open investigation for the same testId created within the last 24 hours, reuse it instead of creating a new one.
+
+The created investigation should be visible in the Evaluator Console UI and behave exactly like investigations that come from real UI runs (can show dev brief, patch suggestions, etc.).
+
+B. Manual “Investigate” button for each behaviour test
+
+In the Tower dashboard UI (the Behaviour Tests panel where I see greeting-basic, personalisation, etc.):
+
+Add an “Investigate” control for each test (for example a small button or icon to the right of each row).
+
+Clicking it should:
+
+Look up the most recent run for that test (using the existing run logging utilities from EVAL-003/EVAL-004, or add a helper if needed).
+
+Create (or reuse) an Investigation with:
+
+source: "behaviour-test"
+
+testId for that behaviour test
+
+latestRunId (if a recent run exists; if not, still create an investigation but mark that no run data is available)
+
+title: e.g. Manual investigation: behaviour test "Greeting / onboarding"
+
+summary: include that this investigation was manually requested from the Tower UI.
+
+Automatically select/open that investigation in the Evaluator Console panel on the right, so I immediately see:
+
+dev brief button
+
+patch suggestions (once created)
+
+status, notes, etc.
+
+The manual button should work even if the last run was a PASS; in that case the investigation summary should say that the last run passed but was manually flagged.
+
+2. Backend: new helpers + routes
+
+Please keep changes focused and reuse existing infrastructure where possible.
+
+2.1 Investigation helper for behaviour tests
+
+Create a helper module, for example:
+
+src/evaluator/behaviourInvestigations.ts
+
+This module should export something like:
+
+export async function ensureBehaviourInvestigationForRun(opts: {
+  testId: string;
+  testName: string;        // human-readable label, e.g. "Greeting / onboarding"
+  runId?: string;          // optional, if we have a specific run
+  triggerReason: string;   // e.g. "auto-detect: regression", "manual: user clicked Investigate"
+  seriousness: 'info' | 'warning' | 'error';
+  now?: Date;              // for testing; default new Date()
+}): Promise<Investigation>; // or the DTO type used by other code
+
+
+Behaviour:
+
+Check if there is an open investigation with:
+
+source === "behaviour-test" AND testId equal to the given testId
+
+created within the last 24 hours
+
+If found:
+
+Update its latestRunId and append a small note mentioning the new trigger (e.g. another failure, manual click, etc.).
+
+Return the existing investigation.
+
+If not found:
+
+Create a new investigation using the same schema used in EVAL-001 (reuse the same creation path / repository).
+
+Use a clear title and summary:
+
+title: Behaviour test "<testName>" is failing
+
+summary: Auto-created from behaviour test "<testId>" due to: <triggerReason>.
+
+Set source: "behaviour-test" and attach testId & latestRunId in whatever metadata field we already use for investigations.
+
+Return the created investigation.
+
+Make sure this helper uses the same investigation table and types as existing UI/supervisor investigations, so downstream components (dev brief, patch suggestions) work unchanged.
+
+2.2 Wire into auto-detection (EVAL-003)
+
+Locate the code that currently runs behaviour tests and auto-detection, likely in:
+
+src/evaluator/behaviourTests.ts
+
+src/evaluator/autoDetect.ts
+
+and the /tower/behaviour-tests/run route
+
+After a behaviour test result is produced and passed through the EVAL-003 auto-detection logic:
+
+If auto-detect decides the run is “interesting” (fail/error/timeout/regression, etc.) and would normally generate an investigation or log:
+
+Call ensureBehaviourInvestigationForRun(...) with:
+
+testId (e.g. "greeting-basic")
+
+testName (user-friendly label from the test definition)
+
+runId if available
+
+triggerReason derived from the auto-detect rule (e.g. "status: fail", "timeout>10s", "PASS→FAIL regression")
+
+seriousness: 'error' for hard fails, 'warning' for regressions with pass, etc.
+
+This should not change how existing investigations for UI runs are created; it should extend auto-detection so a failing behaviour test results in a proper investigation visible in the UI.
+
+2.3 Manual investigation endpoint
+
+Add a small new route file if needed, e.g.:
+
+server/routes-behaviour-investigate.ts
+
+and mount it from server.js alongside the other Tower routes.
+
+New endpoint:
+
+POST /tower/behaviour-tests/:testId/investigate
+
+Behaviour:
+
+Look up the test metadata by testId from the behaviour test definitions (e.g. name/description).
+
+Use the run logger from EVAL-003/EVAL-004 to fetch the most recent run for that testId (if any).
+
+Call ensureBehaviourInvestigationForRun with:
+
+testId
+
+testName
+
+runId from the last run (if found)
+
+triggerReason: "manual: user clicked Investigate from behaviour tests dashboard"
+
+seriousness: 'info'
+
+Return the investigation DTO in the same shape as other investigation endpoints (so the existing front-end utilities can hydrate it).
+
+Make sure to add basic validation and error handling:
+
+404 if the testId is unknown.
+
+500 logging if investigation creation fails.
+
+3. Front-end: Behaviour Tests → Evaluator Console
+
+Update the Tower front-end (likely in something like client/src/components/EvaluatorConsole.tsx and the component that renders the Behaviour Tests list).
+
+3.1 Add “Investigate” action per behaviour test
+
+On each behaviour test row (greeting / onboarding, personalisation, basic lead search, monitoring setup):
+
+Add a small action, e.g. a button or icon:
+
+Label: "Investigate" or a magnifier icon with tooltip "Investigate this test".
+
+When clicked:
+
+Call POST /tower/behaviour-tests/:testId/investigate.
+
+While the request is in flight, show a small loading indicator on that row.
+
+On success:
+
+Take the returned investigation and:
+
+Add it to whatever investigation list/store the Evaluator Console uses.
+
+Mark it as the currently selected investigation.
+
+The right-hand Evaluator Console should immediately display:
+
+investigation title & summary
+
+dev brief button
+
+patch suggestions (when created)
+
+status, etc.
+
+On error:
+
+Show a small toast or inline error message: "Could not create investigation for this test. Please check the logs."
+
+Reuse the existing state management & selection logic from where you already open investigations for UI runs.
+
+3.2 Badge / indicator for tests with open investigation
+
+Optional but useful: if we already have the list of investigations in memory, decorate the Behaviour Test rows:
+
+If there is an open investigation for a given testId:
+
+Show a subtle badge, e.g. "Under investigation" or an icon.
+
+Clicking the badge should simply select that existing investigation in the Evaluator Console instead of creating a new one.
+
+This makes it easy to see which tests are already being worked on.
+
+4. Acceptance criteria
+
+Please verify all of the following before marking EVAL-007 complete:
+
+Manual Investigate button:
+
+From the Behaviour Tests panel, clicking Investigate on greeting / onboarding:
+
+Creates (or reuses) an investigation with source: "behaviour-test" and the correct testId.
+
+Immediately opens it in the Evaluator Console.
+
+I can then click “View Dev Brief” and “Create Patch Suggestion” and the full EVAL-005/006 pipeline works.
+
+Auto investigations from failing tests:
+
+Click Run all when greeting / onboarding and/or personalisation are failing.
+
+At least one new investigation is automatically created for the failing tests (unless one already exists from the last 24 hours).
+
+Those investigations appear in the Evaluator Console list with clear titles and summaries.
+
+Deduplication:
+
+Re-running failing behaviour tests multiple times within a short window does not create dozens of investigations for the same testId.
+
+Instead, the existing investigation is updated (notes/latestRunId), and that is what I see in the UI.
+
+Compatibility:
+
+Existing UI-origin investigations and patch suggestions continue to work exactly as before.
+
+EVAL-003 auto-detection logic is still applied; EVAL-004 gatekeeper still protects against bad patches.
+
+Docs:
+
+Add a short section to replit.md (and/or EVAL-007_COMPLETE.md if you create one) explaining:
+
+How behaviour test failures now create investigations.
+
+How to use the new “Investigate” button.
+
+How this ties into the junior dev + auto-patch pipelines.
+
+Please keep the implementation tight, type-safe, and consistent with the existing EVAL modules. Focus on:
+
+minimal new concepts (reuse existing investigation + junior dev infrastructure),
+
+clear naming (behaviour-test–specific helpers),
+
+and small, testable units.
+
+Produce complete code for any new or modified files so I can copy/paste or review diffs easily in Replit.
