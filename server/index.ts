@@ -14,9 +14,9 @@ const dashboardPath = path.join(process.cwd(), 'server.js');
 console.log('🚀 Starting Wyshbone Status Dashboard...');
 console.log(`📁 Dashboard location: ${dashboardPath}`);
 
-// Execute the dashboard server
+// Execute the dashboard server using tsx to support TypeScript imports
 try {
-  execSync(`node ${dashboardPath}`, { stdio: 'inherit' });
+  execSync(`npx tsx ${dashboardPath}`, { stdio: 'inherit' });
 } catch (error) {
   console.error('Failed to start dashboard:', error);
   process.exit(1);

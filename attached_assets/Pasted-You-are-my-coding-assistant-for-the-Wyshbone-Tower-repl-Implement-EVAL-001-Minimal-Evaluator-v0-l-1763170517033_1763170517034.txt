@@ -1,0 +1,540 @@
+You are my coding assistant for the Wyshbone Tower repl.
+Implement EVAL-001: Minimal Evaluator v0 (logging + investigations).
+
+Goal
+
+Create the foundation layer of the Evaluator in Tower:
+
+Log UI/Supervisor runs with run IDs (using existing logging if available).
+
+Allow Tower to create Investigations for a specific run (manual trigger only).
+
+For each Investigation, bundle:
+
+run logs
+
+basic run metadata (who, when, which agent)
+
+optional code snapshots from UI/Supervisor if available
+
+Send that bundle to GPT using Tower’s existing OpenAI client.
+
+Store the returned diagnosis and patch suggestions in Tower’s DB.
+
+Provide simple API endpoints + dashboard views to list and inspect Investigations.
+
+No automated tests, behaviour checks, or auto-detection in this task.
+Do not build auto-patching.
+Build on any existing Tower structure (status dashboard, task view, etc.).
+Produce actual code, not instructions.
+
+1. Evaluator directory & types
+
+Create a new folder:
+
+src/evaluator/
+
+Add a file src/evaluator/types.ts defining core types:
+
+export type InvestigationTrigger =
+  | "manual"
+  | "timeout"
+  | "tool_error"
+  | "behaviour_flag";
+
+export interface Investigation {
+  id: string;
+  createdAt: Date;
+  trigger: InvestigationTrigger;
+  runId?: string;
+  notes?: string;
+
+  // Raw data we bundle for GPT
+  runLogs: any[]; // structured log entries
+  runMeta?: {
+    userId?: string;
+    sessionId?: string;
+    agent?: "ui" | "supervisor" | "tower";
+    description?: string;
+  };
+
+  uiSnapshot?: any | null;
+  supervisorSnapshot?: any | null;
+
+  // GPT output
+  diagnosis?: string | null;
+  patchSuggestion?: string | null;
+}
+
+
+Also export helper types:
+
+export interface SnapshotBundle {
+  uiSnapshot?: any | null;
+  supervisorSnapshot?: any | null;
+}
+
+export interface DiagnosticResult {
+  diagnosis: string;
+  patchSuggestion: string;
+}
+
+2. Run log access helper
+
+If Tower already has a way to fetch logs for a run, wrap it; if not, create a simple helper that queries the existing logging store (DB table, log service, etc.).
+
+Create src/evaluator/fetchRunLogs.ts:
+
+import { db } from "../db"; // or wherever Tower’s DB client lives
+
+export async function fetchRunLogs(runId?: string): Promise<any[]> {
+  if (!runId) return [];
+
+  // Adjust to Tower’s actual log table / structure
+  // Example assumes a table "run_logs" with columns: run_id, timestamp, level, payload (JSON)
+  const rows = await db.query.run_logs.findMany({
+    where: (logs, { eq }) => eq(logs.run_id, runId),
+    orderBy: (logs, { asc }) => asc(logs.timestamp),
+  });
+
+  return rows.map((r) => ({
+    timestamp: r.timestamp,
+    level: r.level,
+    payload: r.payload,
+  }));
+}
+
+
+If Tower uses a different logging mechanism, adapt this helper to that structure; but keep the function name/signature the same.
+
+3. Optional code snapshot fetcher
+
+We want to optionally include code/config snapshots from UI and Supervisor when available, but this must fail gracefully if those endpoints are not yet implemented.
+
+Create src/evaluator/fetchSnapshots.ts:
+
+import fetch from "node-fetch";
+import type { SnapshotBundle } from "./types";
+
+const UI_SNAPSHOT_URL =
+  process.env.WYSHBONE_UI_SNAPSHOT_URL ??
+  "http://wyshbone-ui/internal/code-snapshot";
+const SUPERVISOR_SNAPSHOT_URL =
+  process.env.WYSHBONE_SUPERVISOR_SNAPSHOT_URL ??
+  "http://wyshbone-supervisor/internal/code-snapshot";
+
+async function safeFetchJson(url: string): Promise<any | null> {
+  try {
+    const res = await fetch(url, { timeout: 5000 });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchSnapshotsForRun(
+  runId?: string
+): Promise<SnapshotBundle> {
+  // runId is currently unused but kept in case we later support per-run snapshots
+  const [uiSnapshot, supervisorSnapshot] = await Promise.all([
+    safeFetchJson(UI_SNAPSHOT_URL),
+    safeFetchJson(SUPERVISOR_SNAPSHOT_URL),
+  ]);
+
+  return {
+    uiSnapshot,
+    supervisorSnapshot,
+  };
+}
+
+
+This way, if snapshot endpoints don’t exist yet, the Evaluator still works (snapshots just come back as null).
+
+4. Investigation creation
+
+Create src/evaluator/createInvestigation.ts:
+
+import { randomUUID } from "crypto";
+import type { Investigation, InvestigationTrigger } from "./types";
+import { fetchRunLogs } from "./fetchRunLogs";
+
+export async function createInvestigation(
+  trigger: InvestigationTrigger,
+  runId?: string,
+  notes?: string
+): Promise<Investigation> {
+  const logs = await fetchRunLogs(runId);
+
+  const investigation: Investigation = {
+    id: randomUUID(),
+    createdAt: new Date(),
+    trigger,
+    runId,
+    notes,
+    runLogs: logs,
+    runMeta: undefined,
+    uiSnapshot: null,
+    supervisorSnapshot: null,
+    diagnosis: null,
+    patchSuggestion: null,
+  };
+
+  return investigation;
+}
+
+
+You can later expand runMeta when you have more metadata for each run (user, session, agent, etc.).
+
+5. OpenAI diagnostic call
+
+Use Tower’s existing OpenAI client if one exists (e.g. src/lib/openai.ts). If not, create a simple client around openai or @openai/openai.
+
+Create src/evaluator/runDiagnosis.ts:
+
+import type { Investigation, DiagnosticResult } from "./types";
+import { fetchSnapshotsForRun } from "./fetchSnapshots";
+import { openai } from "../lib/openai"; // adjust import path to existing client
+
+function buildInvestigationPrompt(inv: Investigation, snapshots: any) {
+  return {
+    role: "user" as const,
+    content: JSON.stringify(
+      {
+        investigation: {
+          id: inv.id,
+          trigger: inv.trigger,
+          runId: inv.runId,
+          notes: inv.notes,
+        },
+        runMeta: inv.runMeta,
+        runLogs: inv.runLogs,
+        snapshots,
+      },
+      null,
+      2
+    ),
+  };
+}
+
+export async function runDiagnosis(
+  investigation: Investigation
+): Promise<DiagnosticResult> {
+  const snapshots = await fetchSnapshotsForRun(investigation.runId);
+
+  const messages = [
+    {
+      role: "system" as const,
+      content:
+        "You are the Wyshbone Evaluator. You receive logs from a failing or suspicious run, plus optional code snapshots from the UI and Supervisor. Your job is to:\n" +
+        "1. Identify the most likely root cause (logic, prompts, tool wiring, state handling, etc.).\n" +
+        "2. Explain the issue clearly for a developer.\n" +
+        "3. Suggest precise code or prompt fixes.\n" +
+        "4. Provide copy-and-paste patches where possible (full functions or files), no placeholders.\n" +
+        "Do not invent unrelated features. Focus strictly on fixing the observed issue.",
+    },
+    buildInvestigationPrompt(investigation, snapshots),
+  ];
+
+  const response = await openai.chat.completions.create({
+    model: process.env.EVAL_MODEL_ID ?? "gpt-4.1-mini",
+    messages,
+    temperature: 0.2,
+  });
+
+  const text =
+    response.choices[0]?.message?.content ??
+    "No diagnosis generated. Please inspect logs manually.";
+
+  // Simple convention: GPT should return a markdown answer.
+  // For v0, we’ll store the whole thing as both diagnosis and patchSuggestion.
+  const result: DiagnosticResult = {
+    diagnosis: text,
+    patchSuggestion: text,
+  };
+
+  return result;
+}
+
+
+If your OpenAI client has a different API, adapt the call but keep the function signature.
+
+6. Persistence layer for Investigations
+
+Create a database table investigations (if using Drizzle or similar, add a schema file) with at least:
+
+id (PK, string)
+
+created_at (timestamp)
+
+trigger (string)
+
+run_id (string, nullable)
+
+notes (text, nullable)
+
+run_logs (jsonb)
+
+run_meta (jsonb, nullable)
+
+ui_snapshot (jsonb, nullable)
+
+supervisor_snapshot (jsonb, nullable)
+
+diagnosis (text, nullable)
+
+patch_suggestion (text, nullable)
+
+Then implement src/evaluator/storeInvestigation.ts:
+
+import { db } from "../db";
+import type { Investigation } from "./types";
+import { investigations } from "../db/schema/investigations"; // adjust path/schema
+
+export async function storeInvestigation(
+  inv: Investigation
+): Promise<void> {
+  await db
+    .insert(investigations)
+    .values({
+      id: inv.id,
+      created_at: inv.createdAt,
+      trigger: inv.trigger,
+      run_id: inv.runId ?? null,
+      notes: inv.notes ?? null,
+      run_logs: inv.runLogs,
+      run_meta: inv.runMeta ?? null,
+      ui_snapshot: inv.uiSnapshot ?? null,
+      supervisor_snapshot: inv.supervisorSnapshot ?? null,
+      diagnosis: inv.diagnosis ?? null,
+      patch_suggestion: inv.patchSuggestion ?? null,
+    })
+    .onConflictDoUpdate({
+      target: investigations.id,
+      set: {
+        trigger: inv.trigger,
+        run_id: inv.runId ?? null,
+        notes: inv.notes ?? null,
+        run_logs: inv.runLogs,
+        run_meta: inv.runMeta ?? null,
+        ui_snapshot: inv.uiSnapshot ?? null,
+        supervisor_snapshot: inv.supervisorSnapshot ?? null,
+        diagnosis: inv.diagnosis ?? null,
+        patch_suggestion: inv.patchSuggestion ?? null,
+      },
+    });
+}
+
+export async function getAllInvestigations(): Promise<Investigation[]> {
+  const rows = await db
+    .select()
+    .from(investigations)
+    .orderBy(investigations.created_at.desc());
+
+  return rows.map((r) => ({
+    id: r.id,
+    createdAt: r.created_at,
+    trigger: r.trigger,
+    runId: r.run_id ?? undefined,
+    notes: r.notes ?? undefined,
+    runLogs: r.run_logs ?? [],
+    runMeta: r.run_meta ?? undefined,
+    uiSnapshot: r.ui_snapshot ?? null,
+    supervisorSnapshot: r.supervisor_snapshot ?? null,
+    diagnosis: r.diagnosis ?? null,
+    patchSuggestion: r.patch_suggestion ?? null,
+  }));
+}
+
+export async function getInvestigationById(
+  id: string
+): Promise<Investigation | null> {
+  const row = await db.query.investigations.findFirst({
+    where: (inv, { eq }) => eq(inv.id, id),
+  });
+
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    trigger: row.trigger,
+    runId: row.run_id ?? undefined,
+    notes: row.notes ?? undefined,
+    runLogs: row.run_logs ?? [],
+    runMeta: row.run_meta ?? undefined,
+    uiSnapshot: row.ui_snapshot ?? null,
+    supervisorSnapshot: row.supervisor_snapshot ?? null,
+    diagnosis: row.diagnosis ?? null,
+    patchSuggestion: row.patch_suggestion ?? null,
+  };
+}
+
+
+Adapt to your actual DB setup, but keep the three functions and their signatures.
+
+7. High-level executeInvestigation helper
+
+Create src/evaluator/executeInvestigation.ts:
+
+import type { Investigation, InvestigationTrigger } from "./types";
+import { createInvestigation } from "./createInvestigation";
+import { runDiagnosis } from "./runDiagnosis";
+import { fetchSnapshotsForRun } from "./fetchSnapshots";
+import { storeInvestigation } from "./storeInvestigation";
+
+export async function executeInvestigation(
+  trigger: InvestigationTrigger,
+  runId?: string,
+  notes?: string
+): Promise<Investigation> {
+  const inv = await createInvestigation(trigger, runId, notes);
+
+  const snapshots = await fetchSnapshotsForRun(runId);
+  inv.uiSnapshot = snapshots.uiSnapshot ?? null;
+  inv.supervisorSnapshot = snapshots.supervisorSnapshot ?? null;
+
+  const diag = await runDiagnosis(inv);
+  inv.diagnosis = diag.diagnosis;
+  inv.patchSuggestion = diag.patchSuggestion;
+
+  await storeInvestigation(inv);
+
+  return inv;
+}
+
+
+This is the main entry point the API will call for EVAL-001.
+
+8. API routes
+
+Create src/evaluator/api.ts to define HTTP handlers. Adapt to your router (Express, Fastify, Hono, etc.). Example with Express-like style:
+
+import type { Request, Response, Router } from "express";
+import { executeInvestigation } from "./executeInvestigation";
+import { getAllInvestigations, getInvestigationById } from "./storeInvestigation";
+
+export function registerEvaluatorRoutes(router: Router) {
+  router.post(
+    "/tower/evaluator/investigate",
+    async (req: Request, res: Response) => {
+      try {
+        const { trigger = "manual", runId, notes } = req.body ?? {};
+        const investigation = await executeInvestigation(trigger, runId, notes);
+        res.status(200).json(investigation);
+      } catch (err) {
+        console.error("Error executing investigation", err);
+        res.status(500).json({ error: "Failed to execute investigation" });
+      }
+    }
+  );
+
+  router.get(
+    "/tower/evaluator/investigations",
+    async (_req: Request, res: Response) => {
+      const investigations = await getAllInvestigations();
+      res.status(200).json(investigations);
+    }
+  );
+
+  router.get(
+    "/tower/evaluator/investigations/:id",
+    async (req: Request, res: Response) => {
+      const investigation = await getInvestigationById(req.params.id);
+      if (!investigation) {
+        res.status(404).json({ error: "Investigation not found" });
+        return;
+      }
+      res.status(200).json(investigation);
+    }
+  );
+}
+
+
+Then, in your main server/router file (e.g. src/server.ts or src/routes/index.ts), import and register:
+
+import { registerEvaluatorRoutes } from "../evaluator/api";
+
+const router = express.Router();
+// existing routes...
+registerEvaluatorRoutes(router);
+
+
+Make sure the new routes are reachable.
+
+9. Minimal dashboard UI for Investigations
+
+In the Tower dashboard, add a simple view to list Investigations and view details.
+
+Assuming a React front-end (adjust to your setup):
+
+Add a page/component: client/components/InvestigationList.tsx
+
+Add a page/component: client/components/InvestigationDetail.tsx
+
+InvestigationList:
+
+Fetch GET /tower/evaluator/investigations
+
+Show:
+
+id
+
+createdAt
+
+trigger
+
+runId
+
+Clicking a row navigates to detail view for that id.
+
+InvestigationDetail:
+
+Fetch GET /tower/evaluator/investigations/:id
+
+Show:
+
+id, createdAt, trigger, runId, notes
+
+diagnosis (render as markdown-style text)
+
+patchSuggestion (render in a <pre><code> block)
+
+maybe a collapsible area for runLogs and snapshots (json pretty-printed)
+
+Add a simple navigation entry from your existing Tower status / roadmap page to “Evaluator Investigations”.
+
+Keep styling minimal but consistent with the rest of Tower.
+
+10. Manual test flow for EVAL-001
+
+After implementation, verify:
+
+A UI or Supervisor run exists with a known runId and logs in run_logs.
+
+Call POST /tower/evaluator/investigate with:
+
+{
+  "trigger": "manual",
+  "runId": "<your-run-id>",
+  "notes": "Testing EVAL-001"
+}
+
+
+Confirm:
+
+API returns an Investigation object.
+
+An entry is written to the investigations table.
+
+diagnosis and patchSuggestion fields contain GPT output.
+
+Open the Tower dashboard:
+
+Visit Investigations list.
+
+Click into the new Investigation.
+
+See diagnosis and patch suggestion rendered.
+
+If this all works, EVAL-001 is complete: you now have manual, GPT-backed Investigations with logging and patch suggestions, ready for later EVAL tasks to build on (behaviour tests, auto-detection, etc.).

@@ -574,7 +574,10 @@ function renderDashboard(state, tasksState) {
     </head>
     <body>
       <div class="container">
-        <h1>Wyshbone Status Dashboard</h1>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+          <h1>Wyshbone Status Dashboard</h1>
+          <a href="/investigations" style="padding: 0.5rem 1rem; background: #7c3aed; color: white; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 0.875rem;">🔍 Investigations</a>
+        </div>
         <div class="subtitle">Auto-refreshing every 60 seconds</div>
         
         ${renderUsageMeter()}
@@ -944,6 +947,142 @@ app.get('/evaluator-tasks.json', (req, res) => {
   });
 });
 
+app.get('/investigations', async (req, res) => {
+  try {
+    const { getAllInvestigations } = await import('./src/evaluator/storeInvestigation.ts');
+    const investigations = await getAllInvestigations();
+    
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tower Investigations - Evaluator Diagnostics</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #f9fafb; color: #111827; padding: 2rem; }
+    .container { max-width: 1400px; margin: 0 auto; }
+    h1 { font-size: 2rem; margin-bottom: 0.5rem; color: #7c3aed; }
+    .subtitle { color: #6b7280; margin-bottom: 2rem; }
+    .header-actions { display: flex; gap: 1rem; margin-bottom: 2rem; }
+    .btn { padding: 0.75rem 1.5rem; border-radius: 8px; font-weight: 600; cursor: pointer; border: none; }
+    .btn-primary { background: #7c3aed; color: white; }
+    .btn-primary:hover { background: #6d28d9; }
+    .empty-state { background: white; border-radius: 12px; padding: 4rem; text-align: center; }
+    .empty-state h2 { font-size: 1.5rem; color: #374151; margin-bottom: 0.5rem; }
+    .empty-state p { color: #6b7280; margin-bottom: 2rem; }
+    .investigations-grid { display: grid; gap: 1.5rem; }
+    .investigation-card { background: white; border-radius: 12px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .investigation-card:hover { box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    .investigation-header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem; }
+    .investigation-id { font-family: monospace; font-size: 0.875rem; color: #6b7280; }
+    .trigger-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 6px; font-size: 0.75rem; font-weight: 600; }
+    .trigger-manual { background: #dbeafe; color: #1e40af; }
+    .trigger-timeout { background: #fef3c7; color: #92400e; }
+    .trigger-tool_error { background: #fee2e2; color: #991b1b; }
+    .trigger-behaviour_flag { background: #fce7f3; color: #831843; }
+    .investigation-meta { font-size: 0.875rem; color: #6b7280; margin-bottom: 1rem; }
+    .investigation-notes { background: #f9fafb; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.875rem; }
+    .diagnosis-section { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e5e7eb; }
+    .diagnosis-label { font-weight: 600; color: #374151; margin-bottom: 0.5rem; }
+    .diagnosis-content { background: #faf5ff; padding: 1rem; border-radius: 8px; font-size: 0.875rem; line-height: 1.6; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
+    .no-diagnosis { color: #9ca3af; font-style: italic; }
+    .view-details-btn { padding: 0.5rem 1rem; background: #7c3aed; color: white; border-radius: 6px; text-decoration: none; font-size: 0.875rem; font-weight: 500; }
+    .view-details-btn:hover { background: #6d28d9; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔍 Tower Investigations</h1>
+    <p class="subtitle">Evaluator diagnostic reports and patch suggestions</p>
+    
+    <div class="header-actions">
+      <button class="btn btn-primary" onclick="createInvestigation()">+ New Investigation</button>
+      <a href="/status" style="padding: 0.75rem 1.5rem; background: #6b7280; color: white; border-radius: 8px; text-decoration: none; font-weight: 600;">← Back to Dashboard</a>
+    </div>
+    
+    ${investigations.length === 0 ? `
+      <div class="empty-state">
+        <h2>No Investigations Yet</h2>
+        <p>Create your first investigation to diagnose issues with Tower, UI, or Supervisor runs.</p>
+        <button class="btn btn-primary" onclick="createInvestigation()">Create Investigation</button>
+      </div>
+    ` : `
+      <div class="investigations-grid">
+        ${investigations.map(inv => `
+          <div class="investigation-card">
+            <div class="investigation-header">
+              <div>
+                <div class="investigation-id">${inv.id}</div>
+                ${inv.runId ? `<div style="font-size: 0.875rem; color: #374151; margin-top: 0.25rem;">Run: ${inv.runId}</div>` : ''}
+              </div>
+              <span class="trigger-badge trigger-${inv.trigger}">${inv.trigger.toUpperCase()}</span>
+            </div>
+            
+            <div class="investigation-meta">
+              Created: ${new Date(inv.createdAt).toLocaleString()}
+            </div>
+            
+            ${inv.notes ? `<div class="investigation-notes">${inv.notes}</div>` : ''}
+            
+            <div class="diagnosis-section">
+              <div class="diagnosis-label">Diagnosis:</div>
+              ${inv.diagnosis ? `
+                <div class="diagnosis-content">${inv.diagnosis.substring(0, 500)}${inv.diagnosis.length > 500 ? '...' : ''}</div>
+              ` : `
+                <div class="no-diagnosis">No diagnosis available</div>
+              `}
+            </div>
+            
+            <div style="margin-top: 1rem; text-align: right;">
+              <a href="/tower/evaluator/investigations/${inv.id}" class="view-details-btn">View Full Details</a>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `}
+  </div>
+  
+  <script>
+    async function createInvestigation() {
+      const runId = prompt('Enter Run ID (optional):');
+      const notes = prompt('Enter investigation notes (optional):');
+      
+      try {
+        const response = await fetch('/tower/evaluator/investigate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            trigger: 'manual',
+            runId: runId || undefined,
+            notes: notes || undefined
+          })
+        });
+        
+        if (response.ok) {
+          alert('Investigation created successfully!');
+          location.reload();
+        } else {
+          const error = await response.json();
+          alert('Failed to create investigation: ' + error.error);
+        }
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    }
+  </script>
+</body>
+</html>
+    `.trim();
+    
+    res.send(html);
+  } catch (err) {
+    console.error('Error rendering investigations page', err);
+    res.status(500).send('Failed to load investigations: ' + err.message);
+  }
+});
+
 app.post('/tasks/:id/status', async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
@@ -1015,6 +1154,47 @@ app.get('/proxy/file', async (req, res) => {
   }
 });
 
+// Evaluator API modules - loaded at startup
+let executeInvestigation;
+let getAllInvestigations;
+let getInvestigationById;
+
+// Evaluator API routes
+app.post('/tower/evaluator/investigate', async (req, res) => {
+  try {
+    const { trigger = "manual", runId, notes } = req.body ?? {};
+    const investigation = await executeInvestigation(trigger, runId, notes);
+    res.status(200).json(investigation);
+  } catch (err) {
+    console.error('Error executing investigation', err);
+    res.status(500).json({ error: 'Failed to execute investigation: ' + err.message });
+  }
+});
+
+app.get('/tower/evaluator/investigations', async (req, res) => {
+  try {
+    const investigations = await getAllInvestigations();
+    res.status(200).json(investigations);
+  } catch (err) {
+    console.error('Error fetching investigations', err);
+    res.status(500).json({ error: 'Failed to fetch investigations: ' + err.message });
+  }
+});
+
+app.get('/tower/evaluator/investigations/:id', async (req, res) => {
+  try {
+    const investigation = await getInvestigationById(req.params.id);
+    if (!investigation) {
+      res.status(404).json({ error: 'Investigation not found' });
+      return;
+    }
+    res.status(200).json(investigation);
+  } catch (err) {
+    console.error('Error fetching investigation', err);
+    res.status(500).json({ error: 'Failed to fetch investigation: ' + err.message });
+  }
+});
+
 // Root redirect
 app.get('/', (req, res) => {
   res.redirect('/status');
@@ -1026,6 +1206,18 @@ async function start() {
   
   // Load tasks
   await tasksManager.loadTasks();
+  
+  // Load evaluator modules
+  try {
+    const evaluatorModule = await import('./src/evaluator/executeInvestigation.ts');
+    const storageModule = await import('./src/evaluator/storeInvestigation.ts');
+    executeInvestigation = evaluatorModule.executeInvestigation;
+    getAllInvestigations = storageModule.getAllInvestigations;
+    getInvestigationById = storageModule.getInvestigationById;
+    console.log('✓ Evaluator modules loaded');
+  } catch (err) {
+    console.warn('⚠️  Failed to load evaluator modules:', err.message);
+  }
   
   // Start polling
   await poller.startPolling();

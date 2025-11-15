@@ -71,6 +71,32 @@ Server runs on port defined by `PORT` environment variable (default: 3000).
 
 ## Recent Changes
 
+- 2025-11-15: EVAL-001: Minimal Evaluator v0 implementation
+  - Created complete evaluator foundation layer in `src/evaluator/` directory
+  - Implemented investigation system with PostgreSQL database storage:
+    - TypeScript types for investigations, triggers, and diagnostic results
+    - Database schema with investigations table (id, trigger, run logs, snapshots, diagnosis, patches)
+    - Storage layer with CRUD operations (create, get all, get by ID)
+  - Integrated OpenAI GPT-4o-mini for automated diagnosis:
+    - Evaluator analyzes run logs and code snapshots to identify root causes
+    - Provides actionable diagnosis and patch suggestions
+    - Configurable via EVAL_MODEL_ID environment variable
+  - Optional code snapshot fetching from UI/Supervisor apps (fails gracefully if unavailable)
+  - Three API endpoints for investigation management:
+    - `POST /tower/evaluator/investigate` - Create and execute new investigation
+    - `GET /tower/evaluator/investigations` - List all investigations
+    - `GET /tower/evaluator/investigations/:id` - Get specific investigation details
+  - Interactive investigations dashboard at `/investigations`:
+    - Empty state with "Create Investigation" button
+    - Investigation cards showing trigger, notes, timestamps, and diagnosis previews
+    - Manual investigation creation with optional run ID and notes
+    - Link from main dashboard to investigations page
+  - Architecture notes:
+    - Modified server startup to use `tsx` for TypeScript module support
+    - Configured Neon WebSocket for serverless database connections
+    - Placeholder run log fetcher (ready for integration with actual logging system)
+  - Ready for EVAL-002 (automated behaviour detection) and EVAL-003 (multi-run analysis)
+
 - 2025-11-15: Evaluator Roadmap implementation
   - Added 5 evaluator tasks (EVAL-001 to EVAL-005) to config/tasks.json
   - Created Evaluator Roadmap section in dashboard with dedicated purple/violet styling
