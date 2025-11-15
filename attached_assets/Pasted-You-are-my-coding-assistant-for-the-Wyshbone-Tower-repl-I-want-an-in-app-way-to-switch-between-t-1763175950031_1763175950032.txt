@@ -1,0 +1,59 @@
+You are my coding assistant for the Wyshbone Tower repl.
+
+I want an in-app way to switch between the two Tower views WITHOUT manually changing the URL:
+
+- The existing server-rendered `/status` page (Wyshbone Status Dashboard with Usage Meter + Critical Path + tasks list).
+- The new React `/dashboard` page (Wyshbone Tower Evaluator Console with Recent Runs, Tower Status, and the Evaluator Console on the right).
+
+Implement a simple, consistent top navigation that appears on BOTH views.
+
+Requirements:
+
+1. Two-tab header
+   - Create a small header bar at the top with two tabs/links:
+     - "Status & Plan" → `/status`
+     - "Evaluator Console" → `/dashboard`
+   - The active tab should be visually highlighted based on the current path:
+     - When on `/status`, "Status & Plan" is active.
+     - When on `/dashboard`, "Evaluator Console" is active.
+
+2. Integration on `/status` (server-rendered page)
+   - Locate the template / layout used to render the existing `/status` dashboard.
+   - Add the nav header ABOVE the current content, without removing or rearranging the existing sections (Usage Meter, Critical Path, etc.).
+   - Use the same font family and spacing conventions as the existing status page.
+   - Keep styling minimal: a horizontal bar with two text buttons or pill-style tabs is fine.
+
+3. Integration on `/dashboard` (React SPA)
+   - Locate the root React component that renders the Evaluator Console dashboard (the page that currently shows "Wyshbone Tower", Tower Status, Recent Runs, and Evaluator Console).
+   - Add the SAME nav header at the top of this layout, above the existing content.
+   - Reuse the same markup / component if possible (e.g. a shared NavTabs component).
+   - The active state must react correctly to the current location (use the router / window.location.pathname, whichever fits the existing setup).
+
+4. Shared component (optional but preferred)
+   - If it fits the codebase, create a small shared component like `TowerNavTabs` in the client (e.g. `client/src/components/TowerNavTabs.tsx`) that renders the two tabs and determines the active one.
+   - On the server-rendered `/status` page, you can either:
+     - Render the same HTML structure directly, or
+     - Inject a minimal pre-rendered version of the same tabs.
+   - The important thing is that visually they look the same and link to the same URLs.
+
+5. Styling
+   - Keep styles consistent with the existing Tower styling:
+     - Use existing CSS / tailwind / utility classes already used in the project.
+     - Make the active tab slightly bolder or underlined, or use a subtle background.
+   - Do NOT radically redesign the page; just add a simple, neat switcher.
+
+6. Behaviour
+   - Clicking "Status & Plan" should navigate to `/status`.
+   - Clicking "Evaluator Console" should navigate to `/dashboard`.
+   - No full-page reload hacks; use normal navigation compatible with the current server + React setup.
+
+7. Deliverables
+   - Produce actual code changes only: full contents for any new files and precise edits for existing files (with file paths).
+   - Do not describe what you are going to do; just show the code needed to implement it.
+
+After implementing, please make sure both URLs still work:
+
+- `/status` still shows the original Usage Meter + Critical Path + tasks.
+- `/dashboard` still shows the Evaluator Console, now with the nav at the top.
+
+The only functional change should be the ability to click between the two views via the new header tabs.

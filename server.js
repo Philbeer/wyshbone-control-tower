@@ -575,6 +575,20 @@ function renderDashboard(state, tasksState) {
       </style>
     </head>
     <body>
+      <!-- Tower Navigation Tabs -->
+      <div style="border-bottom: 1px solid #e5e7eb; background: white;">
+        <div class="container">
+          <nav style="display: flex; gap: 24px; padding: 12px 0;">
+            <a href="/status" style="text-decoration: none; font-size: 14px; font-weight: 500; color: #111827; border-bottom: 2px solid #3b82f6; padding-bottom: 12px;">
+              Status & Plan
+            </a>
+            <a href="/dashboard" style="text-decoration: none; font-size: 14px; font-weight: 500; color: #6b7280; padding-bottom: 12px; transition: color 0.2s;">
+              Evaluator Console
+            </a>
+          </nav>
+        </div>
+      </div>
+      
       <div class="container">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
           <h1>Wyshbone Status Dashboard</h1>

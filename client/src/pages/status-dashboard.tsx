@@ -1,12 +1,16 @@
 import { EvaluatorProvider } from "@/contexts/EvaluatorContext";
 import { EvaluatorConsole } from "@/components/EvaluatorConsole";
 import { RecentRunsTable } from "@/components/RecentRunsTable";
+import { TowerNavTabs } from "@/components/TowerNavTabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function StatusDashboard() {
   return (
     <EvaluatorProvider>
       <div className="min-h-screen bg-background">
+        {/* Navigation Tabs */}
+        <TowerNavTabs />
+        
         {/* Header */}
         <header className="border-b">
           <div className="container mx-auto px-4 py-4">
