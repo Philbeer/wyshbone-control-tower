@@ -1,4 +1,5 @@
 import type { BehaviourTest } from '../../shared/schema';
+import type { ChatRequest, ChatMessage } from './chatApiTypes';
 
 export type BehaviourTestResult = {
   testId: string;
@@ -43,7 +44,10 @@ export function getAllBehaviourTestDefinitions(): BehaviourTest[] {
   return TEST_DEFINITIONS;
 }
 
-async function callWyshboneUI(message: string): Promise<string> {
+async function callWyshboneUI(
+  message: string,
+  options?: { domain?: string }
+): Promise<string> {
   const sources = await import('../../config/sources.json');
   const uiSource = sources.default.find((s: any) => s.name === 'Wyshbone UI');
   
@@ -51,24 +55,49 @@ async function callWyshboneUI(message: string): Promise<string> {
     throw new Error('Wyshbone UI source not configured');
   }
 
+  const chatRequest: ChatRequest = {
+    user: {
+      id: "tower-eval",
+      name: "Tower Evaluator",
+      email: "tower@evaluator.local",
+      ...(options?.domain && { domain: options.domain }),
+    },
+    messages: [
+      {
+        role: "user",
+        content: message,
+      },
+    ],
+  };
+
   const response = await fetch(`${uiSource.baseUrl}/api/chat`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      message,
-      sessionId: `test-${Date.now()}`,
-    }),
+    body: JSON.stringify(chatRequest),
   });
 
   if (!response.ok) {
-    throw new Error(`UI API returned ${response.status}: ${await response.text()}`);
+    const errorText = await response.text();
+    throw new Error(`UI API returned ${response.status}: ${errorText}`);
   }
 
   const data = await response.json();
   
-  return typeof data === 'string' ? data : JSON.stringify(data);
+  if (typeof data === 'string') {
+    return data;
+  }
+  
+  if (data.message) {
+    return data.message;
+  }
+  
+  if (data.response) {
+    return data.response;
+  }
+  
+  return JSON.stringify(data);
 }
 
 async function testGreeting(): Promise<BehaviourTestResult> {
@@ -123,7 +152,10 @@ async function testPersonalisation(): Promise<BehaviourTestResult> {
   const startTime = Date.now();
   
   try {
-    const response = await callWyshboneUI("My company domain is examplebrewery.com");
+    const response = await callWyshboneUI(
+      "My company domain is examplebrewery.com",
+      { domain: "examplebrewery.com" }
+    );
     const durationMs = Date.now() - startTime;
     
     const responseLower = response.toLowerCase();

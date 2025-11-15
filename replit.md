@@ -71,6 +71,24 @@ Server runs on port defined by `PORT` environment variable (default: 3000).
 
 ## Recent Changes
 
+- 2025-11-15: EVAL-002B: Chat API Schema Fix
+  - **Investigation**: Discovered correct `/api/chat` request format through iterative testing
+  - **Schema Definition** (src/evaluator/chatApiTypes.ts):
+    - ChatRequest interface with required user (id, name, email) and messages fields
+    - Optional domain field for personalization tests
+    - ChatMessage interface with role and content
+  - **Implementation Updates** (src/evaluator/behaviourTests.ts):
+    - Updated callWyshboneUI() to send properly structured requests
+    - Added domain parameter support for personalization test
+    - Improved response parsing (checks data.message, data.response, fallback to JSON.stringify)
+    - Better error messages including status code and response body
+  - **Test Script** (scripts/test-ui-chat.js): Experimentation tool for API discovery
+  - **Current Status**: 
+    - ✅ Request format corrected (was missing user + messages, now includes them)
+    - ❌ Tests blocked by 401 Unauthorized (endpoint requires session auth, not X-EXPORT-KEY)
+    - See BEHAVIOUR_TESTS_FINDINGS.md for full investigation details
+  - **Next Steps**: Wyshbone UI needs update to accept X-EXPORT-KEY for `/api/chat` testing
+
 - 2025-11-15: EVAL-002: Automated Behaviour Tests
   - **Test Harness & Definitions**: Created 4 real behaviour tests that probe Wyshbone UI:
     - greeting-basic: Verifies welcome message and goal inquiry on new user conversation
