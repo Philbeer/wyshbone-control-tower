@@ -51,6 +51,13 @@ A sophisticated evaluation system is integrated to automate testing, diagnosis, 
     *   Automatically evaluates generated patches through EVAL-004 gatekeeper pipeline.
     *   Provides "Auto patch (beta)" button in investigation UI for one-click patch generation.
     *   Handles edge cases like NO_PATCH_POSSIBLE with appropriate user feedback.
+*   **Behaviour Test Investigation Bridge (EVAL-007):**
+    *   Seamlessly bridges behaviour tests with the investigation system for comprehensive issue tracking.
+    *   Automatic investigation creation for failed, errored, or timed-out behaviour tests via EVAL-003 integration.
+    *   Manual investigation trigger via "Investigate" button in Behaviour Tests UI for proactive debugging.
+    *   24-hour deduplication prevents investigation spam for repeated test failures.
+    *   Investigation metadata stored in `run_meta` jsonb field includes `testId`, `testName`, and `source: "behaviour_test"`.
+    *   REST API endpoint: `POST /tower/behaviour-tests/:testId/investigate` for manual investigation creation.
 
 **UI/UX:**
 

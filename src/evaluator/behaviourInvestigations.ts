@@ -26,7 +26,7 @@ export async function ensureBehaviourInvestigationForRun(
   const existing = await db.query.investigations.findFirst({
     where: and(
       gte(investigations.created_at, windowStart),
-      sql`${investigations.run_meta}->>'source' = 'behaviour-test'`,
+      sql`${investigations.run_meta}->>'source' = 'behaviour_test'`,
       sql`${investigations.run_meta}->>'testId' = ${opts.testId}`
     ),
     orderBy: (investigations, { desc }) => [desc(investigations.created_at)],
@@ -103,7 +103,7 @@ export async function ensureBehaviourInvestigationForRun(
       run_meta: {
         agent: 'tower' as const,
         description: `Behaviour test: ${opts.testName}`,
-        source: 'behaviour-test',
+        source: 'behaviour_test',
         testId: opts.testId,
         testName: opts.testName,
         triggerReason: opts.triggerReason,
