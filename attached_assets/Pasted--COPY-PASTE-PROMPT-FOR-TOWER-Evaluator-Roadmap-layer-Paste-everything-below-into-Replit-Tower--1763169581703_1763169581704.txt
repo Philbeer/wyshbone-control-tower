@@ -1,0 +1,207 @@
+📋 COPY–PASTE PROMPT FOR TOWER (Evaluator Roadmap layer)
+Paste everything below into Replit (Tower repl):
+
+You are my coding assistant for the Wyshbone Tower repl.
+ I want you to extend the existing “Critical Pathway Gen 2 V1 / Source Status / Wyshbone UI / Wyshbone Supervisor” planning view so that it also includes a dedicated Evaluator Roadmap column with five tasks: EVAL-001 to EVAL-005.
+The goal is not to build the evaluator logic yet, but to give me a clear, clickable planning layer inside Tower that I can use to trigger future build prompts (like we did for the UI and Supervisor tasks).
+Follow these rules:
+Produce actual code, not instructions.
+
+
+Use the existing Tower stack (TypeScript, React/Next or whatever is already there).
+
+
+When modifying files, show the full updated file or clearly marked insertions.
+
+
+No “TODO” placeholders – make everything runnable.
+
+
+Keep UI minimal but consistent with the existing Critical Pathway dashboard.
+
+
+
+1. Add a data model for Evaluator tasks
+Create a small in-memory (or simple DB-backed) model for Evaluator tasks, similar to how you model the existing Critical Pathway tasks.
+Each Evaluator task should have:
+id: string (e.g. "EVAL-001")
+
+
+title: string
+
+
+status: "not_started" | "in_progress" | "done"
+
+
+summary: string (one-line description)
+
+
+detail: string (a fuller description)
+
+
+Seed it with these five tasks:
+EVAL-001 – Minimal Evaluator v0 (logging + investigations)
+
+
+summary: “Add structured run logging and manual GPT-based investigations in Tower.”
+
+
+detail: “Foundation layer: log UI/Supervisor runs with run IDs, create Investigations in Tower, bundle logs and context, send them to GPT, and store diagnosis + patch suggestions. No automated tests or detection yet.”
+
+
+EVAL-002 – Automated behaviour tests
+
+
+summary: “Define and run core conversational behaviour tests (golden paths).”
+
+
+detail: “Add a small framework to define and run behaviour tests like greetings, personalisation via domain, basic lead search, and monitoring setup. Store results and show which tests pass/fail for each build.”
+
+
+EVAL-003 – Automated detection (timeouts, errors, poor scores)
+
+
+summary: “Detect failures and suspicious runs without human intervention.”
+
+
+detail: “Watch logs for timeouts, repeated tool errors, plan failures, and low-quality scores. Automatically open Investigations when thresholds are hit, feeding them into the same GPT-based diagnosis pipeline.”
+
+
+EVAL-004 – Patch quality + regression protection
+
+
+summary: “Score patch suggestions and protect against regressions.”
+
+
+detail: “After applying fixes, automatically re-run relevant behaviour tests and recent failing scenarios, score the patch impact, and flag regressions in Tower. Keep a history of patches and their test outcomes.”
+
+
+EVAL-005 – Junior Developer Agent integration
+
+
+summary: “Link Investigations and patches to an automated code-application flow.”
+
+
+detail: “Integrate with Replit Agent or a Git workflow so patches from the Evaluator can be proposed as code changes. Still require human approval, but wire up the path from Investigation → suggested patch → applied change.”
+
+
+Store these either in a simple config file (e.g. src/evaluator/evalTasks.ts) or in the same place you keep other Critical Pathway task definitions.
+
+2. Extend the Critical Pathway / Roadmap view
+Find the component that renders the current Tower planning view with sections like:
+Critical Pathway Gen 2 V1
+
+
+Source Status
+
+
+Wyshbone UI
+
+
+Wyshbone Supervisor
+
+
+Extend this view to add a new column/section called:
+Evaluator Roadmap
+In that column, render the 5 Evaluator tasks as a simple list or cards, showing:
+id (e.g. “EVAL-001”)
+
+
+title
+
+
+status
+
+
+a truncated version of summary
+
+
+Each task should be clickable.
+
+3. Task detail panel / page
+When I click an Evaluator task (e.g. EVAL-001):
+Show a detail view (could be a right-hand panel, modal, or a separate route like /tower/evaluator/EVAL-001), which displays:
+
+
+id
+
+
+title
+
+
+status
+
+
+full summary
+
+
+full detail
+
+
+Also show a read-only text area or code block labelled:
+
+
+ “Replit build pre-prompt (base)”
+
+
+ For now, fill it with a simple base template like:
+
+ You are my coding assistant for the Wyshbone Tower repl.
+Implement {id}: {title}.
+{detail}
+Build on all previous EVAL tasks.
+Produce actual code, not instructions.
+ where {id}, {title}, and {detail} are interpolated from the task data.
+
+
+This gives me something I can copy as a starting point when I later ask ChatGPT for a full build prompt for each specific EVAL task.
+
+4. Status updates (optional but helpful)
+Add a minimal way to toggle status for each Evaluator task between:
+Not started
+
+
+In progress
+
+
+Done
+
+
+This can be:
+a small dropdown in the task detail view, or
+
+
+buttons like “Start” / “Mark as done”.
+
+
+Persist it however you already persist similar planning data (or use a simple in-memory store if that’s how the existing roadmap works).
+
+5. Navigation
+Add a simple way to access this view from wherever you currently access the Critical Pathway view:
+If there is a sidebar or top-nav, ensure the existing menu item still works and the new Evaluator column appears alongside the other columns.
+
+
+Do not remove or rename existing sections; only extend.
+
+
+
+6. Keep styles consistent
+Match the existing styling in Tower:
+Same fonts, spacing, and card style as other roadmap panels.
+
+
+No need for fancy design — just keep it neat and readable.
+
+
+
+After you have implemented this, I should be able to:
+Open the Tower Critical Pathway / roadmap view
+
+
+See an Evaluator Roadmap column alongside the existing ones
+
+
+Click any EVAL task to see its details and a base “Replit build pre-prompt” I can copy and refine later.
+
+
+
