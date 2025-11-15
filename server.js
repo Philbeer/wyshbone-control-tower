@@ -1416,6 +1416,16 @@ async function start() {
     ensureBehaviourInvestigationForRun = behaviourInvestigationsModule.ensureBehaviourInvestigationForRun;
     getAllBehaviourTestDefinitions = behaviourTestsModule.getAllBehaviourTestDefinitions;
     
+    // EVAL-007: Backfill legacy behaviour test investigations (one-time migration)
+    try {
+      const backfillCount = await behaviourInvestigationsModule.backfillBehaviourTestInvestigations();
+      if (backfillCount > 0) {
+        console.log(`✓ Backfilled ${backfillCount} legacy behaviour test investigations`);
+      }
+    } catch (err) {
+      console.warn('⚠️  Failed to backfill legacy investigations:', err.message);
+    }
+    
     // Load patch evaluator routes (EVAL-004)
     const patchRoutesModule = await import('./server/routes-patch.ts');
     patchRoutesModule.initializePatchRoutes(autoDetectAndTriggerInvestigation);

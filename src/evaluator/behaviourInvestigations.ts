@@ -3,7 +3,7 @@ import { investigations } from "../../shared/schema";
 import { executeInvestigation } from "./executeInvestigation";
 import { storeInvestigation } from "./storeInvestigation";
 import type { Investigation } from "./types";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, sql, isNull, or } from "drizzle-orm";
 
 export type BehaviourInvestigationOpts = {
   testId: string;
@@ -22,8 +22,8 @@ export async function ensureBehaviourInvestigationForRun(
   const now = opts.now || new Date();
   const windowStart = new Date(now.getTime() - DEDUP_WINDOW_HOURS * 60 * 60 * 1000);
 
-  // Check for existing open investigation for this testId within the last 24 hours
-  const existing = await db.query.investigations.findFirst({
+  // Primary query: Check for existing investigation with populated run_meta
+  let existing = await db.query.investigations.findFirst({
     where: and(
       gte(investigations.created_at, windowStart),
       sql`${investigations.run_meta}->>'source' = 'behaviour_test'`,
@@ -32,21 +32,59 @@ export async function ensureBehaviourInvestigationForRun(
     orderBy: (investigations, { desc }) => [desc(investigations.created_at)],
   });
 
+  // Fallback query: Check for legacy investigations without run_meta
+  // Look for investigations with "Behaviour test" in notes (standard prefix)
+  if (!existing) {
+    const legacyCandidates = await db.query.investigations.findMany({
+      where: and(
+        gte(investigations.created_at, windowStart),
+        sql`${investigations.notes} LIKE 'Behaviour test "%'`
+      ),
+      orderBy: (investigations, { desc }) => [desc(investigations.created_at)],
+      limit: 10, // Check up to 10 recent candidates
+    });
+
+    // Find first candidate that matches this testId by parsing notes
+    for (const candidate of legacyCandidates) {
+      const notesText = candidate.notes || '';
+      // Check if notes mention this specific test
+      if (notesText.includes(`"${opts.testName}"`) || notesText.includes(`"${opts.testId}"`)) {
+        existing = candidate;
+        console.log(
+          `[BehaviourInvestigations] Found legacy investigation ${candidate.id} for testId=${opts.testId} (will self-heal)`
+        );
+        break;
+      }
+    }
+  }
+
   if (existing) {
     console.log(
       `[BehaviourInvestigations] Found existing investigation ${existing.id} for testId=${opts.testId}`
     );
 
-    // Update the existing investigation with new run info
+    // Update the existing investigation with new run info and ensure run_meta is populated
     const updatedNotes = `${existing.notes || ''}\n\n[${now.toISOString()}] Additional trigger: ${opts.triggerReason}${
       opts.runId ? ` (run: ${opts.runId})` : ''
     }`;
+
+    // Ensure run_meta is always populated with behaviour test metadata
+    const ensuredRunMeta = {
+      ...(existing.run_meta || {}),
+      agent: 'tower' as const,
+      description: `Behaviour test: ${opts.testName}`,
+      source: 'behaviour_test',
+      testId: opts.testId,
+      testName: opts.testName,
+      triggerReason: opts.triggerReason,
+    };
 
     await db
       .update(investigations)
       .set({
         run_id: opts.runId || existing.run_id,
         notes: updatedNotes,
+        run_meta: ensuredRunMeta as any,
       })
       .where(eq(investigations.id, existing.id));
 
@@ -133,4 +171,65 @@ export async function ensureBehaviourInvestigationForRun(
     diagnosis: updatedInv.diagnosis ?? null,
     patchSuggestion: updatedInv.patch_suggestion ?? null,
   };
+}
+
+export async function backfillBehaviourTestInvestigations(): Promise<number> {
+  console.log('[BehaviourInvestigations] Starting backfill of legacy investigations...');
+  
+  // Find all investigations that look like behaviour test investigations but lack run_meta
+  const candidates = await db.query.investigations.findMany({
+    where: and(
+      or(
+        isNull(investigations.run_meta),
+        sql`${investigations.run_meta}->>'source' IS NULL`
+      ),
+      sql`${investigations.notes} LIKE 'Behaviour test "%'`
+    ),
+  });
+
+  console.log(`[BehaviourInvestigations] Found ${candidates.length} candidates for backfill`);
+  
+  let updated = 0;
+  for (const inv of candidates) {
+    const notesText = inv.notes || '';
+    
+    // Extract test name from notes (format: Behaviour test "TestName" ...)
+    const testNameMatch = notesText.match(/Behaviour test "([^"]+)"/);
+    if (!testNameMatch) continue;
+    
+    const testName = testNameMatch[1];
+    
+    // Try to extract testId from notes (format: ...test "testId"...)
+    let testId = '';
+    const testIdMatch = notesText.match(/test "([^"]+)"/);
+    if (testIdMatch) {
+      testId = testIdMatch[1];
+    }
+    
+    // If we couldn't extract testId, derive it from test name
+    if (!testId) {
+      testId = testName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    }
+    
+    // Populate run_meta
+    await db
+      .update(investigations)
+      .set({
+        run_meta: {
+          agent: 'tower' as const,
+          description: `Behaviour test: ${testName}`,
+          source: 'behaviour_test',
+          testId,
+          testName,
+          triggerReason: 'Backfilled from legacy investigation',
+        } as any,
+      })
+      .where(eq(investigations.id, inv.id));
+    
+    updated++;
+    console.log(`[BehaviourInvestigations] Backfilled investigation ${inv.id} for test "${testName}"`);
+  }
+  
+  console.log(`[BehaviourInvestigations] Backfill complete: ${updated} investigations updated`);
+  return updated;
 }
