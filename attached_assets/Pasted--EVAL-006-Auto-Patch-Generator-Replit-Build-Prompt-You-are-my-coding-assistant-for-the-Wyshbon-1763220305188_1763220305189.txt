@@ -1,0 +1,390 @@
+🧩 EVAL-006: Auto-Patch Generator – Replit Build Prompt
+
+You are my coding assistant for the Wyshbone Control Tower repl.
+Implement EVAL-006: Auto-Patch Generator.
+Build on EVAL-001 → 005. Produce actual code, not instructions.
+
+High-level goal
+
+Add an auto-patch generation pipeline that:
+
+Takes an Investigation (usually created by auto-detection after behaviour test failures).
+
+Builds a dev brief (using the existing EVAL-005 buildDevBrief).
+
+Calls an LLM (same GPT client used by the Investigator pipeline) to generate a unified diff patch.
+
+Stores that as a PatchSuggestion with source="auto".
+
+Immediately runs it through the EVAL-004 patch gatekeeper:
+
+sandbox apply,
+
+behaviour tests before/after,
+
+strict approval/rejection rules.
+
+Updates the suggestion with the evaluation result.
+
+Exposes this via API and UI so that:
+
+I can trigger “Auto patch this investigation”.
+
+I can see auto patch attempts, their status, and the final approved diff to paste into Replit.
+
+This task does NOT auto-apply code to the real Wyshbone repos.
+It only generates and evaluates patches.
+I will still apply the final diff manually in Replit / git.
+
+1. Reuse existing LLM client
+
+Somewhere in this codebase there is already a GPT / OpenAI client used by:
+
+the Investigator pipeline (EVAL-001)
+
+or other LLM-based evaluators.
+
+You must:
+
+Locate that existing client/module.
+
+Reuse it for EVAL-006 (do not add a new OpenAI client or duplicate env config).
+
+Keep using the same environment variables (e.g. OPENAI_API_KEY etc.).
+
+If there is a central “llmClient” or similar utility, use it. If the investigator has a helper like callInvestigatorModel, introduce a new helper in a separate module for the auto-patch model, but reuse the underlying client.
+
+2. Create src/evaluator/autoPatch.ts
+
+Create a new module: src/evaluator/autoPatch.ts.
+
+It should export at least:
+
+export async function requestAutoPatchForInvestigation(investigationId: string): Promise<{
+  suggestionId: string;
+  evaluation?: {
+    status: "approved" | "rejected";
+    evaluationId: string;
+    reasons: string[];
+    riskLevel: "low" | "medium" | "high";
+  };
+}>;
+
+Behaviour
+
+requestAutoPatchForInvestigation must:
+
+Load the investigation
+
+Use the DB (db + investigations table from shared/schema.ts).
+
+Throw a clear error if the investigation doesn’t exist or is not eligible.
+
+Build dev brief
+
+Use the existing buildDevBrief(investigationId) from src/evaluator/juniorDev.ts.
+
+This returns a structured brief with:
+
+what failed,
+
+relevant runs,
+
+diagnosis summary, etc.
+
+You’ll feed this into the LLM.
+
+Call LLM to generate patch
+
+Use the shared GPT client.
+
+System message: explain the role clearly:
+
+Junior dev for Wyshbone UI/Supervisor,
+
+must emit a unified diff only,
+
+must keep changes minimal and targeted,
+
+must not touch Tower code (evaluator, patch evaluator, auto-detect, etc.),
+
+must not introduce new dependencies unless absolutely necessary.
+
+User message: include the dev brief plus any relevant context (e.g. file names from the investigation, last known failures).
+
+Output requirement (very important, to minimise post-processing):
+
+Response must be a plain unified diff, no prose, no markdown, no explanation.
+
+If it cannot propose a safe patch, it must emit a special token like NO_PATCH_POSSIBLE only.
+
+Implement strict post-processing:
+
+If the model returns text containing code fences or explanations, strip them and extract the diff.
+
+If no diff-like content is found → treat as NO_PATCH_POSSIBLE and abort.
+
+Create PatchSuggestion row
+
+Use createPatchSuggestion from juniorDev.ts.
+
+source must be "auto".
+
+summary can be something like "Auto-generated patch for investigation <title>".
+
+patchText is the unified diff from the LLM.
+
+If the LLM returned NO_PATCH_POSSIBLE, do not create a suggestion; instead return a clear error (and log it).
+
+Immediate evaluation via EVAL-004
+
+Call evaluatePatchSuggestion(suggestionId) from juniorDev.ts.
+
+This will:
+
+Run the patch through sandbox + behaviour tests.
+
+Call the gatekeeper.
+
+Update the patchSuggestions row with status (approved / rejected) and link to patchEvaluations.
+
+Return result
+
+Return { suggestionId, evaluation: { ... } }.
+
+If evaluation failed (e.g. EVAL-004 crashed), roll back the suggestion status to "suggested" and include error details.
+
+LLM prompt design (in this file)
+
+In autoPatch.ts, define a helper like:
+
+async function generatePatchFromBrief(brief: DevBrief): Promise<string> { ... }
+
+
+Inside it:
+
+Build a compact but explicit prompt to minimise tokens.
+
+System prompt (rough sketch, but you must implement concretely):
+
+You are a junior developer for the Wyshbone SaaS platform.
+Your only job is to produce small, targeted code patches in the form of unified diffs that fix a specific behavioural issue.
+Do not modify Wyshbone Tower evaluator code, patch evaluator, or auto-detection logic.
+Prefer changing Wyshbone UI or Supervisor behaviour implementation and prompts.
+You must emit only a unified diff patch. No explanations, no markdown, no commentary.
+
+User prompt example structure:
+
+Here is an investigation brief:
+
+<JSON or nicely formatted brief from buildDevBrief>
+
+Your task:
+- Produce a minimal unified diff that fixes this behaviour failure.
+- Do not change evaluator, Tower, or patch pipeline code.
+- Only change the parts of Wyshbone UI or Supervisor that determine the assistant's behaviour and responses.
+- Keep the diff as small and safe as possible.
+
+Output format:
+- If you can propose a patch: output ONLY the unified diff (starting with "diff --git ...").
+- If you cannot propose a safe patch: output exactly "NO_PATCH_POSSIBLE".
+
+
+Ensure your implementation strictly enforces this.
+
+3. Add API route to trigger auto-patch
+
+Create or update server/routes-junior-dev.ts to add:
+
+POST /tower/investigations/:id/auto-patch
+
+Behaviour:
+
+Load the investigation.
+
+Call requestAutoPatchForInvestigation(id).
+
+Return JSON:
+
+{
+  "investigationId": "...",
+  "suggestionId": "...",
+  "evaluation": {
+    "status": "approved" | "rejected",
+    "evaluationId": "...",
+    "reasons": ["..."],
+    "riskLevel": "low" | "medium" | "high"
+  }
+}
+
+
+Error cases:
+
+Investigation not found → 404 with { error: "Investigation not found" }.
+
+NO_PATCH_POSSIBLE → 400 with { error: "Auto-patch not possible", reason: "no_patch_possible" }.
+
+Evaluation failure → 500 with { error: "Evaluation failed", details: "..." }.
+
+Wire this route into the main server (where other /tower routes are registered). Do not change the existing routes’ behaviour.
+
+4. Minimal UI hook (EvaluatorConsole)
+
+In the same React component where Investigations and PatchSuggestions are shown (from EVAL-005, e.g. EvaluatorConsole.tsx):
+
+For each Investigation:
+
+Add a button "Auto patch (beta)".
+
+On click:
+
+Call POST /tower/investigations/:id/auto-patch.
+
+Show a simple loading state (“Auto patch in progress…”).
+
+On success:
+
+Show a toast or inline message: “Auto patch suggestion created and evaluated”.
+
+The existing polling for PatchSuggestions (every 5 seconds) will pick up the new suggestion and show its status.
+
+On error:
+
+Show the error message (for example: “Auto-patch not possible” or gateway error).
+
+You do not need to add a diff viewer. It’s enough that:
+
+The PatchSuggestions UI lists:
+
+status (approved/rejected),
+
+evaluation reasons,
+
+and summary,
+
+and we can fetch the full patch text via the existing endpoints (if they support it). If they don’t, extend the suggestions list/endpoint to include patchText or a truncated preview.
+
+5. Safety constraints
+
+You must enforce these constraints in code and prompt design:
+
+Never auto-apply patches to the real filesystem or repo.
+
+All patch application remains:
+
+in sandbox for evaluation (EVAL-004),
+
+manually applied by a human afterwards.
+
+Limit scope of changes.
+
+Strongly instruct the LLM to:
+
+only modify behaviour logic / prompt text in Wyshbone UI or Supervisor,
+
+avoid touching Tower evaluator code, schema files, or patch evaluator logic.
+
+Small diffs only.
+
+Encourage the LLM to change as little as possible:
+
+1–3 files,
+
+minimal changes,
+
+no wholesale rewrites.
+
+Strict failure handling.
+
+If the patch fails the gatekeeper:
+
+PatchSuggestion remains with status "rejected".
+
+The evaluation reasons must be attached into meta or similar.
+
+If the LLM output cannot be parsed into a diff:
+
+Treat it as NO_PATCH_POSSIBLE, log a warning, and respond with an appropriate error.
+
+6. Leave EVAL-001 → 005 behaviour unchanged
+
+Do not:
+
+change the Investigations schema or behaviour,
+
+change run logging,
+
+alter EVAL-003 auto-detection thresholds,
+
+modify EVAL-004 gatekeeper logic,
+
+break any existing routes or UI flows.
+
+EVAL-006 only:
+
+adds autoPatch.ts,
+
+adds a new /tower/investigations/:id/auto-patch endpoint,
+
+slightly extends the Investigation UI with an “Auto patch” button.
+
+7. Acceptance tests
+
+From the Replit shell, after implementation:
+
+Trigger auto-patch on a known failing investigation
+
+Ensure at least one Investigation exists (e.g. from a failing greeting-basic test).
+
+Call:
+
+curl -X POST http://localhost:5000/tower/investigations/<INV_ID>/auto-patch \
+  -H "Content-Type: application/json"
+
+
+Expect:
+
+200 status,
+
+JSON with suggestionId and evaluation.status.
+
+Verify a PatchSuggestion row exists
+
+Use the DB or existing API:
+
+GET /tower/investigations/<INV_ID>/patch-suggestions
+
+The new suggestion:
+
+has source = "auto",
+
+has status = "approved" or "rejected",
+
+has patchEvaluationId set,
+
+includes evaluation reasons in metadata.
+
+Gatekeeper still works
+
+Intentionally induce a bad patch (e.g. wrongly targeted file) by tweaking prompts if necessary.
+
+Ensure gatekeeper rejects it with clear reasons (new FAIL, regression, etc.).
+
+UI
+
+Open Tower dashboard.
+
+Pick an Investigation.
+
+Click “Auto patch (beta)”.
+
+See:
+
+a new patch suggestion appear after a short delay,
+
+status and reasons visible,
+
+no crashes, no infinite polling loops.
+
+If any step fails or throws, fix it.
+All code must compile cleanly and the server must run without new TypeScript/runtime errors.

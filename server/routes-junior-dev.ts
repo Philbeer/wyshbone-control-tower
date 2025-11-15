@@ -7,6 +7,7 @@ import {
   updatePatchSuggestionStatus,
   getPatchSuggestionsForInvestigation,
 } from '../src/evaluator/juniorDev.ts';
+import { requestAutoPatchForInvestigation } from '../src/evaluator/autoPatch.ts';
 
 const router = express.Router();
 
@@ -170,6 +171,45 @@ router.post('/patch-suggestions/:id/status', async (req, res) => {
     }
     res.status(500).json({
       error: 'Failed to update patch suggestion status',
+      details: error.message
+    });
+  }
+});
+
+router.post('/investigations/:id/auto-patch', async (req, res) => {
+  try {
+    if (!patchEvaluator) {
+      return res.status(500).json({ error: 'Patch evaluator not initialized' });
+    }
+
+    const { id: investigationId } = req.params;
+
+    console.log(`[JuniorDevRoutes] Auto-patching investigation ${investigationId}`);
+
+    const result = await requestAutoPatchForInvestigation(investigationId, patchEvaluator);
+
+    res.json({
+      investigationId,
+      suggestionId: result.suggestionId,
+      evaluation: result.evaluation,
+    });
+  } catch (error: any) {
+    console.error('[JuniorDevRoutes] Error auto-patching investigation:', error);
+    
+    if (error.message.includes('not found')) {
+      return res.status(404).json({ error: 'Investigation not found' });
+    }
+    
+    if (error.message === 'NO_PATCH_POSSIBLE') {
+      return res.status(400).json({
+        error: 'Auto-patch not possible',
+        reason: 'no_patch_possible',
+        details: 'The AI could not generate a safe patch for this investigation'
+      });
+    }
+
+    res.status(500).json({
+      error: 'Evaluation failed',
       details: error.message
     });
   }
