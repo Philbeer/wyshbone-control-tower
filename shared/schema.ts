@@ -113,3 +113,22 @@ export const patchEvaluations = pgTable("patch_evaluations", {
 export const insertPatchEvaluationSchema = createInsertSchema(patchEvaluations);
 export type InsertPatchEvaluation = z.infer<typeof insertPatchEvaluationSchema>;
 export type PatchEvaluation = typeof patchEvaluations.$inferSelect;
+
+export const patchSuggestions = pgTable("patch_suggestions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  investigationId: varchar("investigation_id").notNull(),
+  runId: varchar("run_id"),
+  source: text("source").notNull().default("agent"),
+  patchText: text("patch_text").notNull(),
+  summary: text("summary"),
+  status: text("status").notNull().default("suggested"),
+  patchEvaluationId: varchar("patch_evaluation_id"),
+  externalLink: text("external_link"),
+  meta: jsonb("meta").$type<Record<string, any>>().default({}),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertPatchSuggestionSchema = createInsertSchema(patchSuggestions);
+export type InsertPatchSuggestion = z.infer<typeof insertPatchSuggestionSchema>;
+export type PatchSuggestion = typeof patchSuggestions.$inferSelect;

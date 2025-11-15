@@ -1,0 +1,454 @@
+📋 EVAL-005 Replit Build Prompt (Tower)
+
+You are my coding assistant for the Wyshbone Control Tower repl.
+Implement EVAL-005: Junior Developer Agent integration.
+Build on EVAL-001 → EVAL-004. Produce actual code, not instructions.
+
+Goal
+
+Wire up a complete, trackable path:
+
+Investigation → (developer / agent) suggested patch → patch evaluation → human approval → applied change (tracked).
+
+We already have:
+
+Run logging + Investigations (EVAL-001)
+
+Behaviour tests + run API (EVAL-002)
+
+Auto-detection of bad runs (EVAL-003)
+
+Patch evaluation gatekeeper with sandbox + strict rules (EVAL-004)
+
+EVAL-005 does not auto-change the code by itself.
+It integrates the “Junior Developer” role (Replit Agent or human dev) into Tower:
+
+Tower provides a dev brief + patch prompt for each Investigation.
+
+The Junior Dev (Replit Agent 3 or human) creates a diff patch.
+
+Tower stores that patch as a PatchSuggestion, runs it through the existing PatchEvaluator, and records the outcome.
+
+A human explicitly marks the suggestion as applied or rejected once the code has actually been updated (via Replit / git).
+
+High-level behaviour
+
+From the Tower UI, I can open an Investigation and:
+
+Click something like “Generate dev brief / patch prompt” to get a JSON/markdown brief that I can paste into Replit Agent.
+
+Once I have a patch diff from Replit, I can POST it back to Tower as a PatchSuggestion tied to that Investigation.
+
+Tower then:
+
+Evaluates the patch using the existing patchEvaluator (before/after tests, auto-detection, gatekeeper rules)
+
+Stores the evaluation result, risk, reasons, etc.
+
+Exposes the final status per suggestion: suggested, evaluating, approved, rejected, applied.
+
+A human can:
+
+See suggested patches + their evaluation in the Tower UI.
+
+Apply the patch manually in Replit / Git.
+
+Then mark the suggestion as applied, so Tower knows the Investigation is resolved and which patch fixed it.
+
+This makes Tower the brain and record-keeper, while Replit / Git remains the actual source-of-truth for code changes.
+
+Concrete tasks
+1. Add a PatchSuggestions table to the schema
+
+In shared/schema.ts (where investigations and patchEvaluations are defined), add a new table, something like:
+
+export const patchSuggestions = pgTable("patch_suggestions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  investigationId: uuid("investigation_id")
+    .notNull()
+    .references(() => investigations.id, { onDelete: "cascade" }),
+  // Optional: link directly to a specific run / behaviour test run if available
+  runId: uuid("run_id"),
+
+  // Where this suggestion came from: "human", "auto", "agent"
+  source: text("source").notNull().default("agent"),
+
+  // The proposed code change as a unified diff or other machine-readable format
+  patchText: text("patch_text").notNull(),
+
+  // Short text summary for humans
+  summary: text("summary"),
+
+  // Current status in the lifecycle
+  // "suggested" -> "evaluating" -> "approved"/"rejected" -> "applied"
+  status: text("status").notNull().default("suggested"),
+
+  // Link to the patchEvaluations table from EVAL-004 (nullable until evaluated)
+  patchEvaluationId: uuid("patch_evaluation_id"),
+
+  // Optional: external link (git commit hash, PR URL, Replit change URL)
+  externalLink: text("external_link"),
+
+  // Optional JSON blob with extra metadata / gatekeeper reasons, etc.
+  meta: jsonb("meta").$type<Record<string, any>>().default({}),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+
+Make sure the Drizzle relations (if you’re using them) are updated so you can go from an investigation to its patchSuggestions.
+
+Run the Drizzle migration command you already use (e.g. npx drizzle-kit push) so the table exists.
+
+2. Add a JuniorDev helper module
+
+Create a new file: src/evaluator/juniorDev.ts.
+
+This module should do three things:
+
+Build a developer brief / patch prompt from an Investigation
+Export something like:
+
+import { db } from "../db";
+import { investigations, runs, behaviourTestRuns, patchSuggestions, patchEvaluations } from "../../shared/schema";
+import { getLastRunForTest, getPreviousRunForTest } from "./runLogger";
+
+export async function buildDevBrief(investigationId: string) {
+  // Load the investigation
+  const inv = await db.query.investigations.findFirst({
+    where: (i, { eq }) => eq(i.id, investigationId),
+  });
+
+  if (!inv) {
+    throw new Error(`Investigation ${investigationId} not found`);
+  }
+
+  // Optionally load related run / behaviour test data used to create this investigation
+  // You can reuse whatever foreign keys the investigation already stores
+  // (e.g. runId, testId, source, etc.)
+
+  // Load recent runs / history (using runLogger helpers if helpful)
+  // and any previous investigations for the same test.
+
+  // Return a structured brief that a developer or Replit Agent can use
+  return {
+    investigationId: inv.id,
+    title: inv.title,
+    summary: inv.summary,
+    rootCause: inv.rootCause,  // or whatever fields you store
+    details: inv.details,
+    source: inv.source,        // UI, SUP, behaviour-test, etc.
+    // Include any relevant run data, test names, last PASS vs FAIL, etc.
+    // Keep it concise but precise.
+  };
+}
+
+
+This is not calling any LLMs; it just centralises the logic for what context we give to the Junior Dev (human or agent). It’s fine if you extend this with more fields as needed.
+
+Create a PatchSuggestion record
+
+export async function createPatchSuggestion(params: {
+  investigationId: string;
+  runId?: string;
+  source: "human" | "agent" | "auto";
+  patchText: string;
+  summary?: string;
+  externalLink?: string;
+}) {
+  const [row] = await db
+    .insert(patchSuggestions)
+    .values({
+      investigationId: params.investigationId,
+      runId: params.runId ?? null,
+      source: params.source,
+      patchText: params.patchText,
+      summary: params.summary ?? null,
+      externalLink: params.externalLink ?? null,
+      status: "suggested",
+    })
+    .returning();
+  return row;
+}
+
+
+Evaluate a PatchSuggestion using the existing PatchEvaluator
+
+Reuse your EVAL-004 implementation. You should already have something like evaluatePatch(patchText) or an orchestrator function in src/evaluator/patchEvaluator.ts.
+
+import { evaluatePatch } from "./patchEvaluator";
+
+export async function evaluatePatchSuggestion(suggestionId: string) {
+  const suggestion = await db.query.patchSuggestions.findFirst({
+    where: (ps, { eq }) => eq(ps.id, suggestionId),
+  });
+
+  if (!suggestion) {
+    throw new Error(`PatchSuggestion ${suggestionId} not found`);
+  }
+
+  // Update status to "evaluating"
+  await db
+    .update(patchSuggestions)
+    .set({ status: "evaluating", updatedAt: new Date() })
+    .where(eq(patchSuggestions.id, suggestionId));
+
+  // Use existing EVAL-004 evaluator. Make sure this returns the evaluation row or ID.
+  const evalResult = await evaluatePatch({
+    patchText: suggestion.patchText,
+    // include any flags needed, e.g. risk level, timeout, etc.
+  });
+
+  // evalResult should include an evaluationId, status ("approved"/"rejected"), reasons, riskLevel, etc.
+  await db
+    .update(patchSuggestions)
+    .set({
+      status: evalResult.status === "approved" ? "approved" : "rejected",
+      patchEvaluationId: evalResult.evaluationId,
+      meta: {
+        ...(suggestion.meta ?? {}),
+        evaluationReasons: evalResult.reasons,
+        riskLevel: evalResult.riskLevel,
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(patchSuggestions.id, suggestionId));
+
+  return { suggestionId, evaluation: evalResult };
+}
+
+
+If evaluatePatch doesn’t yet return a clear { evaluationId, status, reasons, riskLevel } object, refactor it so it does. Don’t change its external behaviour; just make it reusable.
+
+3. REST API for devs / Replit Agent
+
+Add a new routes module, e.g. server/routes-junior-dev.ts, and wire it up from server.js (or server/routes.ts) similarly to how routes-patch is mounted.
+
+The routes should be:
+
+a) GET /tower/investigations/:id/dev-brief
+
+Returns the dev brief for an investigation, built via buildDevBrief.
+
+Purpose:
+So I (or Replit Agent) can copy this JSON/markdown and use it as the prompt to generate a patch.
+
+Example:
+
+{
+  "investigationId": "inv_123",
+  "title": "Greeting test fails to ask for goals",
+  "summary": "Greeting / onboarding behaviour test is failing because the assistant greets but never explicitly asks for the user's goals.",
+  "details": "...",
+  "source": "behaviour-test",
+  "runContext": {
+    "testId": "greeting-basic",
+    "lastStatus": "fail",
+    "previousStatus": "pass",
+    "lastResponseSample": "Hi there! How can I assist you today?"
+  }
+}
+
+
+Return JSON only. No HTML.
+
+b) POST /tower/investigations/:id/patch-suggestions
+
+Creates a new PatchSuggestion linked to an Investigation.
+
+Body:
+
+{
+  "patchText": "diff --git a/... etc ...",
+  "summary": "Make greeting ask for goals explicitly.",
+  "source": "agent",          // or "human"
+  "runId": "optional-run-id",
+  "externalLink": "optional-PR-or-replit-url",
+  "autoEvaluate": true        // if true, immediately run evaluatePatchSuggestion
+}
+
+
+Behaviour:
+
+Validate that the investigation exists.
+
+Insert the PatchSuggestion row.
+
+If autoEvaluate is true:
+
+Call evaluatePatchSuggestion and include the evaluation summary in the response.
+
+Response example:
+
+{
+  "suggestion": {
+    "id": "ps_123",
+    "status": "approved",
+    "patchEvaluationId": "pe_456"
+  },
+  "evaluation": {
+    "status": "approved",
+    "riskLevel": "low",
+    "reasons": [
+      "All tests pass",
+      "No latency regression",
+      "Quality improved for greeting-basic"
+    ]
+  }
+}
+
+c) GET /tower/investigations/:id/patch-suggestions
+
+List all PatchSuggestions for a given Investigation, including their status and basic evaluation info (if any).
+
+This is used by the Tower UI to show:
+
+Suggested patches
+
+Whether they were approved or rejected by the gatekeeper
+
+Whether they’ve been applied yet
+
+d) POST /tower/patch-suggestions/:id/status
+
+This is for human approval / tracking after code has actually been changed in Replit / Git.
+
+Body:
+
+{
+  "status": "applied" | "rejected",
+  "externalLink": "optional-commit-or-PR-url",
+  "note": "optional free-text comment"
+}
+
+
+Behaviour:
+
+Only allow transitions:
+
+approved → applied or rejected
+
+rejected → rejected (no change)
+
+suggested / evaluating should normally go through evaluation first; reject invalid transitions.
+
+When status becomes applied, update updatedAt, set externalLink if provided, and optionally mark the Investigation as resolved/closed if there are no other open suggestions.
+
+4. Integrate routes into server
+
+In server.js (or server/routes.ts), import and mount the new routes:
+
+import { registerJuniorDevRoutes } from "./server/routes-junior-dev";
+
+export function registerRoutes(app: Express) {
+  // existing routes...
+  registerPatchRoutes(app);
+  registerBehaviourTestRoutes(app);
+  registerJuniorDevRoutes(app);
+}
+
+
+registerJuniorDevRoutes(app) should attach the four endpoints above with consistent path prefixes (/tower/...).
+
+5. Light UI integration (no heavy frontend work)
+
+Keep this minimal; we just need enough UI so I can actually use EVAL-005 without touching the DB manually.
+
+In whatever frontend file renders Investigations (e.g. client/components/InvestigationsPanel.tsx or similar):
+
+For each Investigation, add:
+
+A button/link “Dev brief / patch prompt”
+
+When clicked, calls GET /tower/investigations/:id/dev-brief and shows the JSON/markdown in a modal / side panel for copy-paste into Replit Agent.
+
+A section that lists Patch Suggestions (calling GET /tower/investigations/:id/patch-suggestions) with:
+
+status badge (suggested, evaluating, approved, rejected, applied)
+
+summary
+
+link to externalLink if present (opens in new tab)
+
+link to view evaluation reasons (if any)
+
+You do not need to build a full “paste patch here” form in the UI if that’s too much; the API is enough for now. Focus on:
+
+Showing dev brief
+
+Showing patch suggestions + statuses
+
+6. Keep everything compatible with EVAL-001 → EVAL-004
+
+Very important:
+
+Do not break or change:
+
+Run logging schemas
+
+Investigations schemas
+
+Auto-detection thresholds
+
+Behaviour test engine
+
+Patch evaluation logic / gatekeeper rules
+
+EVAL-005 only:
+
+Adds a patchSuggestions table
+
+Adds a juniorDev helper module
+
+Adds the junior-dev routes
+
+Adds minimal UI hooks to access dev briefs and see patch suggestions
+
+7. Testing / acceptance
+
+After implementation, verify the following flows from the Replit shell and UI:
+
+Dev brief:
+
+Pick an existing Investigation ID.
+
+curl GET /tower/investigations/<id>/dev-brief
+
+Confirm you get a useful JSON brief (no crash).
+
+Create + evaluate a patch suggestion (API only):
+
+POST /tower/investigations/<id>/patch-suggestions with a dummy patchText (it can be a harmless no-op diff) and "autoEvaluate": true.
+
+Confirm:
+
+A patch_suggestions row is created.
+
+The patch evaluator runs.
+
+Suggestion status is updated to approved or rejected.
+
+patchEvaluationId is set.
+
+List suggestions:
+
+GET /tower/investigations/<id>/patch-suggestions
+
+Confirm the suggestion appears with correct status.
+
+Mark a suggestion as applied:
+
+POST /tower/patch-suggestions/<id>/status with { "status": "applied", "externalLink": "https://example.com/my-commit" }.
+
+Confirm DB row is updated and the UI reflects applied.
+
+Regression check:
+
+Behaviour tests still run and behave exactly as in EVAL-002.
+
+Auto-detection still works (EVAL-003).
+
+Patch evaluator still works as in EVAL-004.
+
+If anything fails, fix it. All code must compile and the server must start cleanly with no new TypeScript or runtime errors.
