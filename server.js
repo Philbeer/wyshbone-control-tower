@@ -1158,13 +1158,67 @@ app.get('/proxy/file', async (req, res) => {
 let executeInvestigation;
 let getAllInvestigations;
 let getInvestigationById;
+let createInvestigationForRun;
+
+// Run tracking modules - loaded at startup
+let listRecentRuns;
+let getRunById;
+let createRun;
+
+// Runs API routes
+app.get('/tower/runs', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 20;
+    const runs = await listRecentRuns(limit);
+    res.status(200).json(runs);
+  } catch (err) {
+    console.error('Error listing runs', err);
+    res.status(500).json({ error: 'Failed to list runs: ' + err.message });
+  }
+});
+
+app.get('/tower/runs/:id', async (req, res) => {
+  try {
+    const run = await getRunById(req.params.id);
+    if (!run) {
+      res.status(404).json({ error: 'Run not found' });
+      return;
+    }
+    res.status(200).json(run);
+  } catch (err) {
+    console.error('Error fetching run', err);
+    res.status(500).json({ error: 'Failed to fetch run: ' + err.message });
+  }
+});
+
+app.post('/tower/runs', async (req, res) => {
+  try {
+    const { id, source, userIdentifier, goalSummary, status, meta } = req.body ?? {};
+    if (!id || !source) {
+      res.status(400).json({ error: 'Missing required fields: id, source' });
+      return;
+    }
+    await createRun({ id, source, userIdentifier, goalSummary, status, meta });
+    res.status(201).json({ success: true });
+  } catch (err) {
+    console.error('Error creating run', err);
+    res.status(500).json({ error: 'Failed to create run: ' + err.message });
+  }
+});
 
 // Evaluator API routes
 app.post('/tower/evaluator/investigate', async (req, res) => {
   try {
     const { trigger = "manual", runId, notes } = req.body ?? {};
-    const investigation = await executeInvestigation(trigger, runId, notes);
-    res.status(200).json(investigation);
+    
+    // If runId is provided, use the enhanced investigation creator
+    if (runId) {
+      const investigation = await createInvestigationForRun({ runId, trigger, notes });
+      res.status(200).json(investigation);
+    } else {
+      const investigation = await executeInvestigation(trigger, runId, notes);
+      res.status(200).json(investigation);
+    }
   } catch (err) {
     console.error('Error executing investigation', err);
     res.status(500).json({ error: 'Failed to execute investigation: ' + err.message });
@@ -1211,9 +1265,18 @@ async function start() {
   try {
     const evaluatorModule = await import('./src/evaluator/executeInvestigation.ts');
     const storageModule = await import('./src/evaluator/storeInvestigation.ts');
+    const investigateRunModule = await import('./src/evaluator/createInvestigationForRun.ts');
+    const runStoreModule = await import('./src/evaluator/runStore.ts');
+    
     executeInvestigation = evaluatorModule.executeInvestigation;
     getAllInvestigations = storageModule.getAllInvestigations;
     getInvestigationById = storageModule.getInvestigationById;
+    createInvestigationForRun = investigateRunModule.createInvestigationForRun;
+    
+    listRecentRuns = runStoreModule.listRecentRuns;
+    getRunById = runStoreModule.getRunById;
+    createRun = runStoreModule.createRun;
+    
     console.log('✓ Evaluator modules loaded');
   } catch (err) {
     console.warn('⚠️  Failed to load evaluator modules:', err.message);

@@ -39,3 +39,22 @@ export const investigations = pgTable("investigations", {
 export const insertInvestigationSchema = createInsertSchema(investigations);
 export type InsertInvestigation = z.infer<typeof insertInvestigationSchema>;
 export type Investigation = typeof investigations.$inferSelect;
+
+export const runs = pgTable("runs", {
+  id: varchar("id").primaryKey(),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  source: text("source").notNull(),
+  user_identifier: text("user_identifier"),
+  goal_summary: text("goal_summary"),
+  status: text("status").notNull().default("completed"),
+  meta: jsonb("meta").$type<{
+    duration?: number;
+    toolsUsed?: string[];
+    tokensUsed?: number;
+    [key: string]: any;
+  }>(),
+});
+
+export const insertRunSchema = createInsertSchema(runs);
+export type InsertRun = z.infer<typeof insertRunSchema>;
+export type Run = typeof runs.$inferSelect;

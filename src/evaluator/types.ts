@@ -1,5 +1,6 @@
 export type InvestigationTrigger =
   | "manual"
+  | "manual-from-run"
   | "timeout"
   | "tool_error"
   | "behaviour_flag";

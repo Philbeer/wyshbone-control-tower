@@ -1,0 +1,326 @@
+You are my coding assistant for the Wyshbone Control Tower repl.
+
+We already have:
+
+A Status Dashboard at /status (Replit Usage Meter + Critical Path to Agentic v1).
+
+An Evaluator backend with:
+
+POST /tower/evaluator/investigate
+
+GET /tower/evaluator/investigations
+
+GET /tower/evaluator/investigations/:id
+
+Investigations stored with fields like:
+
+id, createdAt, trigger, notes
+
+diagnosis, patchSuggestion
+
+runLogs, runMeta, uiSnapshot, supervisorSnapshot etc.
+
+I want to turn this into a mini-Replit debugging console inside Tower, so that I can visually see recent runs, pick one that “looks wrong”, and fire the evaluator on it with one click, then read the diagnosis + patch in a chat-like panel.
+
+Please produce actual code, not instructions. Update or create any files you need (server, client, components, routes, types, etc.). Return full file contents for any new files.
+
+Part 1 – “Recent Runs” model and API
+1.1 Add or reuse a “Run” concept
+
+Look for any existing concept of “runs”, “jobs”, or “sessions” for UI / Supervisor in the codebase (e.g. status snapshots, logs, etc.).
+
+If a proper runs table already exists:
+
+Reuse it.
+
+If not, create a minimal run log using the existing DB / Drizzle setup:
+
+// Example shape – adjust to fit the existing schema style
+export const runs = pgTable("runs", {
+  id: text("id").primaryKey(),          // uuid
+  createdAt: timestamp("created_at").defaultNow(),
+  source: text("source").notNull(),     // "UI" | "SUP" | etc.
+  userIdentifier: text("user_identifier").nullable(), // e.g. email or company name
+  goalSummary: text("goal_summary").nullable(),       // short text of what the run was trying to do
+  status: text("status").notNull().default("completed"), // "completed" | "error" | "timeout" | ...
+  meta: jsonb("meta").nullable(),       // anything extra
+});
+
+
+Add a small helper module, e.g. src/evaluator/runStore.ts (or similar), with functions:
+
+export type RunSummary = {
+  id: string;
+  createdAt: string;
+  source: "UI" | "SUP" | string;
+  userIdentifier?: string | null;
+  goalSummary?: string | null;
+  status: string;
+};
+
+export async function listRecentRuns(limit = 20): Promise<RunSummary[]> { ... }
+export async function getRunById(id: string): Promise<RunSummary | null> { ... }
+
+
+Use whatever logging that already exists (UI / Supervisor) to populate this table; if there is already a place where a “runId” is created, hook into it there so that runs are recorded consistently.
+
+1.2 Expose runs via API
+
+Add server routes (in server.js or equivalent):
+
+// GET /tower/runs
+// Returns newest N runs (default 20)
+app.get("/tower/runs", async (req, res) => { ... });
+
+// GET /tower/runs/:id
+// Returns a single run summary
+app.get("/tower/runs/:id", async (req, res) => { ... });
+
+
+Return JSON in a shape suitable for the frontend:
+
+[
+  {
+    "id": "run_123",
+    "createdAt": "2025-11-15T02:10:00Z",
+    "source": "UI",
+    "userIdentifier": "Phil – Listers Brewery",
+    "goalSummary": "Find freehouse pubs near Brighton",
+    "status": "completed"
+  }
+]
+
+
+Handle errors with proper status codes.
+
+Part 2 – “Investigate this run” integration
+2.1 Extend the investigate endpoint to accept a runId
+
+Update POST /tower/evaluator/investigate so it accepts JSON like:
+
+{
+  "trigger": "manual",
+  "notes": "User asked for pubs but got coffee shops",
+  "runId": "run_123"
+}
+
+
+Store runId in the investigation record if there is a column for it; if not, add a nullable run_id column to the investigations table and wire it up.
+
+If runId is provided and there is a Run record:
+
+Optionally enrich the notes / context with run meta (goalSummary, source, etc.) before sending to GPT.
+
+2.2 Small helper on the server
+
+Add a helper function to create an investigation for a given run:
+
+export async function createInvestigationForRun(params: {
+  runId: string;
+  trigger: string;     // e.g. "manual-from-run"
+  notes?: string;      // extra human notes
+}): Promise<Investigation> { ... }
+
+
+This function should:
+
+Look up the run
+
+Build sensible default notes like
+"Investigation created for run {runId} (source: UI, goal: ...)."
+
+Call the same internal logic that /tower/evaluator/investigate uses.
+
+Part 3 – Frontend: Recent Runs panel
+3.1 Client API wrapper
+
+Add a client-side API helper, e.g. src/client/api/runs.ts:
+
+export type RunSummary = {
+  id: string;
+  createdAt: string;
+  source: string;
+  userIdentifier?: string | null;
+  goalSummary?: string | null;
+  status: string;
+};
+
+export async function listRuns(): Promise<RunSummary[]> { ... }
+export async function getRun(id: string): Promise<RunSummary> { ... }
+export async function createInvestigationFromRun(input: {
+  runId: string;
+  notes?: string;
+}): Promise<Investigation> { ... }  // calls POST /tower/evaluator/investigate with trigger="manual-from-run"
+
+
+Use the existing fetch helper pattern used elsewhere in the Tower client.
+
+3.2 Add “Recent runs” section to the Status Dashboard
+
+On the /status page (Wyshbone Status Dashboard), add a new section below the Critical Path card:
+
+Section title: Recent runs
+
+Table with columns:
+
+Time (pretty formatted from createdAt)
+
+Source (UI/SUP)
+
+User / Company (userIdentifier if present)
+
+Goal (goalSummary truncated)
+
+Status
+
+Actions
+
+For each row, add an “Investigate” button:
+
+Clicking it should:
+
+Open a small modal or right-hand panel asking for optional notes, e.g.
+
+“What felt wrong about this run?” (textarea)
+
+On submit, call createInvestigationFromRun({ runId, notes }).
+
+When the call succeeds:
+
+Show a success toast like “Investigation created”.
+
+Pass the new investigation id to the Evaluator Console (see Part 4) so it immediately loads and displays.
+
+Part 4 – Mini-Replit Evaluator Console (sidebar)
+
+I want a chat-like panel on the right-hand side of the Status Dashboard (and optionally the Investigations page) that acts like our own mini-Replit.
+
+4.1 Layout
+
+On the /status page:
+
+Use a two-column layout:
+
+Left: existing content (Usage Meter, Critical Path, Recent Runs).
+
+Right: a new fixed-width panel: “Evaluator Console”.
+
+On smaller screens, the console can stack below; on desktop, make it a right-hand sidebar.
+
+4.2 Console behaviour
+
+Create a React component, e.g. EvaluatorConsole.tsx, that:
+
+Maintains a currently selected investigation id (prop or internal state).
+
+Shows:
+
+If no investigation selected:
+
+A friendly empty state:
+
+“Select a run and click ‘Investigate’, or open an existing investigation to see its diagnosis here.”
+
+If an investigation is selected:
+
+A header with:
+
+Investigation id
+
+Time
+
+Trigger (e.g. manual-from-run)
+
+A chat-like timeline:
+
+Example layout:
+
+Bubble 1:
+You / Run context
+– Show:
+
+The run summary (source, goalSummary, userIdentifier)
+
+The investigation notes.
+
+Bubble 2:
+Evaluator – Diagnosis
+– The diagnosis text, rendered in a readable block.
+
+Bubble 3:
+Evaluator – Patch suggestion
+– The patchSuggestion in a <pre> / code-style bubble with:
+
+a “Copy patch” button (uses navigator.clipboard.writeText).
+
+Polls or refreshes the investigation until diagnosis and patchSuggestion are non-empty (since GPT may take a few seconds). You can do this with a simple setInterval loop for that investigation id, with a reasonable timeout.
+
+4.3 Wiring selections into the console
+
+When createInvestigationFromRun completes (from Recent Runs panel), pass the new investigation id to the Evaluator Console component so it loads that investigation immediately.
+
+Also allow the console to be driven from existing Investigations UI if present:
+
+For example, when viewing the Investigations list, clicking an investigation could set the “active investigation id” in some shared state (React context/store), and the console would pick it up.
+
+Implementation idea:
+
+Add a simple EvaluatorContext in the client:
+
+type EvaluatorContextValue = {
+  activeInvestigationId: string | null;
+  setActiveInvestigationId: (id: string | null) => void;
+};
+
+
+Wrap the dashboard in this provider so both the Recent Runs panel and the Evaluator Console can share the active investigation.
+
+Part 5 – UX & styling
+
+Match the existing Tower dashboard look:
+
+Same fonts, paddings, card style.
+
+Use Tailwind and any existing design primitives already in the project.
+
+The Evaluator Console should feel a bit like Replit’s left-hand agent chat:
+
+Bubbles, labels (“You”, “Evaluator”), clear separation.
+
+But keep it simple and focused on:
+
+Context (what run / what notes)
+
+Diagnosis
+
+Patch suggestion
+
+Make sure error states are handled:
+
+If loading the investigation fails, show a brief error message in the console.
+
+If diagnostics are still pending, show “Waiting for evaluator response…” skeleton text.
+
+Part 6 – Testing checklist
+
+When you’re done, I should be able to:
+
+Open /status in the browser.
+
+See a Recent runs table showing the latest UI/Supervisor runs.
+
+Click Investigate on one run, optionally type a note, submit.
+
+See a toast “Investigation created”, and within a few seconds:
+
+The Evaluator Console on the right populates with:
+
+Run + notes (top bubble)
+
+Diagnosis (middle bubble)
+
+Patch suggestion (bottom bubble) with a copy button.
+
+If I create more investigations, the console updates to the most recent active one, and I can see them via whatever Investigations navigation already exists.
+
+Please implement all of this end-to-end: DB/schema, server routes, client API helpers, React components, routing, and wiring into the existing Status Dashboard layout.
