@@ -1,0 +1,70 @@
+1. Run the “behaviour alignment” task in Wyshbone UI
+
+In the Wyshbone UI repl (⚠️ not Tower):
+
+Open the Replit Agent panel (bottom left: “Make, test, iterate…”).
+
+Click New task.
+
+Give it a name like: UI-010 Align chat with Tower tests.
+
+Paste this exact prompt as the task description:
+
+You are my coding assistant for the Wyshbone UI repl.
+
+Goal: bring Wyshbone UI’s chat behaviour in line with the Tower behaviour tests so the following tests can PASS without breaking the overall UX:
+
+- "greeting-basic": expects the first assistant reply in a new chat to:
+  - clearly greet the user, AND
+  - clearly ask for their high-level sales/lead goal (e.g. “what’s your main sales or lead generation goal today?”).
+
+- "personalisation-domain": when a user has provided their company / website / domain or we have it in context,
+  the assistant should:
+  - explicitly acknowledge that domain/company in its early responses, and
+  - adapt its wording slightly to that business (e.g. “since you’re a brewery…”, “for a coffee roastery like yours…”).
+
+- "lead-search-basic": when the user asks for leads (e.g. “find me burger bars in Kent”):
+  - the assistant should confirm it is running a lead search (not just chatting),
+  - call the existing lead search / Wyshbone Global Database tools as it already does,
+  - and mention in the reply that it has triggered or will trigger a search and will return concrete venue results.
+
+Implementation requirements:
+
+1. DO NOT change the Tower repl. All changes belong in the Wyshbone UI repl (chat behaviour, prompts, and tool-calling logic).
+
+2. Find the central place where:
+   - the initial system / assistant instructions for the chat model are defined, and
+   - messages are assembled for the LLM (including user + assistant history and any tool messages).
+
+3. Update the behaviour so that, on a brand-new chat session:
+   - The first assistant message:
+     - greets the user,
+     - briefly explains what Wyshbone can do,
+     - AND always asks an explicit question like:
+       “What’s your main sales or lead generation goal today?” or equivalent.
+   - This “ask for goal” must be present in the plain-text content so the Tower test can see it.
+
+4. Add a small, well-structured “behaviour contract” to the system / assistant prompt so the model consistently:
+   - Uses any known company / website / domain to personalise its language (“since you’re a <business-type>…”, etc.).
+   - When the user asks for leads, clearly states that it is running a lead search and will return specific businesses,
+     not just generic advice.
+
+   Keep this behaviour contract compact but explicit so it is stable and cheap to run.
+
+5. Make only minimal, surgical code changes:
+   - Prefer editing existing prompts / helper functions rather than adding lots of new files.
+   - Do not hardcode any specific industries (breweries, coffee roasteries, etc.); keep it generic and data-driven.
+
+6. After changes:
+   - Ensure existing tool calls (Wyshbone Global Database, Deep Research, Monitoring, etc.) still work as before.
+   - Run any local tests / type checks that exist in this repo and fix breakages.
+
+7. When you are done, summarise:
+   - exactly which files you changed,
+   - the key prompt / logic changes you made,
+   - and why these should make “greeting-basic”, “personalisation-domain”, and “lead-search-basic” pass.
+
+Produce concrete code edits (full file contents or precise patches), not high-level advice.
+
+
+Let the agent run until it says it’s finished and has restarted the app.
