@@ -1,0 +1,271 @@
+You are my coding assistant for the Wyshbone Tower repl.
+
+Goal: Implement **EVAL-008: Live User Run Logging & Investigation Bridge**.
+
+I want Tower to log **real Wyshbone UI user conversations** (not just behaviour tests), show them on the dashboard, and let me trigger investigations + patch suggestions from those runs. This should integrate cleanly with EVAL-001 → EVAL-007.
+
+High-level requirements:
+
+- When a real user uses Wyshbone UI chat, the UI should be able to POST a "run log" into Tower.
+- Tower should store these runs with metadata (user, session, input, output, duration, status, etc.).
+- The dashboard should show a “Recent Runs” list for LIVE user interactions, separate from behaviour tests.
+- Each live run should be “investigatable”: I can click “Investigate” on a row, and Tower will open or reuse an Investigation wired into the existing pipeline (EVAL-001 + EVAL-005 + EVAL-006/007).
+- EVAL-003-style auto-detection logic should be able to run on these live runs as well (timeouts, obvious errors, junk output, etc.), but we can keep that conservative and non-spammy.
+
+You are working **only in the Wyshbone Tower repl**. Do not change the Wyshbone UI code here; instead, expose clean APIs and document how UI should call them.
+
+--------------------------------------------------
+CONTEXT (WHAT ALREADY EXISTS)
+--------------------------------------------------
+
+Tower currently has:
+
+- EVAL-001:
+  - Run logging for behaviour tests / internal executions.
+  - Manual Investigations.
+  - GPT-based “Investigator” pipeline.
+  - Investigations table + API.
+  - Evaluator Console UI.
+
+- EVAL-002:
+  - Behaviour tests (greeting, domain personalization, lead search, monitoring setup).
+  - Test_runs storage.
+  - BehaviourTestsCard in the dashboard.
+
+- EVAL-003:
+  - Auto-detection logic (timeouts, errors, regressions, poor scores).
+  - Creates Investigations automatically for bad behaviour test runs.
+
+- EVAL-004:
+  - Patch gatekeeper / sandbox (patch evaluation using behaviour tests before applying).
+
+- EVAL-005:
+  - Junior Developer / Patch Suggestions.
+  - Dev Brief + patch suggestions, evaluated by EVAL-004.
+
+- EVAL-007:
+  - Bridge from behaviour tests → Investigations.
+  - “Investigate” button per behaviour test, with deduplication and run_meta.
+
+There is already some concept of “runs” in the schema and a “Recent runs” view in the dashboard, but currently it only shows specific internal runs, not live UI user conversations.
+
+--------------------------------------------------
+WHAT EVAL-008 MUST DELIVER
+--------------------------------------------------
+
+### 1. Define a clean run-log API for Wyshbone UI
+
+Implement a **new Tower endpoint** that Wyshbone UI can call:
+
+- `POST /tower/runs/log`
+
+This endpoint will be called by the UI whenever a chat interaction completes.
+
+The body should accept at least:
+
+- `source`: string (e.g. "live_user")
+- `userId`: string | null (Wyshbone user id, if known)
+- `sessionId`: string | null (chat/session id)
+- `request`: {
+    - `inputText`: string (the user’s message that triggered this run)
+    - `toolCalls?`: array with tool name(s) + args (if any)
+  }
+- `response`: {
+    - `outputText`: string (final assistant plain text reply)
+    - `toolResultsSummary?`: string | null (optional summary of tool result)
+  }
+- `status`: "success" | "error" | "timeout" | "fail"
+- `durationMs`: number (total time taken)
+- `meta?`: generic JSON (for extra fields later: model name, latency breakdowns, etc.)
+
+Implementation details:
+
+- Reuse existing run logging schema/code as much as possible.
+- If there is already a `runs` or `test_runs` table, extend it rather than creating an entirely new one.
+- Add a field to distinguish **source**:
+  - e.g. "behaviour_test", "patch_eval", "live_user", etc.
+- Validate input (basic Zod or similar) so bad callers don’t crash Tower.
+- Return a simple `{ id, status }` JSON payload.
+
+No authentication complexity: assume UI will call this from server-side with a shared secret/header if needed (you can add an optional header check if consistent with existing sources.json/exportKey usage, but keep it simple).
+
+Also create a **short integration guide** file, e.g.:
+
+- `docs/EVAL-008_UI_INTEGRATION.md`
+
+Describe:
+
+- Endpoint: `/tower/runs/log`
+- HTTP method: POST
+- Required JSON shape (with example payload).
+- Recommended status mapping:
+  - HTTP 200 for success.
+  - HTTP 4xx/5xx only for genuine failures.
+
+### 2. Persist and label live runs in the database
+
+Update the schema (Drizzle or equivalent) so that:
+
+- Live runs are saved in the existing runs table (if present) or a new table that is clearly aligned with current run logging.
+- Each run has:
+  - Unique ID.
+  - `created_at` timestamp.
+  - `source` ("live_user", etc.).
+  - `user_id` / `session_id` (nullable).
+  - `request_text` (first user message that kicked off the run).
+  - `response_text` (assistant’s final markdown/plain reply).
+  - `status` (success/error/timeout/fail).
+  - `duration_ms`.
+  - Generic `meta` JSON for extra context.
+
+If behaviour tests already store runs in a table, extend that schema instead of duplicating conceptually identical tables.
+
+Add migrations via the existing migration system (drizzle-kit, etc.) and ensure they run cleanly.
+
+### 3. Dashboard: Show “Recent Live Runs”
+
+On the Tower dashboard (where behaviour tests and investigations are shown):
+
+- Add a **“Recent Live Runs” panel** (or fix the existing Recent Runs panel) that:
+
+  - Shows only runs where `source = 'live_user'`.
+  - Sorted by `created_at DESC`.
+  - Limited to e.g. last 20 runs.
+
+Each row should display:
+
+- Timestamp (relative or absolute).
+- User / session (e.g. “demo@…”, “anonymous”, or session id).
+- Short input preview (first ~80 chars).
+- Short response preview (first ~80 chars).
+- Status badge (success / error / timeout / fail).
+- Duration (ms or seconds).
+
+UX:
+
+- Clicking a row should open a side panel or modal with the **full details**:
+  - Full user input.
+  - Full assistant response.
+  - Status, duration, source, userId / sessionId.
+  - Any tool calls or meta that’s available.
+
+Make this visually distinct from behaviour tests. Behaviour tests are synthetic; live runs are real user traffic.
+
+### 4. Make live runs “investigatable”
+
+From a live run, I must be able to trigger an Investigation:
+
+- Add an **“Investigate” button** for each live run row (and/or in the details panel).
+
+When I click Investigate on a live run:
+
+- Call a new helper in the evaluator layer, something like:
+  - `ensureInvestigationForLiveRun(runId, options)` or similar.
+- This should:
+
+  - Create a new Investigation if one does not exist for this run (with reasonable dedup logic so clicking twice doesn’t spam).
+  - Attach the run’s data into investigation metadata (run id, source = live_user, userId, sessionId, etc.).
+  - Seed the investigation notes with a standard header such as:
+
+    "🤖 AUTO/USER-TRIGGERED INVESTIGATION (LIVE RUN)
+     Source: live_user
+     Run ID: …
+     Status: …
+     Summary: [short summary of what went wrong, if known]"
+
+- Optionally call the existing GPT-based investigator pipeline **only when explicitly triggered**, not automatically for every run.
+
+Dedup strategy:
+
+- If an Investigation already exists for this runId (and source=live_user), reuse it:
+  - Append a note: “Additional investigation trigger at TIME from dashboard”.
+  - Do NOT create a new row.
+
+You can use the same pattern EVAL-007 used for behaviour test investigations (run_meta / notes fallback / self-healing), but adapted for live runs.
+
+### 5. (Optional but preferred) Auto-detection for live runs
+
+Integrate EVAL-003 auto-detection logic so it can also watch live runs:
+
+- **Don’t** auto-investigate every single live run.
+- Instead, define a small, conservative set of triggers, e.g.:
+
+  - Repeated errors for the same user/session within a short window.
+  - Timeouts above a hard threshold.
+  - Clearly empty / junk responses (very short and useless vs. query).
+
+Minimal implementation:
+
+- Add a small function like `maybeAutoDetectIssueForLiveRun(run)` that:
+  - Checks some simple rules.
+  - Optionally calls the investigator pipeline.
+  - Logs any auto-detected issues with a clear `[AutoDetect-Live]` prefix.
+
+Wire this into the live run logging path so it runs **after** a run is saved.
+
+### 6. Keep everything backwards compatible
+
+Important:
+
+- Do NOT break or significantly change any EVAL-001..EVAL-007 semantics.
+- Behaviour tests must keep working exactly as before.
+- Patch evaluation, suggestions, and investigations should remain unchanged except for the **new ability** to originate investigations from live runs.
+
+- Do not remove or drastically alter existing endpoints or React components, unless clearly necessary and strictly backwards-compatible.
+
+### 7. Testing & acceptance
+
+Before you decide you’re done, verify:
+
+1. You can POST a fake live run from the Replit Shell, e.g.:
+
+   curl -X POST http://localhost:5000/tower/runs/log \
+     -H "Content-Type: application/json" \
+     -d '{
+       "source": "live_user",
+       "userId": "demo-user",
+       "sessionId": "demo-session-123",
+       "request": { "inputText": "Find me burger bars in Kent" },
+       "response": { "outputText": "Here is what I found..." },
+       "status": "success",
+       "durationMs": 2345
+     }'
+
+   - This should store a new run row with source=live_user.
+
+2. The new run appears in the dashboard “Recent Live Runs” list with correct data and badges.
+
+3. Clicking “Investigate” on that run:
+
+   - Creates or reuses an Investigation.
+   - Investigation appears in the Investigations panel.
+   - Investigation notes include the live run context.
+
+4. Behaviour tests still work:
+   - “Run all” in behaviour tests still returns PASS/FAIL/ERROR as before.
+   - Existing EVAL-003 auto-detection still works for behaviour tests.
+
+5. No TypeScript errors, no failing imports, no crashes.
+
+### 8. Documentation
+
+Add or update:
+
+- `replit.md` to document EVAL-008.
+- `EVAL-008_LIVE_RUN_LOGGING.md` (or similar) that briefly explains:
+  - How UI should call `/tower/runs/log`.
+  - What the dashboard shows.
+  - How to trigger investigations from live runs.
+
+--------------------------------------------------
+Implementation style:
+
+- Produce actual code changes (TS, routes, React components, schema, migrations).
+- Be explicit and concrete; no pseudo-code.
+- Keep changes minimal and coherent with existing architecture and naming.
+- Comment code where non-obvious.
+
+Do NOT touch the Wyshbone UI repo here. Only:
+- expose the Tower API,
+- update Tower’s DB + dashboard,
+- and include a clear UI integration guide for me to use later.
