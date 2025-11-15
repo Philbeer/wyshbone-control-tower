@@ -1366,6 +1366,11 @@ async function start() {
     patchRoutesModule.initializePatchRoutes(autoDetectAndTriggerInvestigation);
     app.use('/tower/patch', patchRoutesModule.default);
     
+    // Load junior dev routes (EVAL-005)
+    const juniorDevRoutesModule = await import('./server/routes-junior-dev.ts');
+    juniorDevRoutesModule.initializeJuniorDevRoutes(autoDetectAndTriggerInvestigation);
+    app.use('/tower', juniorDevRoutesModule.default);
+    
     // Ensure behaviour test definitions are seeded
     await ensureBehaviourTestsSeeded();
     
