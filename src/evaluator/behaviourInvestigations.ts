@@ -101,12 +101,13 @@ export async function ensureBehaviourInvestigationForRun(
     .update(investigations)
     .set({
       run_meta: {
+        agent: 'tower' as const,
+        description: `Behaviour test: ${opts.testName}`,
         source: 'behaviour-test',
         testId: opts.testId,
         testName: opts.testName,
         triggerReason: opts.triggerReason,
-        agent: 'tower' as const,
-      },
+      } as any, // Cast to any because we're adding extra fields beyond the base type
     })
     .where(eq(investigations.id, investigation.id));
 

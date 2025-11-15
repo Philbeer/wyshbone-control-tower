@@ -3,9 +3,11 @@ import type { BehaviourTestRun } from "../../shared/schema";
 import type { InvestigationTrigger } from "./types";
 import { getLastRunForTest, getRecentErrorsForTest } from "./runLogger";
 import { executeInvestigation } from "./executeInvestigation";
+import { ensureBehaviourInvestigationForRun } from "./behaviourInvestigations";
+import { getAllBehaviourTestDefinitions } from "./behaviourTests";
 import { db } from "../lib/db";
 import { investigations } from "../../shared/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 
 const TIMEOUT_THRESHOLD_MS = 10000;
 const ERROR_WINDOW_MINUTES = 5;
@@ -96,14 +98,15 @@ export async function autoDetectAndTriggerInvestigation(
     return;
   }
 
-  // Check if investigation already exists for this run
-  const existing = await db.query.investigations.findFirst({
+  // EVAL-007: Check if behaviour test investigation already exists for this testId
+  // (deduplication is now handled by ensureBehaviourInvestigationForRun)
+  const existingForRun = await db.query.investigations.findFirst({
     where: and(
       eq(investigations.run_id, runId),
     ),
   });
 
-  if (existing) {
+  if (existingForRun) {
     console.log(`[AutoDetect] Investigation already exists for run ${runId}, skipping`);
     return;
   }
@@ -113,20 +116,30 @@ export async function autoDetectAndTriggerInvestigation(
   
   console.log(`[AutoDetect] Triggering investigation for testId=${result.testId} reason=${primaryTrigger.reason}`);
   
-  // Build detailed notes
-  const notes = buildInvestigationNotes(result, triggers, runId);
+  // EVAL-007: Get test metadata
+  const testDefinitions = getAllBehaviourTestDefinitions();
+  const testDef = testDefinitions.find(t => t.id === result.testId);
+  const testName = testDef?.name || result.testId;
+
+  // Determine seriousness level
+  const seriousness = primaryTrigger.reason === 'error' ? 'error' : 
+                      primaryTrigger.reason === 'timeout' ? 'error' :
+                      primaryTrigger.reason === 'fail' ? 'error' :
+                      primaryTrigger.reason === 'regression' ? 'warning' : 'info';
 
   try {
-    // Create and execute investigation using existing pipeline
-    await executeInvestigation(
-      mapReasonToTrigger(primaryTrigger.reason),
+    // EVAL-007: Create behaviour test investigation (with deduplication)
+    await ensureBehaviourInvestigationForRun({
+      testId: result.testId,
+      testName,
       runId,
-      notes
-    );
+      triggerReason: triggers.map(t => `[${t.reason.toUpperCase()}] ${t.summary}`).join('; '),
+      seriousness,
+    });
 
-    console.log(`[AutoDetect] Investigation created successfully for run ${runId}`);
+    console.log(`[AutoDetect] Behaviour investigation created successfully for testId=${result.testId}`);
   } catch (error: any) {
-    console.error(`[AutoDetect] Failed to create investigation:`, error.message);
+    console.error(`[AutoDetect] Failed to create behaviour investigation:`, error.message);
   }
 }
 
