@@ -4,8 +4,25 @@ import { getInvestigation, getRun, type Investigation, type RunSummary } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Copy, Check, AlertCircle } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Copy, Check, AlertCircle, FileText, ExternalLink } from "lucide-react";
 import { format } from "date-fns";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+
+type PatchSuggestion = {
+  id: string;
+  status: string;
+  summary: string | null;
+  source: string;
+  createdAt: string;
+  updatedAt: string;
+  externalLink: string | null;
+  patchEvaluationId: string | null;
+  evaluation?: {
+    status: string;
+    reasons: string[];
+  };
+};
 
 export function EvaluatorConsole() {
   const { activeInvestigationId } = useEvaluator();
@@ -15,6 +32,11 @@ export function EvaluatorConsole() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [pollCount, setPollCount] = useState(0);
+  const [devBriefOpen, setDevBriefOpen] = useState(false);
+  const [devBrief, setDevBrief] = useState<any>(null);
+  const [patchSuggestions, setPatchSuggestions] = useState<PatchSuggestion[]>([]);
+  const [loadingBrief, setLoadingBrief] = useState(false);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
 
   useEffect(() => {
     if (!activeInvestigationId) {
@@ -71,6 +93,62 @@ export function EvaluatorConsole() {
       await navigator.clipboard.writeText(investigation.patchSuggestion);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleViewDevBrief = async () => {
+    if (!activeInvestigationId) return;
+    
+    setLoadingBrief(true);
+    try {
+      const response = await fetch(`/tower/investigations/${activeInvestigationId}/dev-brief`);
+      if (!response.ok) throw new Error('Failed to load dev brief');
+      const data = await response.json();
+      setDevBrief(data);
+      setDevBriefOpen(true);
+    } catch (err) {
+      console.error('Error loading dev brief:', err);
+    } finally {
+      setLoadingBrief(false);
+    }
+  };
+
+  const loadPatchSuggestions = async () => {
+    if (!activeInvestigationId) return;
+    
+    setLoadingSuggestions(true);
+    try {
+      const response = await fetch(`/tower/investigations/${activeInvestigationId}/patch-suggestions`);
+      if (!response.ok) throw new Error('Failed to load patch suggestions');
+      const data = await response.json();
+      setPatchSuggestions(data.suggestions || []);
+    } catch (err) {
+      console.error('Error loading patch suggestions:', err);
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeInvestigationId) {
+      loadPatchSuggestions();
+    } else {
+      setPatchSuggestions([]);
+    }
+  }, [activeInvestigationId]);
+
+  const getStatusBadgeVariant = (status: string) => {
+    switch (status) {
+      case 'approved':
+        return 'default';
+      case 'rejected':
+        return 'destructive';
+      case 'applied':
+        return 'default';
+      case 'evaluating':
+        return 'secondary';
+      default:
+        return 'outline';
     }
   };
 
@@ -208,7 +286,116 @@ export function EvaluatorConsole() {
             </div>
           </div>
         )}
+
+        {/* Junior Dev Section */}
+        <div className="space-y-2 border-t pt-4">
+          <div className="text-xs font-medium text-muted-foreground">Junior Developer Integration</div>
+          
+          {/* Dev Brief Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleViewDevBrief}
+            disabled={loadingBrief}
+            data-testid="button-view-dev-brief"
+            className="w-full"
+          >
+            <FileText className="h-3 w-3 mr-2" />
+            {loadingBrief ? 'Loading...' : 'View Dev Brief / Patch Prompt'}
+          </Button>
+
+          {/* Patch Suggestions List */}
+          {patchSuggestions.length > 0 && (
+            <div className="space-y-2 mt-3">
+              <div className="text-xs font-medium text-muted-foreground">
+                Patch Suggestions ({patchSuggestions.length})
+              </div>
+              {patchSuggestions.map((suggestion) => (
+                <div
+                  key={suggestion.id}
+                  className="bg-card border rounded-lg p-3 space-y-2"
+                  data-testid={`patch-suggestion-${suggestion.id}`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-medium truncate">
+                        {suggestion.summary || `Patch ${suggestion.id.slice(0, 8)}`}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        Source: {suggestion.source} • {format(new Date(suggestion.createdAt), "PPp")}
+                      </div>
+                    </div>
+                    <Badge variant={getStatusBadgeVariant(suggestion.status)} data-testid={`badge-status-${suggestion.status}`}>
+                      {suggestion.status}
+                    </Badge>
+                  </div>
+                  
+                  {suggestion.evaluation && suggestion.evaluation.reasons && suggestion.evaluation.reasons.length > 0 && (
+                    <div className="text-xs space-y-1 pt-2 border-t">
+                      <div className="font-medium">Evaluation:</div>
+                      <ul className="list-disc list-inside space-y-0.5 text-muted-foreground">
+                        {suggestion.evaluation.reasons.slice(0, 3).map((reason, i) => (
+                          <li key={i} className="truncate">{reason}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  
+                  {suggestion.externalLink && (
+                    <a
+                      href={suggestion.externalLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-primary hover:underline flex items-center gap-1"
+                      data-testid="link-external"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      View change
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {loadingSuggestions && (
+            <div className="text-xs text-muted-foreground italic">Loading patch suggestions...</div>
+          )}
+        </div>
       </CardContent>
+
+      {/* Dev Brief Dialog */}
+      <Dialog open={devBriefOpen} onOpenChange={setDevBriefOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Developer Brief / Patch Prompt</DialogTitle>
+            <DialogDescription>
+              Use this context to generate a patch for this investigation
+            </DialogDescription>
+          </DialogHeader>
+          {devBrief && (
+            <div className="space-y-4">
+              <div className="bg-muted rounded-lg p-4">
+                <pre className="text-xs whitespace-pre-wrap font-mono overflow-x-auto">
+                  {JSON.stringify(devBrief, null, 2)}
+                </pre>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  navigator.clipboard.writeText(JSON.stringify(devBrief, null, 2));
+                }}
+                data-testid="button-copy-dev-brief"
+                className="w-full"
+              >
+                <Copy className="h-3 w-3 mr-2" />
+                Copy to Clipboard
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
