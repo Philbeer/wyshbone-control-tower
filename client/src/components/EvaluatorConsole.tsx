@@ -5,9 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Copy, Check, AlertCircle, FileText, ExternalLink } from "lucide-react";
+import { Copy, Check, AlertCircle, FileText, ExternalLink, Sparkles } from "lucide-react";
 import { format } from "date-fns";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
 
 type PatchSuggestion = {
   id: string;
@@ -37,6 +38,8 @@ export function EvaluatorConsole() {
   const [patchSuggestions, setPatchSuggestions] = useState<PatchSuggestion[]>([]);
   const [loadingBrief, setLoadingBrief] = useState(false);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [autoPatchLoading, setAutoPatchLoading] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!activeInvestigationId) {
@@ -110,6 +113,52 @@ export function EvaluatorConsole() {
       console.error('Error loading dev brief:', err);
     } finally {
       setLoadingBrief(false);
+    }
+  };
+
+  const handleAutoPatch = async () => {
+    if (!activeInvestigationId) return;
+    
+    setAutoPatchLoading(true);
+    try {
+      const response = await fetch(`/tower/investigations/${activeInvestigationId}/auto-patch`, {
+        method: 'POST',
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        if (data.reason === 'no_patch_possible') {
+          toast({
+            title: "Auto-patch not possible",
+            description: data.details || "The AI could not generate a safe patch for this investigation",
+            variant: "default",
+          });
+        } else {
+          toast({
+            title: "Auto-patch failed",
+            description: data.details || data.error || "Failed to generate auto-patch",
+            variant: "destructive",
+          });
+        }
+        return;
+      }
+
+      toast({
+        title: "Auto-patch created",
+        description: `Suggestion created and ${data.evaluation?.status === 'approved' ? 'approved' : 'rejected'} by evaluation`,
+      });
+
+      loadPatchSuggestions();
+    } catch (err) {
+      console.error('Error auto-patching:', err);
+      toast({
+        title: "Auto-patch failed",
+        description: err instanceof Error ? err.message : "An error occurred",
+        variant: "destructive",
+      });
+    } finally {
+      setAutoPatchLoading(false);
     }
   };
 
@@ -297,18 +346,33 @@ export function EvaluatorConsole() {
         <div className="space-y-2 border-t pt-4">
           <div className="text-xs font-medium text-muted-foreground">Junior Developer Integration</div>
           
-          {/* Dev Brief Button */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleViewDevBrief}
-            disabled={loadingBrief}
-            data-testid="button-view-dev-brief"
-            className="w-full"
-          >
-            <FileText className="h-3 w-3 mr-2" />
-            {loadingBrief ? 'Loading...' : 'View Dev Brief / Patch Prompt'}
-          </Button>
+          <div className="flex gap-2">
+            {/* Dev Brief Button */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleViewDevBrief}
+              disabled={loadingBrief}
+              data-testid="button-view-dev-brief"
+              className="flex-1"
+            >
+              <FileText className="h-3 w-3 mr-2" />
+              {loadingBrief ? 'Loading...' : 'View Dev Brief'}
+            </Button>
+
+            {/* Auto Patch Button */}
+            <Button
+              variant="default"
+              size="sm"
+              onClick={handleAutoPatch}
+              disabled={autoPatchLoading}
+              data-testid="button-auto-patch"
+              className="flex-1"
+            >
+              <Sparkles className="h-3 w-3 mr-2" />
+              {autoPatchLoading ? 'Generating...' : 'Auto patch (beta)'}
+            </Button>
+          </div>
 
           {/* Patch Suggestions List */}
           {patchSuggestions.length > 0 && (
