@@ -71,6 +71,42 @@ Server runs on port defined by `PORT` environment variable (default: 3000).
 
 ## Recent Changes
 
+- 2025-11-15: EVAL-002: Automated Behaviour Tests
+  - **Test Harness & Definitions**: Created 4 real behaviour tests that probe Wyshbone UI:
+    - greeting-basic: Verifies welcome message and goal inquiry on new user conversation
+    - personalisation-domain: Checks domain acknowledgment and business-specific adaptation
+    - lead-search-basic: Validates lead search triggering and result delivery
+    - monitor-setup-basic: Confirms monitoring setup acknowledgment and recurring behavior
+  - **Database Schema**: Added behaviour_tests and behaviour_test_runs tables
+    - Tests table: id, name, description, category, isActive
+    - Runs table: id, createdAt, testId, status (pass/fail/error), details, rawLog, buildTag, durationMs
+  - **Test Execution Engine** (src/evaluator/behaviourTests.ts):
+    - Calls Wyshbone UI /api/chat endpoint with scenario-specific prompts
+    - Uses regex heuristics to determine pass/fail (greeting patterns, domain mentions, search indicators, monitoring language)
+    - Gracefully handles errors when UI unavailable (503) and reports as "error" status
+    - Measures execution time for performance tracking
+  - **Storage Layer** (src/evaluator/behaviourTestStore.ts):
+    - ensureBehaviourTestsSeeded() auto-populates test definitions on startup
+    - recordBehaviourTestRun() persists results with build tags
+    - getTestsWithLatestRuns() returns tests paired with most recent execution
+    - Handles text-to-boolean conversion for isActive, text-to-number for durationMs
+  - **API Endpoints**:
+    - GET /tower/behaviour-tests - Returns all tests with latest run status
+    - POST /tower/behaviour-tests/run - Executes tests (supports runAll, testId, buildTag)
+  - **Dashboard UI** (BehaviourTestsCard):
+    - Integrated into /dashboard between Tower Status and Recent Runs
+    - Shows all 4 tests with status badges (green=pass, red=fail, orange=error, gray=never run)
+    - "Run all" button executes full test suite with loading state
+    - Individual "Run" buttons per test for targeted execution
+    - Real-time updates with timestamps ("Just now", "2m ago", etc.)
+    - Displays test details, category, duration, and failure diagnostics
+  - **End-to-End Testing**: Playwright verification confirms full workflow from UI to API to database
+  - Architecture notes:
+    - Tests auto-seed on server startup
+    - Results persist with optional build tags for tracking across deployments
+    - Simple heuristic-based pass/fail (no GPT calls for smoke tests)
+    - Ready for EVAL-003 multi-run pattern analysis
+
 - 2025-11-15: EVAL-001B: Interactive Debugging Console with Runs Tracking
   - **React Dashboard Integration**: Added Vite middleware to serve React SPA at `/dashboard`
     - Hybrid architecture: Server-rendered routes (`/status`) + React app (`/dashboard`, `/`)
