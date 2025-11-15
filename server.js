@@ -1195,13 +1195,16 @@ app.get('/tower/runs/:id', async (req, res) => {
 
 app.post('/tower/runs', async (req, res) => {
   try {
-    const { id, source, userIdentifier, goalSummary, status, meta } = req.body ?? {};
-    if (!id || !source) {
-      res.status(400).json({ error: 'Missing required fields: id, source' });
-      return;
-    }
-    await createRun({ id, source, userIdentifier, goalSummary, status, meta });
-    res.status(201).json({ success: true });
+    const { source, userIdentifier, goalSummary, status, meta } = req.body ?? {};
+    
+    // Generate ID if not provided
+    const id = req.body?.id || `run-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    // Default source to "MANUAL" if not provided
+    const runSource = source || "MANUAL";
+    
+    await createRun({ id, source: runSource, userIdentifier, goalSummary, status, meta });
+    const createdRun = await getRunById(id);
+    res.status(201).json(createdRun);
   } catch (err) {
     console.error('Error creating run', err);
     res.status(500).json({ error: 'Failed to create run: ' + err.message });

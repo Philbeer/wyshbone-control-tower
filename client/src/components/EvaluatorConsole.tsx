@@ -43,11 +43,14 @@ export function EvaluatorConsole() {
           }
         }
 
-        // Poll until diagnosis is complete
-        if (!inv.diagnosis && pollCount < 30) {
+        // Poll until diagnosis and patch suggestion are complete
+        if ((!inv.diagnosis || !inv.patchSuggestion) && pollCount < 30) {
           pollInterval = setTimeout(() => {
             setPollCount((c) => c + 1);
           }, 2000);
+        } else if (inv.diagnosis && inv.patchSuggestion) {
+          // Reset poll count when investigation is complete
+          setPollCount(0);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load investigation");
