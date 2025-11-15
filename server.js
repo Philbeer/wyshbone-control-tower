@@ -1188,6 +1188,8 @@ let getTestsWithLatestRuns;
 let recordBehaviourTestRun;
 let ensureBehaviourTestsSeeded;
 let autoDetectAndTriggerInvestigation;
+let ensureBehaviourInvestigationForRun;  // EVAL-007
+let getAllBehaviourTestDefinitions;  // EVAL-007
 
 // Runs API routes
 app.get('/tower/runs', async (req, res) => {
@@ -1323,6 +1325,54 @@ app.post('/tower/behaviour-tests/run', async (req, res) => {
   }
 });
 
+// EVAL-007: Manual investigation trigger for behaviour tests
+app.post('/tower/behaviour-tests/:testId/investigate', async (req, res) => {
+  try {
+    const { testId } = req.params;
+    
+    // Validate test exists
+    if (!getAllBehaviourTestDefinitions) {
+      return res.status(500).json({ error: 'Behaviour test system not initialized' });
+    }
+    
+    const testDefs = getAllBehaviourTestDefinitions();
+    const testDef = testDefs.find(t => t.id === testId);
+    
+    if (!testDef) {
+      return res.status(404).json({ error: `Unknown test ID: ${testId}` });
+    }
+    
+    // Get most recent run for this test (if any)
+    const testsWithRuns = await getTestsWithLatestRuns();
+    const testWithRun = testsWithRuns.find(t => t.test.id === testId);
+    const latestRun = testWithRun?.latestRun;
+    
+    // Determine trigger reason
+    let triggerReason = 'Manual investigation requested from behaviour tests dashboard';
+    if (latestRun) {
+      triggerReason += `. Last run status: ${latestRun.status.toUpperCase()}`;
+    } else {
+      triggerReason += '. No previous runs found';
+    }
+    
+    // Create or reuse investigation
+    const investigation = await ensureBehaviourInvestigationForRun({
+      testId,
+      testName: testDef.name,
+      runId: latestRun?.id,
+      triggerReason,
+      seriousness: 'info',
+    });
+    
+    res.status(200).json(investigation);
+  } catch (err) {
+    console.error('Error creating manual investigation for behaviour test', err);
+    res.status(500).json({ 
+      error: 'Failed to create investigation: ' + err.message 
+    });
+  }
+});
+
 // Note: Vite middleware will handle React app routes (/, /dashboard, etc.)
 
 // Start server
@@ -1360,6 +1410,11 @@ async function start() {
     
     const autoDetectModule = await import('./src/evaluator/autoDetect.ts');
     autoDetectAndTriggerInvestigation = autoDetectModule.autoDetectAndTriggerInvestigation;
+    
+    // EVAL-007: Load behaviour investigation module
+    const behaviourInvestigationsModule = await import('./src/evaluator/behaviourInvestigations.ts');
+    ensureBehaviourInvestigationForRun = behaviourInvestigationsModule.ensureBehaviourInvestigationForRun;
+    getAllBehaviourTestDefinitions = behaviourTestsModule.getAllBehaviourTestDefinitions;
     
     // Load patch evaluator routes (EVAL-004)
     const patchRoutesModule = await import('./server/routes-patch.ts');
