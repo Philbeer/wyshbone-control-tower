@@ -58,6 +58,20 @@ A sophisticated evaluation system is integrated to automate testing, diagnosis, 
     *   24-hour deduplication prevents investigation spam for repeated test failures.
     *   Investigation metadata stored in `run_meta` jsonb field includes `testId`, `testName`, and `source: "behaviour_test"`.
     *   REST API endpoint: `POST /tower/behaviour-tests/:testId/investigate` for manual investigation creation.
+*   **Single-Test Scoped Behaviour Auto-Patch Flow (EVAL-008):**
+    *   Surgical patch generation focused on fixing a single behaviour test at a time.
+    *   Every behaviour test investigation includes explicit `focus` metadata in `run_meta`:
+        *   `type: "behaviour-single-test"`
+        *   `focus.kind: "behaviour-test"`
+        *   `focus.testId` and `focus.testName` for the specific test
+    *   Dev briefs respect focus scope, filtering to only the targeted test's data and history.
+    *   Auto-patch generator receives explicit single-test instructions:
+        *   "Fix ONLY this test"
+        *   "Make the SMALLEST possible change"
+        *   "Do NOT touch unrelated behaviour tests or modules"
+    *   Patch suggestions tagged with focus metadata for observability.
+    *   Patch evaluations log focus in `evaluationMeta` for human-readable summaries.
+    *   Gatekeeper pipeline (EVAL-004) remains strict and unchanged, but patches are more surgical and likely to pass.
 
 **UI/UX:**
 
