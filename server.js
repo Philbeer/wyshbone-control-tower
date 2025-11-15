@@ -1181,6 +1181,13 @@ let listRecentRuns;
 let getRunById;
 let createRun;
 
+// Behaviour test modules - loaded at startup
+let runBehaviourTest;
+let runAllBehaviourTests;
+let getTestsWithLatestRuns;
+let recordBehaviourTestRun;
+let ensureBehaviourTestsSeeded;
+
 // Runs API routes
 app.get('/tower/runs', async (req, res) => {
   try {
@@ -1268,6 +1275,43 @@ app.get('/tower/evaluator/investigations/:id', async (req, res) => {
   }
 });
 
+// Behaviour Tests API routes
+app.get('/tower/behaviour-tests', async (req, res) => {
+  try {
+    const testsWithRuns = await getTestsWithLatestRuns();
+    res.status(200).json(testsWithRuns);
+  } catch (err) {
+    console.error('Error fetching behaviour tests', err);
+    res.status(500).json({ error: 'Failed to fetch behaviour tests: ' + err.message });
+  }
+});
+
+app.post('/tower/behaviour-tests/run', async (req, res) => {
+  try {
+    const { testId, buildTag, runAll } = req.body ?? {};
+    
+    let results;
+    if (runAll || !testId) {
+      // Run all active tests
+      results = await runAllBehaviourTests({ buildTag });
+    } else {
+      // Run single test
+      const result = await runBehaviourTest(testId, { buildTag });
+      results = [result];
+    }
+    
+    // Persist all results
+    for (const result of results) {
+      await recordBehaviourTestRun({ ...result, buildTag });
+    }
+    
+    res.status(200).json({ results });
+  } catch (err) {
+    console.error('Error running behaviour tests', err);
+    res.status(500).json({ error: 'Failed to run behaviour tests: ' + err.message });
+  }
+});
+
 // Note: Vite middleware will handle React app routes (/, /dashboard, etc.)
 
 // Start server
@@ -1292,6 +1336,19 @@ async function start() {
     listRecentRuns = runStoreModule.listRecentRuns;
     getRunById = runStoreModule.getRunById;
     createRun = runStoreModule.createRun;
+    
+    // Load behaviour test modules
+    const behaviourTestsModule = await import('./src/evaluator/behaviourTests.ts');
+    const behaviourTestStoreModule = await import('./src/evaluator/behaviourTestStore.ts');
+    
+    runBehaviourTest = behaviourTestsModule.runBehaviourTest;
+    runAllBehaviourTests = behaviourTestsModule.runAllBehaviourTests;
+    getTestsWithLatestRuns = behaviourTestStoreModule.getTestsWithLatestRuns;
+    recordBehaviourTestRun = behaviourTestStoreModule.recordBehaviourTestRun;
+    ensureBehaviourTestsSeeded = behaviourTestStoreModule.ensureBehaviourTestsSeeded;
+    
+    // Ensure behaviour test definitions are seeded
+    await ensureBehaviourTestsSeeded();
     
     console.log('✓ Evaluator modules loaded');
   } catch (err) {

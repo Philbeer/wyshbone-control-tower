@@ -102,7 +102,7 @@ export async function getTestsWithLatestRuns(): Promise<
 > {
   const testRows = await db.select().from(behaviourTests);
   
-  const results = [];
+  const results: Array<{ test: BehaviourTest; latestRun: BehaviourTestRun | null }> = [];
   
   for (const testRow of testRows) {
     const latestRun = await getLatestRunByTestId(testRow.id);

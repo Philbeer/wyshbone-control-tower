@@ -69,7 +69,8 @@ export const behaviourTests = pgTable("behaviour_tests", {
 
 export const insertBehaviourTestSchema = createInsertSchema(behaviourTests);
 export type InsertBehaviourTest = z.infer<typeof insertBehaviourTestSchema>;
-export type BehaviourTest = typeof behaviourTests.$inferSelect & {
+export type BehaviourTestRow = typeof behaviourTests.$inferSelect;
+export type BehaviourTest = Omit<BehaviourTestRow, 'isActive'> & {
   isActive: boolean;
 };
 
@@ -86,6 +87,7 @@ export const behaviourTestRuns = pgTable("behaviour_test_runs", {
 
 export const insertBehaviourTestRunSchema = createInsertSchema(behaviourTestRuns);
 export type InsertBehaviourTestRun = z.infer<typeof insertBehaviourTestRunSchema>;
-export type BehaviourTestRun = typeof behaviourTestRuns.$inferSelect & {
+export type BehaviourTestRunRow = typeof behaviourTestRuns.$inferSelect;
+export type BehaviourTestRun = Omit<BehaviourTestRunRow, 'durationMs'> & {
   durationMs: number | null;
 };
