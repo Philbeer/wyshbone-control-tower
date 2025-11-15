@@ -58,3 +58,34 @@ export const runs = pgTable("runs", {
 export const insertRunSchema = createInsertSchema(runs);
 export type InsertRun = z.infer<typeof insertRunSchema>;
 export type Run = typeof runs.$inferSelect;
+
+export const behaviourTests = pgTable("behaviour_tests", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  category: text("category").notNull(),
+  isActive: text("is_active").notNull().default("true"),
+});
+
+export const insertBehaviourTestSchema = createInsertSchema(behaviourTests);
+export type InsertBehaviourTest = z.infer<typeof insertBehaviourTestSchema>;
+export type BehaviourTest = typeof behaviourTests.$inferSelect & {
+  isActive: boolean;
+};
+
+export const behaviourTestRuns = pgTable("behaviour_test_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  testId: text("test_id").notNull(),
+  status: text("status").notNull(),
+  details: text("details"),
+  rawLog: jsonb("raw_log"),
+  buildTag: text("build_tag"),
+  durationMs: text("duration_ms"),
+});
+
+export const insertBehaviourTestRunSchema = createInsertSchema(behaviourTestRuns);
+export type InsertBehaviourTestRun = z.infer<typeof insertBehaviourTestRunSchema>;
+export type BehaviourTestRun = typeof behaviourTestRuns.$inferSelect & {
+  durationMs: number | null;
+};

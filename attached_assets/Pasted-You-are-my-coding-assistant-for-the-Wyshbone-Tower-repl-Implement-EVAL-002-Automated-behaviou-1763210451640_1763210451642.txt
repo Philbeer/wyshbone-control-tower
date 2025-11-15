@@ -1,0 +1,355 @@
+You are my coding assistant for the Wyshbone Tower repl.
+
+Implement **EVAL-002: Automated behaviour tests.**
+
+Goal: Add a small but real behaviour test framework that can run a few core “is the agent behaving sanely?” tests against the Wyshbone UI/Supervisor, record pass/fail, and surface this clearly in the Tower dashboard.
+
+We already have:
+
+- EVAL-001: Evaluator + Investigations (manual investigations, GPT diagnosis, patch suggestions).
+- Runs tracking + API:
+  - POST /tower/runs
+  - GET /tower/runs
+  - GET /tower/runs/:id
+- Dashboard UI at `/dashboard`:
+  - Tower Status card
+  - Recent Runs table with “Investigate” button
+  - Evaluator Console panel
+- Status & Plan page at `/status` with tab switcher between `/status` and `/dashboard`.
+- OpenAI key wired for the evaluator.
+
+Now we want **EVAL-002**: an automated test harness that can probe basic behaviours like greeting, domain-based personalisation, lead search, and monitoring setup, and show pass/fail per build.
+
+---
+
+## 1. Behaviour test model & DB schema
+
+Add a minimal schema (using the existing Drizzle/Neon setup) for storing:
+
+1. **Test definitions** (static list, but persisted):
+   - id (string slug, PK) e.g. "greeting-basic", "personalisation-domain", "lead-search-basic", "monitor-setup-basic"
+   - name (human friendly)
+   - description
+   - category (e.g. "greeting", "personalisation", "lead-search", "monitoring")
+   - isActive (boolean)
+
+2. **Test runs** (each execution of a test suite):
+   - id (uuid)
+   - created_at
+   - test_id (FK to tests)
+   - status ("pending" | "pass" | "fail" | "error")
+   - details (text) – short summary of what happened
+   - raw_log (jsonb or text) – raw response / evaluation info
+   - build_tag (text, nullable) – optional string like "dev-2025-11-15" or git SHA
+   - duration_ms (int, nullable)
+
+Use a naming convention consistent with existing schema, e.g. `behaviour_tests` and `behaviour_test_runs`. Add this into the shared schema file (e.g. `shared/schema.ts`).
+
+Also add TypeScript types for:
+
+```ts
+export type BehaviourTest = {
+  id: string; // slug
+  name: string;
+  description: string;
+  category: string;
+  isActive: boolean;
+};
+
+export type BehaviourTestRun = {
+  id: string;
+  createdAt: string;
+  testId: string;
+  status: "pending" | "pass" | "fail" | "error";
+  details: string | null;
+  rawLog: any | null;
+  buildTag: string | null;
+  durationMs: number | null;
+};
+2. Core behaviour tests (logic layer)
+Create a small test harness module, e.g. src/evaluator/behaviourTests.ts, that defines and runs tests.
+
+2.1 Test definitions
+Define at least these four tests as built-ins:
+
+Greeting / onboard test (greeting-basic)
+
+Simulate a new user conversation (no prior data).
+
+Expectation: the UI responds with some welcome + asks for a goal or what they want to achieve.
+
+Pass criteria: response contains some greeting-like pattern and a question about goals/what they’re trying to do.
+
+Personalisation via domain (personalisation-domain)
+
+Simulate supplying a domain, e.g. "examplebrewery.com".
+
+Expectation: the system acknowledges the domain and frames the next steps in terms of that business (e.g. “we can help you find pubs/retailers for your brewery”).
+
+Pass criteria: response includes something indicating it recognised a company/domain and adapted its language.
+
+Basic lead search (lead-search-basic)
+
+Simulate a request like “find some freehouse pubs near Brighton”.
+
+Expectation: a lead search is triggered and returns at least some structured results (or a plan to fetch them).
+
+Pass criteria: response indicates a lead search has been run/started and includes plausible lead output or a summary of them.
+
+Monitoring setup (monitor-setup-basic)
+
+Simulate user asking “set up a monitor for new breweries in Texas” or similar.
+
+Expectation: system offers/acknowledges setting up a monitoring routine and confirms what it will do.
+
+Pass criteria: response makes it clear that a recurring/monitoring behaviour is set up or planned.
+
+These tests DO NOT need to be perfect, but they must be implemented as real code, not stubs.
+
+2.2 Test harness interface
+In src/evaluator/behaviourTests.ts, implement something like:
+
+ts
+Copy code
+export type BehaviourTestResult = {
+  testId: string;
+  status: "pass" | "fail" | "error";
+  details: string;
+  rawLog?: any;
+  durationMs?: number;
+};
+
+export async function runBehaviourTest(testId: string, options?: { buildTag?: string }): Promise<BehaviourTestResult> { ... }
+
+export async function runAllBehaviourTests(options?: { buildTag?: string }): Promise<BehaviourTestResult[]> { ... }
+
+export function getAllBehaviourTestDefinitions(): BehaviourTest[] { ... }
+The harness should:
+
+Know how to call the Wyshbone UI / Supervisor endpoints in a consistent way (if there’s an existing internal client, reuse it; if not, call the public HTTP endpoint for UI’s chat API using fetch/axios with the base URL from env).
+
+For each test:
+
+Build a minimal “scenario” (prompt or input payload).
+
+Call the corresponding UI entry point.
+
+Inspect the output (string or structured) with simple heuristics to decide pass/fail (e.g. regex contains "goal", "what are you trying to achieve", "monitor", "breweries", "freehouse", etc.).
+
+Wrap the call in try/catch so we can set status "error" if something blows up.
+
+Always return a BehaviourTestResult with a human-readable details string summarising what it saw and why it passed/failed.
+
+For now, keep the heuristics simple and explicit; don’t call GPT for these tests. This is about smoke tests, not deep semantic analysis.
+
+3. Persisting test runs
+Create a repository module, e.g. src/evaluator/behaviourTestStore.ts, with functions:
+
+ts
+Copy code
+export async function ensureBehaviourTestsSeeded(): Promise<void>;
+export async function recordBehaviourTestRun(result: BehaviourTestResult & { buildTag?: string }): Promise<BehaviourTestRun>;
+export async function getRecentTestRuns(limit?: number): Promise<BehaviourTestRun[]>;
+export async function getLatestRunByTestId(testId: string): Promise<BehaviourTestRun | null>;
+export async function getTestRunsByTestId(testId: string, limit?: number): Promise<BehaviourTestRun[]>;
+export async function getTestsWithLatestRuns(): Promise<Array<{ test: BehaviourTest; latestRun: BehaviourTestRun | null }>>;
+ensureBehaviourTestsSeeded should ensure that the four built-in tests exist in the behaviour_tests table with correct name/description/category.
+
+recordBehaviourTestRun inserts into behaviour_test_runs.
+
+getTestsWithLatestRuns returns a list where each test is paired with its last run (or null if never run).
+
+4. API endpoints for behaviour tests
+Add new routes in the server (e.g. in server.js):
+
+GET /tower/behaviour-tests
+
+Returns the list of test definitions along with their latest run.
+
+Shape:
+
+json
+Copy code
+[
+  {
+    "test": {
+      "id": "greeting-basic",
+      "name": "Greeting / onboarding",
+      "description": "...",
+      "category": "greeting",
+      "isActive": true
+    },
+    "latestRun": {
+      "id": "run-uuid",
+      "createdAt": "...",
+      "status": "pass",
+      "details": "Saw greeting and goal question",
+      "buildTag": "dev-2025-11-15",
+      "durationMs": 850
+    }
+  }
+]
+POST /tower/behaviour-tests/run
+
+Body: { "testId"?: string, "buildTag"?: string, "runAll"?: boolean }
+
+If runAll is true or testId is absent:
+
+Runs all active tests via runAllBehaviourTests.
+
+If testId is provided:
+
+Runs only that test.
+
+Persists all results and returns them:
+
+json
+Copy code
+{
+  "results": [
+    { "testId": "greeting-basic", "status": "pass", "details": "...", "durationMs": 850 },
+    ...
+  ]
+}
+Handle errors gracefully; return 500 with error message if something fundamental breaks.
+
+5. Frontend: Behaviour Tests card in the Dashboard
+On the React /dashboard (the Wyshbone Tower Evaluator Console page), add a new card called “Behaviour tests”.
+
+Create a component, e.g. client/src/components/BehaviourTestsCard.tsx, that:
+
+On mount, fetches GET /tower/behaviour-tests.
+
+Displays a table/list of tests:
+
+Name
+
+Category
+
+Last status (pass / fail / error / never run)
+
+Last run time
+
+BuildTag (if present)
+
+Run button for each individual test.
+
+Include a “Run all tests” button at the top of the card:
+
+Calls POST /tower/behaviour-tests/run with { "runAll": true }.
+
+Shows a loading state while tests run.
+
+After completion, refreshes the list.
+
+Status colouring:
+
+Green badge for pass
+
+Red for fail
+
+Amber/orange for error
+
+Grey for never run
+
+Use existing styling primitives (cards, tables, badges) from the Tower dashboard. Don’t introduce a new design system.
+
+6. Frontend API helper
+Add a small client API helper, e.g. client/src/api/behaviourTests.ts:
+
+ts
+Copy code
+export type BehaviourTestSummary = {
+  test: {
+    id: string;
+    name: string;
+    description: string;
+    category: string;
+    isActive: boolean;
+  };
+  latestRun: {
+    id: string;
+    createdAt: string;
+    status: "pass" | "fail" | "error" | "pending";
+    details: string | null;
+    buildTag: string | null;
+    durationMs: number | null;
+  } | null;
+};
+
+export async function fetchBehaviourTests(): Promise<BehaviourTestSummary[]> { ... }
+
+export async function runAllBehaviourTests(buildTag?: string): Promise<BehaviourTestResult[]> { ... }
+
+export async function runSingleBehaviourTest(testId: string, buildTag?: string): Promise<BehaviourTestResult> { ... }
+Use the same fetch pattern and base URL handling as other Tower API helpers.
+
+7. Integrate Behaviour Tests card into /dashboard
+In the /dashboard React layout (the one that currently shows:
+
+Tower Status
+
+Recent Runs
+
+Evaluator Console
+
+add the new Behaviour Tests card into the left column, near Tower Status and Recent Runs. Make sure the layout doesn’t collapse horribly on small screens (stack vertically if needed).
+
+Example layout:
+
+Left column:
+
+Tower Status
+
+Behaviour Tests
+
+Recent Runs
+
+Right column:
+
+Evaluator Console
+
+8. Testing checklist
+Make sure the following all work end-to-end:
+
+/tower/behaviour-tests returns the 4 built-in tests with latestRun = null initially.
+
+/tower/behaviour-tests/run with { "runAll": true }:
+
+Executes 4 tests
+
+Persists 4 runs
+
+Returns results array
+
+Dashboard:
+
+Behaviour Tests card loads and shows all tests.
+
+Clicking “Run all tests”:
+
+Shows a loading state
+
+After completion, each test row shows last status + time.
+
+Clicking “Run” on a single test re-runs just that one and updates its row.
+
+Tests actually call the UI/Supervisor endpoints and base their pass/fail on real responses (even if heuristics are simple).
+
+Nothing breaks /status, /dashboard, runs, or investigations.
+
+Important: Produce actual code, not instructions.
+For any new files, output full contents. For existing files, show the complete updated version or very clear, targeted edits with full context, consistent with how you’ve been editing this project so far.
+
+yaml
+Copy code
+
+---
+
+That’s EVAL-002 framed in a way that:
+
+- Gives you **real, automated smoke tests** of behaviour (not just health checks).
+- Stores history per test and per build.
+- Exposes everything in Tower so you can see at a glance if a new change broke “basic sanity”.
+
+Once Replit has done this, we’ll then wire EVAL-003 to look at **patterns over these test runs plus real user runs**, and
