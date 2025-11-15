@@ -1361,6 +1361,11 @@ async function start() {
     const autoDetectModule = await import('./src/evaluator/autoDetect.ts');
     autoDetectAndTriggerInvestigation = autoDetectModule.autoDetectAndTriggerInvestigation;
     
+    // Load patch evaluator routes (EVAL-004)
+    const patchRoutesModule = await import('./server/routes-patch.ts');
+    patchRoutesModule.initializePatchRoutes(autoDetectAndTriggerInvestigation);
+    app.use('/tower/patch', patchRoutesModule.default);
+    
     // Ensure behaviour test definitions are seeded
     await ensureBehaviourTestsSeeded();
     

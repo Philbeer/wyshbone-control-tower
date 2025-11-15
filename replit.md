@@ -71,6 +71,39 @@ Server runs on port defined by `PORT` environment variable (default: 3000).
 
 ## Recent Changes
 
+- 2025-11-15: EVAL-004: Patch Quality + Regression Protection (Mode C: Strict Gatekeeper)
+  - **Patch Evaluation Pipeline**: Complete CI/CD gatekeeper that evaluates patches before application
+  - **New Modules**:
+    - src/evaluator/patchSandbox.ts: In-memory patch application with file overlay system
+    - src/evaluator/patchDiff.ts: Diff pre-patch vs post-patch test results
+    - src/evaluator/patchGate.ts: Mode C strict approval rules (10 rejection conditions)
+    - src/evaluator/patchEvaluator.ts: Main orchestrator (before→sandbox→after→diff→gate→decision)
+    - server/routes-patch.ts: New API endpoints for patch submission and retrieval
+  - **Database Schema**: Added patch_evaluations table with full audit trail
+  - **API Endpoints**:
+    - POST /tower/patch/submit: Submit patch for evaluation
+    - GET /tower/patch/:id: Retrieve evaluation results
+  - **Strict Rejection Rules** (10 conditions):
+    - Rule 1: Any test FAILS after patch
+    - Rule 2: Any new ERROR appears
+    - Rule 3: Latency regression >30%
+    - Rule 4: Quality degradation detected
+    - Rule 5: Regression (PASS→FAIL)
+    - Rule 6: Investigator danger flags
+    - Rule 7: Auto-detection triggers fired
+    - Rule 8: Test suite instability
+    - Rule 9: Patch is irrelevant
+    - Rule 10: Breaks imports/exports/boot
+  - **Approval Criteria**: All tests pass, no errors, no regressions, stable/improved latency, maintained/improved quality, investigator safe, no auto-detect triggers
+  - **Performance**: 20-25 second evaluation time, <60s timeout protection, sequential execution
+  - **Integration**: Uses EVAL-002 behaviour tests, EVAL-003 auto-detection, existing investigation pipeline
+  - **Results**: Returns comprehensive diff summary, before/after test results, rejection reasons, risk level
+  - Architecture:
+    - Zero breaking changes to EVAL-001/002/003
+    - In-memory sandbox (no filesystem modifications)
+    - Deterministic decision making
+    - Complete observability with [PatchEvaluator] logs
+
 - 2025-11-15: EVAL-003: Automated Detection and Investigation Triggering
   - **Auto-Detection System** (src/evaluator/autoDetect.ts):
     - Automatically detects failures, timeouts, errors, and regressions after each behaviour test run

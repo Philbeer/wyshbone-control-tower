@@ -91,3 +91,25 @@ export type BehaviourTestRunRow = typeof behaviourTestRuns.$inferSelect;
 export type BehaviourTestRun = Omit<BehaviourTestRunRow, 'durationMs'> & {
   durationMs: number | null;
 };
+
+export const patchEvaluations = pgTable("patch_evaluations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  status: text("status").notNull(),
+  patchText: text("patch_text").notNull(),
+  diff: jsonb("diff"),
+  reasons: jsonb("reasons").$type<string[]>(),
+  testResultsBefore: jsonb("test_results_before"),
+  testResultsAfter: jsonb("test_results_after"),
+  investigationIds: jsonb("investigation_ids").$type<string[]>(),
+  evaluationMeta: jsonb("evaluation_meta").$type<{
+    latencyRegressions?: Array<{ testId: string; before: number; after: number; increase: number }>;
+    qualityFlags?: string[];
+    autoDetectTriggers?: string[];
+    [key: string]: any;
+  }>(),
+});
+
+export const insertPatchEvaluationSchema = createInsertSchema(patchEvaluations);
+export type InsertPatchEvaluation = z.infer<typeof insertPatchEvaluationSchema>;
+export type PatchEvaluation = typeof patchEvaluations.$inferSelect;
