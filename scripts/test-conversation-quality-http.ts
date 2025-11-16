@@ -13,7 +13,7 @@ if (typeof fetch === 'undefined') {
 }
 
 async function testAPI() {
-  const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
+  const BASE_URL = process.env.BASE_URL || "http://localhost:5000";
   
   console.log("\n=== EVAL-009 HTTP API Test ===\n");
   console.log(`Testing against: ${BASE_URL}\n`);
@@ -199,7 +199,7 @@ async function testAPI() {
 
 // Wait for server to be ready
 async function waitForServer(maxAttempts = 10) {
-  const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
+  const BASE_URL = process.env.BASE_URL || "http://localhost:5000";
   
   for (let i = 0; i < maxAttempts; i++) {
     try {

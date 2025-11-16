@@ -89,33 +89,49 @@ A sophisticated evaluation system is integrated to automate testing, diagnosis, 
     *   Conservative auto-detection (currently logs errors only, future: repeated errors, timeouts, quality issues)
     *   Separate query endpoint `GET /tower/runs/live` for filtering live user runs only
     *   Integration guide at `docs/EVAL-008_UI_INTEGRATION.md` for Wyshbone UI team
-*   **Conversation Quality Investigator (EVAL-009):**
+*   **Conversation Quality Investigator (EVAL-009 - ✅ PRODUCTION READY):**
     *   Analyzes flagged assistant conversations to identify chat behavior issues and provide actionable recommendations.
-    *   API endpoint `POST /tower/conversation-flag` accepts flagged conversations from Wyshbone UI:
-        *   Required: `session_id`, `messages` array, `flagged_message_index`
-        *   Optional: `user_id`, `user_note` (free text explaining the issue)
-        *   Validates input and creates investigation with `source: "conversation_quality"` and `focus.kind: "conversation"`
-    *   LLM-powered analysis using GPT-4o-mini to classify failures into categories:
+    *   **API Endpoints:**
+        *   `POST /tower/conversation-flag`: Creates conversation quality investigations
+            *   Required: `session_id`, `messages` array, `flagged_message_index`
+            *   Optional: `user_id`, `user_note` (free text explaining the issue)
+            *   Validates input and creates investigation with `source: "conversation_quality"` and `focus.kind: "conversation"`
+        *   `GET /tower/conversation-quality`: Retrieves all conversation quality investigations
+    *   **LLM-Powered Analysis** using GPT-4o-mini to classify failures into categories:
         *   `prompt_issue`: System prompt or instructions inadequate
         *   `decision_logic_issue`: Poor assistant decisions about actions
         *   `missing_behaviour_test`: Specific scenario lacks test coverage
         *   `missing_clarification_logic`: Should have asked for clarification
         *   `unclear_or_ambiguous_user_input`: User input genuinely unclear
-    *   Structured analysis output includes:
+    *   **Structured Analysis Output** includes:
         *   Failure category classification
         *   Human-readable summary of the issue
         *   Minimal reproducible scenario (transcript snippet)
         *   Suggested prompt changes (optional)
         *   Suggested behavior test description (optional)
-    *   Dashboard displays "Conversation Quality" panel showing recent flagged conversations:
-        *   Color-coded badges for failure categories
+    *   **Dashboard Integration:**
+        *   "Conversation Quality" panel showing recent flagged conversations
+        *   Color-coded badges using Badge component variants for failure categories
         *   Analysis summaries with timestamps
         *   Click to view full conversation window with flagged message highlighted
         *   View suggested fixes and test recommendations
         *   "Open in Console" button for detailed investigation
-    *   24-hour deduplication by session ID prevents duplicate investigations
+        *   Toast notifications for errors and successful operations
+        *   Skeleton loading states for better UX
+    *   **Deduplication with Reanalysis:**
+        *   24-hour window by session ID prevents duplicate investigations
+        *   When duplicate flags arrive, updates conversation window and user notes
+        *   Automatically triggers reanalysis with new data
+    *   **Testing:**
+        *   Integration test: `npx tsx scripts/test-conversation-quality.ts`
+        *   HTTP API test: `npx tsx scripts/test-conversation-quality-http.ts`
+        *   Both tests verify end-to-end flow, validation, and deduplication
     *   Analysis runs asynchronously and updates investigation with diagnosis
     *   Investigations stored with full conversation context for downstream patch generation
+    *   **Production Notes:**
+        *   Requires `OPENAI_API_KEY` for LLM analysis
+        *   Server runs on port 5000
+        *   See `docs/EVAL-009_CONVERSATION_QUALITY.md` for complete documentation
 
 **UI/UX:**
 
