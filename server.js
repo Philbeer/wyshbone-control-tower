@@ -1560,6 +1560,10 @@ async function start() {
     juniorDevRoutesModule.initializeJuniorDevRoutes(autoDetectAndTriggerInvestigation);
     app.use('/tower', juniorDevRoutesModule.default);
     
+    // Load conversation quality routes (EVAL-009)
+    const conversationQualityRoutesModule = await import('./server/routes-conversation-quality.ts');
+    app.use('/tower', conversationQualityRoutesModule.default);
+    
     // Ensure behaviour test definitions are seeded
     await ensureBehaviourTestsSeeded();
     

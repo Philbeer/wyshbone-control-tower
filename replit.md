@@ -89,6 +89,33 @@ A sophisticated evaluation system is integrated to automate testing, diagnosis, 
     *   Conservative auto-detection (currently logs errors only, future: repeated errors, timeouts, quality issues)
     *   Separate query endpoint `GET /tower/runs/live` for filtering live user runs only
     *   Integration guide at `docs/EVAL-008_UI_INTEGRATION.md` for Wyshbone UI team
+*   **Conversation Quality Investigator (EVAL-009):**
+    *   Analyzes flagged assistant conversations to identify chat behavior issues and provide actionable recommendations.
+    *   API endpoint `POST /tower/conversation-flag` accepts flagged conversations from Wyshbone UI:
+        *   Required: `session_id`, `messages` array, `flagged_message_index`
+        *   Optional: `user_id`, `user_note` (free text explaining the issue)
+        *   Validates input and creates investigation with `source: "conversation_quality"` and `focus.kind: "conversation"`
+    *   LLM-powered analysis using GPT-4o-mini to classify failures into categories:
+        *   `prompt_issue`: System prompt or instructions inadequate
+        *   `decision_logic_issue`: Poor assistant decisions about actions
+        *   `missing_behaviour_test`: Specific scenario lacks test coverage
+        *   `missing_clarification_logic`: Should have asked for clarification
+        *   `unclear_or_ambiguous_user_input`: User input genuinely unclear
+    *   Structured analysis output includes:
+        *   Failure category classification
+        *   Human-readable summary of the issue
+        *   Minimal reproducible scenario (transcript snippet)
+        *   Suggested prompt changes (optional)
+        *   Suggested behavior test description (optional)
+    *   Dashboard displays "Conversation Quality" panel showing recent flagged conversations:
+        *   Color-coded badges for failure categories
+        *   Analysis summaries with timestamps
+        *   Click to view full conversation window with flagged message highlighted
+        *   View suggested fixes and test recommendations
+        *   "Open in Console" button for detailed investigation
+    *   24-hour deduplication by session ID prevents duplicate investigations
+    *   Analysis runs asynchronously and updates investigation with diagnosis
+    *   Investigations stored with full conversation context for downstream patch generation
 
 **UI/UX:**
 

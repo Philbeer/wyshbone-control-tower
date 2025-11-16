@@ -3,6 +3,7 @@ import { EvaluatorConsole } from "@/components/EvaluatorConsole";
 import { RecentRunsTable } from "@/components/RecentRunsTable";
 import { BehaviourTestsCard } from "@/components/BehaviourTestsCard";
 import { LiveUserRunsCard } from "@/components/LiveUserRunsCard";
+import { ConversationQualityCard } from "@/components/ConversationQualityCard";
 import { TowerNavTabs } from "@/components/TowerNavTabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -59,6 +60,9 @@ export default function StatusDashboard() {
 
               {/* EVAL-008: Live User Runs */}
               <LiveUserRunsCard />
+
+              {/* EVAL-009: Conversation Quality */}
+              <ConversationQualityCard />
 
               {/* Recent Runs Table */}
               <RecentRunsTable />
