@@ -112,7 +112,7 @@
   },
   {
     "id": "POL-001",
-    "app": "poller",
+    "app": "tower",
     "title": "Persist status snapshots for history",
     "description": "Store a rolling history of status snapshots (cleverness, LOC, TODO/FIXME) to disk so we can see trends over time, not just the latest view.",
     "status": "planned",
@@ -594,7 +594,7 @@
   },
   {
     "id": "POL-010",
-    "app": "poller",
+    "app": "tower",
     "title": "Success metrics per goal",
     "description": "Track and store success metrics (conversion rates, lead quality) for each active goal.",
     "status": "planned",
@@ -614,7 +614,7 @@
   },
   {
     "id": "POL-011",
-    "app": "poller",
+    "app": "tower",
     "title": "Per-goal success score",
     "description": "Calculate and track a composite success score for each goal based on multiple metrics.",
     "status": "planned",
@@ -655,7 +655,7 @@
   },
   {
     "id": "POL-020",
-    "app": "poller",
+    "app": "tower",
     "title": "Cleverness trend graph",
     "description": "Display historical trends of cleverness index across all monitored apps.",
     "status": "planned",
@@ -677,7 +677,7 @@
   },
   {
     "id": "POL-021",
-    "app": "poller",
+    "app": "tower",
     "title": "Complexity vs TODO/FIXME trend",
     "description": "Track the relationship between code complexity (LOC) and technical debt (TODO/FIXME) over time.",
     "status": "planned",
@@ -699,7 +699,7 @@
   },
   {
     "id": "POL-022",
-    "app": "poller",
+    "app": "tower",
     "title": "Tool error rate charts",
     "description": "Monitor and visualize error rates for each tool used in lead generation.",
     "status": "planned",
@@ -721,7 +721,7 @@
   },
   {
     "id": "POL-030",
-    "app": "poller",
+    "app": "tower",
     "title": "Error spike alerting",
     "description": "Detect and alert when error rates spike above normal thresholds.",
     "status": "planned",
@@ -744,7 +744,7 @@
   },
   {
     "id": "POL-031",
-    "app": "poller",
+    "app": "tower",
     "title": "Goal stagnation alerting",
     "description": "Alert when goals show no progress for extended periods.",
     "status": "planned",
@@ -767,7 +767,7 @@
   },
   {
     "id": "POL-032",
-    "app": "poller",
+    "app": "tower",
     "title": "System status dashboard (Green/Amber/Red)",
     "description": "Overall system health dashboard with traffic-light status indicators.",
     "status": "planned",
