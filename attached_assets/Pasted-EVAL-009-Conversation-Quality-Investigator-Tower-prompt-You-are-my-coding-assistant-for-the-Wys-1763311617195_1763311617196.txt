@@ -1,0 +1,192 @@
+EVAL-009 – Conversation Quality Investigator (Tower prompt)
+
+You are my coding assistant for the Wyshbone Control Tower repl. Implement EVAL-009: Conversation Quality Investigator in the Tower codebase.
+
+Goal
+
+When Wyshbone UI flags an assistant reply, Tower must:
+
+Store a conversation_quality Investigation with the transcript + metadata.
+
+Run an LLM analysis that explains what went wrong in the chat behaviour (not tools) and how to fix it.
+
+Produce structured fields that downstream evaluators and the auto-patch generator can consume.
+
+1. Data model
+
+Extend the existing Investigations storage (use the same table/collection pattern already in the repo) to support a new kind:
+
+source: "conversation_quality"
+
+focus.kind: "conversation"
+
+For these investigations, persist at least:
+
+session_id
+
+user_id (or a nullable/anonymous field)
+
+flagged_message_index (index of the bad assistant message)
+
+conversation_window (last N messages, including system/tool messages if those are present in the payload)
+
+optional user_note (free text from the flag UI)
+
+analysis object (to be filled in by the LLM step; see below)
+
+Do not break existing investigation types.
+
+2. Ingestion API
+
+Add a lightweight HTTP endpoint that Wyshbone UI can call:
+
+POST /api/conversation-flag
+
+Request body (JSON):
+
+session_id: string
+
+user_id: string | null
+
+messages: Message[] (use whatever internal shape Tower already uses for transcripts, or normalise into it)
+
+flagged_message_index: number
+
+user_note?: string
+
+Behaviour:
+
+Validate input (basic type checks; reject invalid payloads with 4xx).
+
+Normalise messages into Tower’s internal conversation format.
+
+Create a new Investigation with:
+
+source: "conversation_quality"
+
+focus.kind: "conversation"
+
+the transcript + metadata from above
+
+Return a simple JSON response with the created investigation id and status.
+
+Follow the existing routing + controller patterns already used for other Tower APIs.
+
+3. LLM analysis worker
+
+Add a worker/evaluator that processes only source: "conversation_quality" investigations.
+
+It should:
+
+Load the investigation, including conversation_window, flagged_message_index, and user_note.
+
+Call the LLM with a structured prompt that:
+
+Summarises the conversation.
+
+Identifies the main failure mode, for example:
+
+didn’t ask for goals
+
+misunderstood user intent
+
+overly robotic / unhelpful tone
+
+wrong level of detail
+
+asked irrelevant questions
+
+ignored a clear instruction
+
+failed to ask for clarification
+
+Classifies the failure into one of these categories (single string value):
+
+prompt_issue
+
+decision_logic_issue
+
+missing_behaviour_test
+
+missing_clarification_logic
+
+unclear_or_ambiguous_user_input
+
+Produces a developer brief with:
+
+root cause hypothesis
+
+minimal reproducible scenario (shortened transcript focused on the problem)
+
+suggested changes (prompt / routing / decision logic)
+
+whether a new behaviour test should exist and a short description of what it should assert
+
+Write the result back into the investigation as a structured analysis object with at least:
+
+analysis: {
+  failure_category: string;            // one of the enums above
+  summary: string;                     // short human-readable summary
+  repro_scenario: string;              // minimal transcript snippet
+  suggested_prompt_changes?: string;   // free-text suggestions
+  suggested_behaviour_test?: string;   // description of a test, if applicable
+}
+
+
+Use the existing LLM helper / client already used by other evaluators.
+
+4. UI / status surface (Tower)
+
+In the Tower /status (or equivalent) UI, add a minimal view for conversation-quality investigations:
+
+A list/table of recent source: "conversation_quality" investigations.
+
+Each row shows: created time, failure_category, and a short analysis.summary.
+
+Clicking an item shows:
+
+the conversation window (or truncated version)
+
+flagged message highlighted (if feasible)
+
+analysis.failure_category
+
+analysis.summary
+
+analysis.suggested_prompt_changes
+
+analysis.suggested_behaviour_test
+
+This can be simple; focus on backend correctness first.
+
+5. Tests & safety
+
+Add tests in the existing style to cover:
+
+Creating a conversation_quality investigation from mock POST data.
+
+Running the analysis worker on a simple “bad conversation” fixture.
+
+Confirming that analysis.failure_category and other key fields are populated and persisted.
+
+Keep everything idempotent and robust to missing/non-ideal input.
+
+6. Scope
+
+Only modify the Control Tower repo for this task.
+
+Do not change the Wyshbone UI or Supervisor repos here; UI will later call /api/conversation-flag.
+
+Follow existing patterns for:
+
+routing
+
+DB access
+
+logging
+
+error handling
+
+configuration
+
+Update any relevant docs (replit.md, README, or status page help text) to briefly describe EVAL-009 once implemented.
