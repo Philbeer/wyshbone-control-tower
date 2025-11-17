@@ -1,0 +1,118 @@
+You are my coding assistant for the Wyshbone UI repl.
+
+Implement runId unification across the entire chat system.
+The goal: every message in a single user chat session must use the SAME runId, regardless of the flow (standard response, clarification question, deep research request, planner, executor, quick tools, etc).
+Tower must receive one single run object representing the entire conversation flow.
+
+Requirements
+1. Add persistent runId storage per session
+
+When a conversation starts and no runId exists:
+
+create a new runId using:
+const runId = 'run-' + Date.now() + '-' + nanoid();
+
+Store it for the user session:
+
+Use the same mechanism we use for conversationId/sessionId.
+
+It must persist across all message bubbles until the chat resets.
+
+2. Attach this unified runId to EVERY chat flow
+
+Specifically update:
+
+Standard chat completion flow
+
+Clarification flows (lead clarification, deep research clarification)
+
+Deep research tool flow
+
+Planner/executor flow
+
+Quick tools
+
+Search tools
+
+Any early-return flow from /api/chat
+
+Any “needs_clarification” response
+
+Any streaming path
+
+Any error path
+
+Every outgoing response and Tower log must include the same runId.
+
+3. Update Tower logging to use the unified runId
+
+The startRunLog must use this runId (if you’re still using it).
+
+All completeRunLog calls must use it.
+
+All clarification logs must use it (the clarification logging patch we added earlier).
+
+All tool logs must use it.
+
+There should never be multiple runs representing one conversation.
+
+4. Reset the runId only when the user explicitly starts a new conversation
+
+This must happen when:
+
+The user clicks “New Chat”
+
+The session is manually reset
+
+(Optional) If session is idle for > 2 hours
+
+5. Add a helper function
+
+Add to the shared chat utils:
+
+export function getOrCreateRunId(session) {
+  if (!session.runId) {
+    session.runId = "run-" + Date.now() + "-" + nanoid();
+  }
+  return session.runId;
+}
+
+
+Use this everywhere.
+
+6. Update all calls
+
+Replace any code that does:
+
+const runId = "run-" + ...
+
+
+with:
+
+const runId = getOrCreateRunId(session);
+
+7. Ensure backward-compatibility
+
+Don’t break MEGA mode.
+
+Don’t break streaming.
+
+Don’t break OpenAI tool formatting.
+
+If any flow currently returns early, inject Tower logging before return.
+
+8. Provide a code summary after implementing
+
+After coding, output:
+
+Files created
+
+Files modified
+
+Exact code blocks inserted
+
+Line numbers
+
+Search/replace patterns you changed
+
+So I can paste changes manually if needed.
