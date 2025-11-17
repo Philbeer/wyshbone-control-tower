@@ -1,6 +1,6 @@
 import { db } from "../lib/db";
 import { investigations } from "../../shared/schema";
-import { desc, sql } from "drizzle-orm";
+import { desc, sql, eq } from "drizzle-orm";
 import type { Investigation, PatchFailureMeta } from "./types";
 import { storeInvestigation } from "./storeInvestigation";
 
@@ -73,9 +73,57 @@ Risk Level: ${params.sandboxResult.riskLevel || 'unknown'}`;
 async function processPatchFailureInvestigation(investigationId: string): Promise<void> {
   console.log(`[PatchFailureInvestigations] Starting post-mortem analysis for ${investigationId}`);
 
+  // Fetch investigation
+  const investigation = await db.query.investigations.findFirst({
+    where: eq(investigations.id, investigationId),
+  });
+
+  if (!investigation) {
+    throw new Error(`Investigation ${investigationId} not found`);
+  }
+
+  const typedInvestigation: Investigation = {
+    id: investigation.id,
+    createdAt: investigation.created_at,
+    trigger: investigation.trigger as any,
+    runId: investigation.run_id ?? undefined,
+    notes: investigation.notes ?? undefined,
+    runLogs: investigation.run_logs ?? [],
+    runMeta: investigation.run_meta ?? undefined,
+    uiSnapshot: investigation.ui_snapshot ?? null,
+    supervisorSnapshot: investigation.supervisor_snapshot ?? null,
+    diagnosis: investigation.diagnosis ?? null,
+    patchSuggestion: investigation.patch_suggestion ?? null,
+  };
+
+  // Run analysis
   const { analyzePatchFailure } = await import("./patchFailureAnalysis");
-  
-  const analysis = await analyzePatchFailure(investigationId);
+  const analysis = await analyzePatchFailure(typedInvestigation);
+
+  // Store analysis back in run_meta
+  const updatedRunMeta = {
+    ...(typedInvestigation.runMeta || {}),
+    analysis,
+  };
+
+  // Also store a human-readable diagnosis
+  const diagnosis = `Patch Failure Post-Mortem
+
+Category: ${analysis.failure_category}
+Failure Reason: ${analysis.failure_reason}
+
+Next Step:
+${analysis.next_step}
+
+${analysis.suggested_constraints_for_next_patch ? `Suggested Constraints for Next Patch:\n${analysis.suggested_constraints_for_next_patch}` : ''}`;
+
+  await db
+    .update(investigations)
+    .set({
+      run_meta: updatedRunMeta,
+      diagnosis,
+    })
+    .where(eq(investigations.id, investigationId));
 
   console.log(`[PatchFailureInvestigations] Post-mortem analysis complete for ${investigationId}`);
   console.log(`  Category: ${analysis.failure_category}`);

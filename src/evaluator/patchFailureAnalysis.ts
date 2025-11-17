@@ -1,8 +1,5 @@
 import { openai } from "../lib/openai";
-import { db } from "../lib/db";
-import { investigations } from "../../shared/schema";
-import { eq, sql } from "drizzle-orm";
-import type { PatchFailureAnalysis, PatchFailureMeta } from "./types";
+import type { Investigation, PatchFailureAnalysis, PatchFailureMeta } from "./types";
 
 const SYSTEM_PROMPT = `You are an expert code reviewer analyzing why an automatically generated code patch was rejected by a strict CI/CD gatekeeper.
 
@@ -64,40 +61,41 @@ Important:
 - If this belongs in a different repo (UI/Supervisor instead of Tower), say so clearly`;
 }
 
-export async function analyzePatchFailure(investigationId: string): Promise<PatchFailureAnalysis> {
-  console.log(`[PatchFailureAnalysis] Analyzing patch failure for investigation ${investigationId}`);
-
-  // Load the investigation
-  const inv = await db.query.investigations.findFirst({
-    where: eq(investigations.id, investigationId),
-  });
-
-  if (!inv) {
-    throw new Error(`Investigation ${investigationId} not found`);
-  }
-
-  const runMeta = inv.run_meta as PatchFailureMeta;
-  
-  if (!runMeta || runMeta.source !== "patch_failure") {
-    throw new Error(`Investigation ${investigationId} is not a patch failure investigation`);
-  }
-
-  // Load the original investigation for context
-  let originalInvestigationNotes: string | undefined;
-  let originalDiagnosis: string | undefined;
-  
+async function loadOriginalInvestigation(originalInvestigationId: string): Promise<{ notes?: string; diagnosis?: string }> {
   try {
+    const { db } = await import("../lib/db");
+    const { investigations } = await import("../../shared/schema");
+    const { eq } = await import("drizzle-orm");
+    
     const originalInv = await db.query.investigations.findFirst({
-      where: eq(investigations.id, runMeta.original_investigation_id),
+      where: eq(investigations.id, originalInvestigationId),
     });
     
     if (originalInv) {
-      originalInvestigationNotes = originalInv.notes ?? undefined;
-      originalDiagnosis = originalInv.diagnosis ?? undefined;
+      return {
+        notes: originalInv.notes ?? undefined,
+        diagnosis: originalInv.diagnosis ?? undefined,
+      };
     }
   } catch (err) {
-    console.warn(`[PatchFailureAnalysis] Could not load original investigation ${runMeta.original_investigation_id}:`, err);
+    console.warn(`[PatchFailureAnalysis] Could not load original investigation ${originalInvestigationId}:`, err);
   }
+  
+  return {};
+}
+
+export async function analyzePatchFailure(investigation: Investigation): Promise<PatchFailureAnalysis> {
+  console.log(`[PatchFailureAnalysis] Analyzing patch failure for investigation ${investigation.id}`);
+
+  const runMeta = investigation.runMeta as PatchFailureMeta;
+  
+  if (!runMeta || runMeta.source !== "patch_failure") {
+    throw new Error(`Investigation ${investigation.id} is not a patch failure investigation`);
+  }
+
+  // Load the original investigation for context
+  const { notes: originalInvestigationNotes, diagnosis: originalDiagnosis } = 
+    await loadOriginalInvestigation(runMeta.original_investigation_id);
 
   // Call LLM for analysis
   const messages = [
@@ -144,34 +142,8 @@ export async function analyzePatchFailure(investigationId: string): Promise<Patc
     analysis.failure_category = "other";
   }
 
-  // Store the analysis back in the investigation
-  const updatedMeta = {
-    ...runMeta,
-    analysis,
-  };
-
-  // Also create a human-readable diagnosis
-  const diagnosis = `# Patch Failure Analysis
-
-**Failure Category:** ${analysis.failure_category}
-
-**Why it failed:**
-${analysis.failure_reason}
-
-**Recommended Next Step:**
-${analysis.next_step}
-
-${analysis.suggested_constraints_for_next_patch ? `**Constraints for Next Patch:**\n${analysis.suggested_constraints_for_next_patch}` : ''}`;
-
-  await db
-    .update(investigations)
-    .set({
-      run_meta: updatedMeta as any,
-      diagnosis,
-    })
-    .where(eq(investigations.id, investigationId));
-
-  console.log(`[PatchFailureAnalysis] Analysis complete and stored for investigation ${investigationId}`);
+  console.log(`[PatchFailureAnalysis] Analysis complete for investigation ${investigation.id}`);
+  console.log(`  Category: ${analysis.failure_category}`);
 
   return analysis;
 }
