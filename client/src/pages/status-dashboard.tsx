@@ -1,140 +1,180 @@
 import { useState } from "react";
 import { EvaluatorProvider } from "@/contexts/EvaluatorContext";
-import { EvaluatorConsole } from "@/components/EvaluatorConsole";
-import { LiveUserRunsCard } from "@/components/LiveUserRunsCard";
-import { ConversationQualityCard } from "@/components/ConversationQualityCard";
-import { AutoConversationQualityCard } from "@/components/AutoConversationQualityCard";
+import { RecentRunsSimple } from "@/components/RecentRunsSimple";
+import { AutoFlaggedCard } from "@/components/AutoFlaggedCard";
+import { ManualFlagsCard } from "@/components/ManualFlagsCard";
 import { PatchFailuresCard } from "@/components/PatchFailuresCard";
 import { BehaviourTestsCard } from "@/components/BehaviourTestsCard";
 import { RecentRunsTable } from "@/components/RecentRunsTable";
 import { TowerNavTabs } from "@/components/TowerNavTabs";
 import { CollapsibleCard } from "@/components/CollapsibleCard";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronRight, TestTubes, Activity } from "lucide-react";
+import { Settings, Activity, TestTubes, Trash2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 export default function StatusDashboard() {
-  const [isEvaluatorOpen, setIsEvaluatorOpen] = useState(false);
+  const { toast } = useToast();
+  const [isResetting, setIsResetting] = useState(false);
+
+  const handleReset = async () => {
+    setIsResetting(true);
+    try {
+      await apiRequest("POST", "/tower/reset-investigations", {});
+      toast({
+        title: "Tower Reset Complete",
+        description: "All flags and investigations have been cleared.",
+      });
+      // Refresh the page to see updated data
+      window.location.reload();
+    } catch (error: any) {
+      toast({
+        title: "Reset Failed",
+        description: error.message || "Failed to reset Tower data",
+        variant: "destructive",
+      });
+    } finally {
+      setIsResetting(false);
+    }
+  };
 
   return (
     <EvaluatorProvider>
       <div className="min-h-screen bg-background">
-        {/* Navigation Tabs */}
-        <TowerNavTabs />
-        
         {/* Header */}
         <header className="border-b">
           <div className="container mx-auto px-4 py-4">
-            <h1 className="text-2xl font-bold">Wyshbone Tower</h1>
-            <p className="text-sm text-muted-foreground">Live Quality Monitoring & Evaluation</p>
+            <TowerNavTabs />
           </div>
         </header>
 
-        {/* Main Content: Two-column layout */}
+        {/* Main Content */}
         <div className="container mx-auto px-4 py-6">
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr,400px] gap-6">
-            {/* Left Column: Main Content */}
+          <div className="space-y-6 max-w-5xl mx-auto">
+            {/* Core Sections - Always Visible */}
             <div className="space-y-6">
-              {/* EVAL-008: Live User Runs - ALWAYS VISIBLE */}
-              <LiveUserRunsCard />
+              {/* Section 1: Recent Runs */}
+              <RecentRunsSimple />
 
-              {/* EVAL-009: Auto Conversation Quality - ALWAYS VISIBLE */}
-              <AutoConversationQualityCard />
+              {/* Section 2: Auto-Flagged Runs */}
+              <AutoFlaggedCard />
 
-              {/* EVAL-009: Conversation Quality (Manual Flags) - ALWAYS VISIBLE */}
-              <ConversationQualityCard />
+              {/* Section 3: Manual Flags */}
+              <ManualFlagsCard />
+            </div>
 
-              {/* EVAL-016: Patch Failures - AUTO-EXPAND IF ITEMS EXIST */}
-              <PatchFailuresCard />
-
-              {/* Tower Status - COLLAPSED */}
-              <CollapsibleCard
-                title="Tower Status"
-                description="System health and metrics"
-                icon={<Activity className="h-5 w-5 text-primary" />}
-                defaultOpen={false}
-                testId="card-tower-status"
-              >
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="space-y-1">
-                    <div className="text-2xl font-bold">0</div>
-                    <div className="text-xs text-muted-foreground">Active Runs</div>
+            {/* Advanced Tools - Collapsed by Default */}
+            <CollapsibleCard
+              title="Advanced Tools"
+              description="Debugging and testing utilities"
+              icon={<Settings className="h-5 w-5 text-muted-foreground" />}
+              defaultOpen={false}
+              testId="card-advanced-tools"
+              headerActions={
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      data-testid="button-reset-tower"
+                    >
+                      <Trash2 className="h-3 w-3 mr-2" />
+                      Clear All Flags
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Clear All Flags and Investigations?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will permanently delete:
+                        <ul className="list-disc list-inside mt-2 space-y-1">
+                          <li>All auto-flagged runs</li>
+                          <li>All manually-flagged runs</li>
+                          <li>Past investigations and diagnoses</li>
+                          <li>Patch attempts and failures</li>
+                        </ul>
+                        <p className="mt-3 font-medium">
+                          Recent runs and system configuration will NOT be affected.
+                        </p>
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel data-testid="button-cancel-reset">
+                        Cancel
+                      </AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={handleReset}
+                        disabled={isResetting}
+                        data-testid="button-confirm-reset"
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      >
+                        {isResetting ? "Clearing..." : "Clear All Data"}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              }
+            >
+              <div className="space-y-6">
+                {/* Tower Status Metrics */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-muted-foreground" />
+                    <h3 className="font-medium">Tower Status</h3>
                   </div>
-                  <div className="space-y-1">
-                    <div className="text-2xl font-bold">3</div>
-                    <div className="text-xs text-muted-foreground">Total Runs</div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-2xl font-bold">0</div>
-                    <div className="text-xs text-muted-foreground">Investigations</div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-2xl font-bold">Online</div>
-                    <div className="text-xs text-muted-foreground">Status</div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="space-y-1">
+                      <div className="text-2xl font-bold">0</div>
+                      <div className="text-xs text-muted-foreground">Active Runs</div>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-2xl font-bold">3</div>
+                      <div className="text-xs text-muted-foreground">Total Runs</div>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-2xl font-bold">0</div>
+                      <div className="text-xs text-muted-foreground">Investigations</div>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-2xl font-bold">Online</div>
+                      <div className="text-xs text-muted-foreground">Status</div>
+                    </div>
                   </div>
                 </div>
-              </CollapsibleCard>
 
-              {/* Behaviour Tests - COLLAPSED */}
-              <CollapsibleCard
-                title="Behaviour Tests"
-                description="EVAL-002: Automated scenario testing"
-                icon={<TestTubes className="h-5 w-5 text-primary" />}
-                defaultOpen={false}
-                testId="card-behaviour-tests"
-              >
-                <BehaviourTestsCard />
-              </CollapsibleCard>
+                {/* Behaviour Tests */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <TestTubes className="h-4 w-4 text-muted-foreground" />
+                    <h3 className="font-medium">Automated Tests</h3>
+                  </div>
+                  <BehaviourTestsCard />
+                </div>
 
-              {/* Recent Runs Table - COLLAPSED */}
-              <CollapsibleCard
-                title="All Runs"
-                description="Complete run history (live, test, tower)"
-                defaultOpen={false}
-                testId="card-all-runs"
-              >
-                <RecentRunsTable />
-              </CollapsibleCard>
-            </div>
+                {/* Patch Failures (if any exist) */}
+                <div className="space-y-3">
+                  <h3 className="font-medium">Patch Failures</h3>
+                  <PatchFailuresCard />
+                </div>
 
-            {/* Right Column: Evaluator Console - COLLAPSIBLE */}
-            <div className="lg:sticky lg:top-6 h-fit">
-              <Collapsible open={isEvaluatorOpen} onOpenChange={setIsEvaluatorOpen}>
-                <Card>
-                  <CollapsibleTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      className="w-full justify-between p-4 h-auto hover:bg-transparent"
-                      data-testid="button-toggle-evaluator-console"
-                    >
-                      <div className="flex items-center gap-3 text-left">
-                        <div className="flex-shrink-0">
-                          {isEvaluatorOpen ? (
-                            <ChevronDown className="h-5 w-5 text-muted-foreground" />
-                          ) : (
-                            <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                          )}
-                        </div>
-                        <div>
-                          <h3 className="font-semibold text-lg">Evaluator Console</h3>
-                          <p className="text-sm text-muted-foreground">
-                            EVAL-005: Junior Developer Agent
-                          </p>
-                        </div>
-                      </div>
-                    </Button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <CardContent className="p-0">
-                      <div className="h-[calc(100vh-12rem)]">
-                        <EvaluatorConsole />
-                      </div>
-                    </CardContent>
-                  </CollapsibleContent>
-                </Card>
-              </Collapsible>
-            </div>
+                {/* All Runs Table */}
+                <div className="space-y-3">
+                  <h3 className="font-medium">Complete Run History</h3>
+                  <RecentRunsTable />
+                </div>
+              </div>
+            </CollapsibleCard>
           </div>
         </div>
       </div>

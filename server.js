@@ -1601,6 +1601,14 @@ async function start() {
     const manualFlagsRoutesModule = await import('./server/routes-manual-flags.ts');
     app.use('/tower', manualFlagsRoutesModule.default);
     
+    // Load investigate routes (investigation detail page)
+    const investigateRoutesModule = await import('./server/routes-investigate.ts');
+    app.use('/tower', investigateRoutesModule.default);
+    
+    // Load reset routes (clear all flags and investigations)
+    const resetRoutesModule = await import('./server/routes-reset.ts');
+    app.use('/tower', resetRoutesModule.default);
+    
     // Ensure behaviour test definitions are seeded
     await ensureBehaviourTestsSeeded();
     
