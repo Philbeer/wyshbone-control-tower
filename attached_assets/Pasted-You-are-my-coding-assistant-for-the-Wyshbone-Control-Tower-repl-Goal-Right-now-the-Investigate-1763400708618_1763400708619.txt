@@ -1,0 +1,142 @@
+You are my coding assistant for the Wyshbone Control Tower repl.
+
+Goal
+Right now the “Investigate & Fix” page shows:
+- Run Input / Run Output (from investigations.run_meta)
+- “Diagnosis is being generated. Please check back in a moment.”
+- “Patch suggestion is being generated. Please check back in a moment.”
+
+But nothing ever fills in diagnosis or patch_suggestion.
+
+Implement Phase 1 of the evaluator:
+
+When I open an investigation, Tower should:
+1) Fetch the relevant run(s) / conversation.
+2) Call OpenAI once.
+3) Store a human-readable `diagnosis` and `patch_suggestion` in the `investigations` table.
+4) Return the updated investigation so the UI shows real content.
+
+Do NOT auto-apply any patches. Only generate text suggestions.
+
+------------------------------------
+1. Add a small OpenAI client (if not present)
+------------------------------------
+
+1. Check if there is already an OpenAI client helper in this repo.
+   - If yes, reuse it.
+   - If not, create `src/lib/openai.ts`:
+
+   - Use the official `openai` npm package and the new client:
+     import OpenAI from "openai";
+     export const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+   - Assume the API key is set in env as OPENAI_API_KEY.
+   - If the dependency is missing, add it to package.json.
+
+------------------------------------
+2. Implement an investigation evaluator helper
+------------------------------------
+
+Create a new file `src/evaluator/investigationEvaluator.ts` with a function like:
+
+- `export async function runInvestigation(investigationId: string): Promise<{ diagnosis: string; patchSuggestion: string; }>`.
+
+Behaviour:
+
+1) Load the investigation row by id from `investigations`.
+2) If it already has both `diagnosis` and `patch_suggestion` non-empty, just return them (idempotent).
+3) Work out which runs to inspect:
+   - If `investigation.run_id` looks like a conversation id (i.e. matches a `runs.conversation_run_id`):
+     - Load all runs with `conversation_run_id = investigation.run_id`, ordered by created_at.
+   - Else:
+     - Load the single run where `runs.id = investigation.run_id`.
+
+4) Build a plain-text transcript for the model, something like:
+
+   - Conversation meta (user identifier, goal_summary, status).
+   - Then a list of messages/events in order, e.g.:
+
+     [Event 1]
+     Time: ...
+     Status: ...
+     Input: ...
+     Output: ...
+
+5) Call OpenAI with a prompt that asks for JSON:
+
+   - Use a small but capable model (e.g. `gpt-4o-mini` or similar, whatever is already used in this repo if present).
+   - System prompt: “You are an expert AI debugger for the Wyshbone agent system. You receive logs of a conversation and must explain what went wrong and propose a concrete patch.”
+   - User content: the transcript + simple instructions:
+
+     “Return strict JSON with two fields:
+      { "diagnosis": "...", "patch_suggestion": "..." }”
+
+6) Parse the JSON safely.
+   - If parsing fails, put a fallback diagnosis (“Evaluator failed to parse response”) and include the raw text in patch_suggestion.
+
+7) Update the `investigations` row:
+   - `diagnosis` = parsed diagnosis
+   - `patch_suggestion` = parsed patch_suggestion
+
+8) Return the final strings.
+
+------------------------------------
+3. Add an API endpoint to trigger evaluation
+------------------------------------
+
+Update or extend the existing investigate routes:
+
+- In `server/routes-investigate-run.ts` (or create `server/routes-investigations-eval.ts` if cleaner), add:
+
+  - `POST /tower/investigations/:id/evaluate`
+
+  Behaviour:
+  - Calls `runInvestigation(req.params.id)`.
+  - Returns the updated investigation row as JSON.
+
+- Wire this route into the main server (server.js / server/index.ts) next to the other Tower routes.
+
+------------------------------------
+4. Wire the Investigate & Fix page to call the evaluator
+------------------------------------
+
+Find the React page that renders the Investigate & Fix UI
+(e.g. something like `client/src/pages/investigate-run.tsx` or similar – search for “Diagnosis is being generated.”).
+
+Update it so that:
+
+1) It fetches the investigation details by id as it does now.
+2) If `diagnosis` and `patch_suggestion` are empty/null on load:
+   - Immediately call `POST /tower/investigations/:id/evaluate`.
+   - While this request is running, show the existing “Diagnosis is being generated…” placeholders.
+3) When the evaluate call returns:
+   - Update local state with the returned `diagnosis` and `patch_suggestion`.
+   - Render them in the UI instead of the placeholder text.
+
+Make sure:
+- Errors are handled gracefully (show a small error message but do not crash the page).
+- There’s no infinite loop: only call evaluate if both fields are empty.
+
+------------------------------------
+5. Testing
+------------------------------------
+
+Add a basic test path:
+
+1) Create a conversation with a few fake runs via /tower/runs/log (like the curl example used earlier).
+2) Flag that conversation manually from the dashboard.
+3) Go to Manual Flags → “Investigate & Fix”.
+4) Confirm that:
+   - After a short delay, `diagnosis` and `patch_suggestion` appear.
+   - Refreshing the page does NOT re-call OpenAI (idempotent because fields are now filled).
+
+------------------------------------
+6. Output summary
+------------------------------------
+
+At the end, output a short summary including:
+
+- Files created
+- Files modified
+- Any new env/dependency requirements
+- Example curl request to hit `/tower/investigations/:id/evaluate` directly for debugging.
