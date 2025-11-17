@@ -1399,16 +1399,10 @@ app.post('/tower/runs/log', async (req, res) => {
   try {
     const payload = req.body;
     
-    // Enhanced validation
+    // Basic validation - source and status are required
     if (!payload.source || payload.source !== 'live_user') {
       return res.status(400).json({ 
         error: 'Invalid payload: source must be "live_user"' 
-      });
-    }
-    
-    if (!payload.request?.inputText || !payload.response?.outputText) {
-      return res.status(400).json({ 
-        error: 'Invalid payload: request.inputText and response.outputText are required' 
       });
     }
     
@@ -1418,9 +1412,9 @@ app.post('/tower/runs/log', async (req, res) => {
       });
     }
     
-    if (typeof payload.durationMs !== 'number' || !Number.isFinite(payload.durationMs) || payload.durationMs <= 0) {
+    if (typeof payload.durationMs !== 'number' || !Number.isFinite(payload.durationMs)) {
       return res.status(400).json({ 
-        error: 'Invalid durationMs: must be a positive finite number greater than zero' 
+        error: 'Invalid durationMs: must be a finite number' 
       });
     }
     
@@ -1429,12 +1423,13 @@ app.post('/tower/runs/log', async (req, res) => {
     // EVAL-008: Auto-detection for live runs (conservative triggers only)
     if (ensureLiveUserInvestigationForRun && payload.status === 'error') {
       try {
+        const inputText = payload.request?.inputText || payload.goal || 'Error run';
         console.log(`[EVAL-008] Auto-investigating error run ${result.id}`);
         await ensureLiveUserInvestigationForRun({
           runId: result.id,
           userId: payload.userId,
           sessionId: payload.sessionId,
-          inputText: payload.request.inputText,
+          inputText,
           triggerReason: 'Auto-detected error from live user run',
           seriousness: 'error',
         });

@@ -98,7 +98,14 @@ export function RecentRunsSimple() {
   };
 
   const formatTime = (timestamp: string) => {
+    if (!timestamp) return "Unknown time";
+    
     const date = new Date(timestamp);
+    
+    if (isNaN(date.getTime())) {
+      return "Unknown time";
+    }
+    
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
@@ -106,7 +113,27 @@ export function RecentRunsSimple() {
     if (diffMins < 1) return "just now";
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`;
-    return date.toLocaleDateString();
+    
+    return date.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const getInputText = (run: Run): string => {
+    return run.goal_summary || 
+           run.meta?.inputText || 
+           run.meta?.requestText || 
+           "No input captured";
+  };
+
+  const getOutputText = (run: Run): string => {
+    return run.meta?.output || 
+           run.meta?.responseText || 
+           run.meta?.outputText || 
+           "No response captured";
   };
 
   // Filter to only show Wyshbone UI user runs
@@ -136,7 +163,7 @@ export function RecentRunsSimple() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0 space-y-2">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <Clock className="h-3 w-3 text-muted-foreground flex-shrink-0" />
                         <span className="text-xs text-muted-foreground">
                           {formatTime(run.created_at)}
@@ -150,28 +177,30 @@ export function RecentRunsSimple() {
                           </>
                         )}
                         <Badge
-                          variant={run.status === "completed" ? "default" : "secondary"}
+                          variant={
+                            run.status === "success" || run.status === "completed" 
+                              ? "default" 
+                              : run.status === "error" || run.status === "fail"
+                              ? "destructive"
+                              : "secondary"
+                          }
                           className="ml-auto flex-shrink-0"
                         >
                           {run.status}
                         </Badge>
                       </div>
 
-                      {run.goal_summary && (
-                        <div>
-                          <div className="text-xs text-muted-foreground mb-1">Input:</div>
-                          <div className="text-sm line-clamp-2">{run.goal_summary}</div>
-                        </div>
-                      )}
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">Input:</div>
+                        <div className="text-sm line-clamp-2">{getInputText(run)}</div>
+                      </div>
 
-                      {run.meta?.output && (
-                        <div>
-                          <div className="text-xs text-muted-foreground mb-1">Output:</div>
-                          <div className="text-sm text-muted-foreground line-clamp-2">
-                            {run.meta.output}
-                          </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">Output:</div>
+                        <div className="text-sm text-muted-foreground line-clamp-2">
+                          {getOutputText(run)}
                         </div>
-                      )}
+                      </div>
                     </div>
                   </div>
 

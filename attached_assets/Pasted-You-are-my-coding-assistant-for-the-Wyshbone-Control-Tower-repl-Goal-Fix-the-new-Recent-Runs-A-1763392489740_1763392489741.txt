@@ -1,0 +1,153 @@
+You are my coding assistant for the Wyshbone Control Tower repl.
+
+Goal: Fix the new “Recent Runs / Auto-Flagged / Manual Flags” dashboard so that runs coming from UI show valid dates and clear details instead of “Invalid Date” and empty cards.
+
+Right now:
+
+Runs do appear in Recent Runs, but:
+
+The time shows as “Invalid Date”.
+
+The cards don’t show the input/output summary.
+
+UI is logging runs to Tower via POST /tower/runs/log using the new nested structure:
+
+{
+  runId: string;
+  source: "live_user" | "test_user" | string;
+  userId?: string;
+  userEmail?: string;
+  status: "success" | "error" | "timeout";
+  goal?: string;
+  request?: {
+    inputText?: string;
+    // maybe more fields…
+  };
+  response?: {
+    outputText?: string;
+    // maybe more fields…
+  };
+  startedAt?: number;      // ms since epoch
+  completedAt?: number;    // ms since epoch
+  durationMs?: number;
+  model?: string;
+  mode?: string;           // "standard" | "mega" etc.
+}
+
+
+I need you to make Tower fully understand this payload and render it properly.
+
+1. Backend: fix /tower/runs/log ingestion
+
+Find the handler for POST /tower/runs/log (Tower API).
+
+It’s the endpoint UI calls to log runs.
+
+Update the code that maps the incoming JSON into the runs table so that:
+
+runs.runId (or equivalent) is set from body.runId (fallback to generated UUID if missing).
+
+runs.source is set from body.source (default "live_user").
+
+runs.userId and runs.userEmail are stored if provided.
+
+Timestamps:
+
+If body.startedAt is provided, use it (convert from ms to Date) for runs.createdAt or runs.startedAt.
+
+Otherwise use Date.now() so createdAt is never null.
+
+Also store completedAt and durationMs if present.
+
+Text fields:
+
+Store body.request?.inputText into a plain column like runs.inputText (or runs.requestInputText).
+
+Store body.response?.outputText into runs.outputText (or similar).
+
+Goal / meta:
+
+Store body.goal if provided.
+
+Store body.model and body.mode (e.g. in runs.model and runs.mode or a JSON meta column).
+
+Ensure no field that the dashboard depends on is left undefined:
+
+createdAt must always be a valid Date.
+
+status must always be one of "success" | "error" | "timeout".
+
+Add minimal logging for debugging, e.g.:
+
+console.log("📥 Tower run log received", {
+  runId,
+  source,
+  createdAt,
+  hasInput: !!inputText,
+  hasOutput: !!outputText,
+});
+
+2. Frontend: fix “Recent Runs” cards
+
+Find the React (or frontend) component that renders the new “Recent Runs” section on the Tower dashboard.
+
+Confirm what the /tower/runs GET endpoint returns now (fields like createdAt, inputText, outputText, goal, status, source, etc).
+
+Update the component so that each card shows:
+
+Time: formatted from run.createdAt (or run.startedAt), using something like:
+
+const createdAt = run.createdAt || run.startedAt;
+const createdDate = createdAt ? new Date(createdAt) : null;
+const createdLabel = createdDate ? format(createdDate, "dd MMM yyyy, HH:mm") : "Unknown time";
+
+
+This must avoid “Invalid Date”.
+
+Status pill: use run.status with a clear label and colour (success/error/timeout).
+
+Goal/summary line:
+
+Prefer run.goal if present.
+
+Fallback to a truncated version of run.inputText (e.g. first 80–120 chars).
+
+Input / Output preview:
+
+Show one-line snippets:
+
+Input: "<inputText…>"
+
+Output: "<outputText…>"
+
+If either is missing, show a sensible placeholder like “No input captured” / “No response captured”.
+
+Make sure the “Investigate & Fix” button still links to the right investigation view for that run, using the unified runId.
+
+Double-check that Auto-Flagged Runs and Manual Flags (if present) either:
+
+Reuse the same RunCard component, or
+
+At least show consistent time + summary so the UX is coherent.
+
+3. Safety / migration
+
+Handle legacy runs that might still store input / output instead of request.inputText / response.outputText by:
+
+const inputText = run.inputText ?? run.request?.inputText ?? "";
+const outputText = run.outputText ?? run.response?.outputText ?? "";
+
+
+Don’t break existing APIs – only extend mapping and rendering.
+
+4. Done checklist
+
+When you’re finished, I should see:
+
+No more “Invalid Date” – each run shows a real timestamp.
+
+Each run card shows a clear one-line summary plus input/output snippets.
+
+The two recent test runs I already logged from UI now show real data instead of blank cards.
+
+Return a short summary of what you changed (files + key logic), so I can review.

@@ -1,0 +1,276 @@
+You are my coding assistant for the Wyshbone Control Tower repl.
+
+Context
+- Wyshbone has 3 apps: Wyshbone UI, Wyshbone Supervisor, Wyshbone Control Tower.
+- Tower receives run logs from UI (and later Supervisor) and shows them in a React dashboard.
+- The dashboard has 3 sections:
+  1) Recent Runs
+  2) Auto-Flagged Runs
+  3) Manual Flags
+
+Recent situation
+- We just redesigned Tower’s dashboard and logging.
+- UI has been updated so that every message in a single user chat session uses the SAME unified `runId`.
+- The goal: one `runId` = one entire conversation flow (including clarifications, deep research, tools, errors, etc.).
+- Tower is now receiving logs, but:
+  - Recent Runs cards show “Invalid Date”
+  - Input/output summaries are empty
+  - Run details are not rendering properly
+- We also want Tower to understand that `runId` is a conversation identifier, so we can:
+  - Flag an entire conversation (not only individual messages)
+  - Later open that conversation and see the full chain of events for that `runId`.
+
+Your job
+Implement the **end-to-end fix** in Tower so that:
+1. The `/tower/runs/log` endpoint ingests the new UI log format correctly.
+2. Timestamps are stored and rendered correctly.
+3. The dashboard shows human-readable cards, correct dates, input/output summaries, and correct status.
+4. The unified `runId` is treated as the **conversation run ID**, and we can:
+   - Flag a whole conversation by that `runId`
+   - Inspect all events/steps inside that conversation in one place.
+
+Important: work with the existing codebase and types; do NOT redesign the whole system from scratch. Patch what is there.
+
+------------------------------------------------------------------------
+1. Fix /tower/runs/log ingestion for the new UI payload
+------------------------------------------------------------------------
+
+UI now sends a nested structure. Typical fields are (names may vary slightly – inspect the existing code and recent payload types):
+
+- Conversation-level and request information:
+  - `runId` (this is the unified conversation run ID created in UI)
+  - `sessionId` (or similar)
+  - `goal` / `userGoal` / `runGoal`
+  - `request.inputText` or equivalent
+  - `request.model`
+  - `request.startedAt` or `request.timestamp`
+- Response information:
+  - `response.outputText` or equivalent
+  - `response.model`
+  - `response.completedAt`
+  - `response.status` (e.g. success, error, needs_clarification)
+- Clarification and deep research logs (if present):
+  - `clarifications.lead`
+  - `clarifications.deepResearch`
+- Tool events (if present):
+  - tools executed, timing, etc.
+
+Tasks:
+
+1. Inspect the current `/tower/runs/log` handler (API route / server handler) and the types for incoming logs.
+2. Make the handler robust to the new nested structure coming from UI:
+   - Correctly map:
+     - UI `runId` → Tower’s conversation-level run ID (see section 3 below)
+     - `request.inputText` → stored input text / input summary field
+     - `response.outputText` → stored output text / output summary field
+     - `request.startedAt` (or equivalent) → `startedAt`
+     - `response.completedAt` (or equivalent) → `completedAt`
+   - If the UI timestamps are strings, parse them safely into Date objects when storing.
+   - If timestamps are missing, fall back to `Date.now()` but make this rare – prefer the supplied times.
+
+3. Ensure the handler validates required fields:
+   - A `runId` must be present.
+   - At least one of input or output must be present.
+   - If any critical data is missing, log a warning but do not crash the endpoint.
+
+4. Keep backwards compatibility:
+   - If older-style logs (without nested `request` / `response`) arrive, still accept them.
+   - Write the parsing so it checks both “new-style” and “old-style” fields.
+
+------------------------------------------------------------------------
+2. Store proper timestamps and summaries
+------------------------------------------------------------------------
+
+Update the server-side models / DB / types used for runs so that each stored run entry has:
+
+- `runId` (string)
+- `conversationRunId` or equivalent (see section 3)
+- `startedAt` (Date)
+- `completedAt` (Date or null if still running)
+- `status` (string/enum: e.g. "running", "completed", "error", "needs_clarification")
+- `inputSummary` (short text)
+- `outputSummary` (short text)
+- `rawInput` (optional, full text)
+- `rawOutput` (optional, full text)
+- Any clarifications / deep research metadata already used by the UI log patch.
+
+Implementation details:
+
+1. Identify the existing run storage (Prisma model, in-memory store, etc.).
+2. Make sure `startedAt` and `completedAt` are always set from the log payload where possible.
+3. When saving:
+   - Set `startedAt` from the earliest timestamp in the payload (e.g. request start).
+   - Set `completedAt` from response completion timestamp, or null if missing.
+4. Compute human-friendly summaries:
+   - `inputSummary`: first ~120 characters of the main input text (strip whitespace).
+   - `outputSummary`: first ~160 characters of the main output text.
+5. Do not break any existing code that expects simple `input` / `output` fields:
+   - If there are existing `input`/`output` columns, keep populating them, but also set the new summary fields if needed.
+
+------------------------------------------------------------------------
+3. Treat runId as a conversation-level identifier
+------------------------------------------------------------------------
+
+UI now uses a single unified `runId` per conversation:
+
+- At the start of a chat session, UI creates `run-<timestamp>-<nanoid>`.
+- This `runId` is persisted for that chat session.
+- Every message / clarification / deep research / tool step in that chat shares the SAME `runId`.
+- Only when the user starts a **new chat** does UI create a new `runId`.
+
+Tower must:
+
+1. Treat the UI `runId` as the **conversation run ID**.
+2. Group all individual log entries / events for that conversation under this single `runId`.
+3. Support both:
+   - A top-level “conversation run” representation (one card in Recent Runs per `runId`).
+   - Per-event or per-step entries (if the codebase already has them).
+
+Concretely:
+
+- If you already have a `Run` type representing a single request/response:
+  - Add a `conversationRunId: string` field and:
+    - For new logs from UI:
+      - `conversationRunId` = `runId` coming from UI.
+      - `id` / `runId` field for that record can be kept as-is (or also equal to the same value; pick the least disruptive approach).
+    - For old logs (no unified `runId`):
+      - `conversationRunId` can default to their existing `id` / `runId` so grouping still works.
+- The important thing: all events from one conversation share the same `conversationRunId`.
+
+Dashboard behaviour:
+
+- Recent Runs:
+  - One card per `conversationRunId`.
+  - Each card shows:
+    - Human-readable start time (e.g. “Today 14:32”).
+    - Status (derived from the latest event for that conversation).
+    - Input summary (from the first event’s input).
+    - Output summary (from the latest event’s output).
+- Run details view:
+  - When clicking a conversation card, show a timeline of all events for that `conversationRunId` in order (by `startedAt` or event index).
+
+------------------------------------------------------------------------
+4. Fix the React UI rendering (dates, summaries, details)
+------------------------------------------------------------------------
+
+Go through the React components for:
+
+- Recent Runs list / cards
+- Auto-Flagged Runs
+- Manual Flags
+- Run details / Investigate view
+
+And make these changes:
+
+1. Fix “Invalid Date”:
+   - Find where dates are rendered (likely using `new Date(run.startedAt)` + `format`).
+   - Make sure `startedAt` is always a valid string or Date object.
+   - If the API returns ISO strings, parse once on the client and keep as Date objects.
+   - If a date is missing or invalid, show a sensible fallback like “Unknown time” instead of `Invalid Date`.
+
+2. Show summaries:
+   - Show `inputSummary` and `outputSummary` (or the computed short versions of input/output).
+   - If these don’t exist in the API response yet, add them server-side and wire them through.
+
+3. Run details:
+   - Ensure that when clicking “Investigate & Fix” (or equivalent), the details page/modal fetches all events for the chosen `conversationRunId`.
+   - Render:
+     - Full input text
+     - Full output text
+     - Model used
+     - Timestamps
+     - Clarifications (if any)
+     - Tool calls (if any)
+   - Make it readable: headings, spacing, monospace for JSON if needed.
+
+4. Status:
+   - Derive card status from the latest event in the conversation:
+     - If any event has status `error` → mark conversation as “Error”.
+     - Else if any `needs_clarification` → mark as “Needs Clarification”.
+     - Else if last event is `completed` → “Completed”.
+   - Display this status clearly on the card.
+
+------------------------------------------------------------------------
+5. Manual flags at conversation level
+------------------------------------------------------------------------
+
+We already have:
+
+- “Manual Flags” section.
+- Ability to “Flag this run” from the UI.
+
+We now want this at **conversation level**:
+
+1. The “Flag this run” control on the dashboard / details view should:
+   - Flag the entire conversation (`conversationRunId`), not just a single step.
+2. Data model:
+   - If you already have a `RunFlag` or similar table/model:
+     - Add a `conversationRunId` field.
+     - When flagging from the UI, pass the `conversationRunId`.
+   - If flags are stored inline on runs, ensure the flag is associated with the conversation grouping.
+3. Manual Flags section:
+   - Show one entry per flagged conversation.
+   - When clicking a flagged conversation, open the same details view that shows the whole conversation timeline for that `conversationRunId`.
+
+------------------------------------------------------------------------
+6. Auto-flagged runs (keep working but use conversationRunId)
+------------------------------------------------------------------------
+
+If auto-flag logic already exists (e.g. based on certain statuses or heuristics):
+
+1. Make sure auto-flags also attach to the `conversationRunId`.
+2. Prevent duplicates:
+   - If multiple events in the same conversation trigger an auto-flag, only show one auto-flag card for that `conversationRunId`.
+3. Auto-Flagged section:
+   - Same behaviour as Manual Flags – one card per conversation.
+
+------------------------------------------------------------------------
+7. “Investigate & Fix” links
+------------------------------------------------------------------------
+
+The “Investigate & Fix” action on a card must:
+
+1. Use the `conversationRunId` in the route (or query param) when navigating to the details view.
+2. On the details page, fetch all events for that `conversationRunId`.
+3. Render them as described above.
+
+If there is already a route like `/tower/runs/[id]`:
+
+- Either:
+  - Make `[id]` represent `conversationRunId`, and the page queries for all events for that ID.
+- Or:
+  - Introduce a new route `/tower/conversations/[conversationRunId]` and update the links.
+
+Pick the option that requires fewer changes but still gives a clean mental model: “this page shows a whole conversation”.
+
+------------------------------------------------------------------------
+8. Stability and error handling
+------------------------------------------------------------------------
+
+Make the dashboard robust:
+
+1. If the API returns malformed data, the UI should not crash:
+   - Add null checks where needed.
+   - Use optional chaining and sane fallbacks.
+2. If no runs exist:
+   - Show an empty state message instead of blank or broken layout.
+3. If dates or summaries are missing:
+   - Show “Unknown” or “No summary available” rather than raw `undefined`.
+
+------------------------------------------------------------------------
+9. Output a precise implementation summary
+------------------------------------------------------------------------
+
+After you implement all of the above, output a clear summary in this format so I can paste changes manually if needed:
+
+- Files created:
+  - `path/to/file.tsx` – short description
+- Files modified:
+  - `path/to/file.ts` – short description
+- Exact code blocks:
+  - For each file you touched, include the full, final version of the relevant modules / components / handlers.
+- Search/replace patterns:
+  - List any important search/replace operations you applied (e.g. `run.id` → `run.conversationRunId` in specific components).
+
+Important: produce concrete, copy-pasteable code, not just descriptions.
+If you add new types or fields, include their definitions (e.g. TypeScript interfaces, Prisma models, Zod schemas, etc.).
