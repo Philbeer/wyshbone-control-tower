@@ -1,0 +1,191 @@
+EVAL-016 – Patch Failure Post-Mortem (Tower prompt)
+
+You are my coding assistant for the Wyshbone Control Tower repl. Implement EVAL-016: Patch Failure Post-Mortem in the Tower codebase.
+
+Goal
+
+When an auto-generated patch is rejected by the sandbox/gatekeeper, Tower must:
+
+Capture that failure as a structured patch_failure Investigation.
+
+Run an LLM post-mortem that explains why the patch failed.
+
+Produce a clear “next step” recommendation for the human (or for future auto-patch attempts).
+
+This closes the loop so we don’t just reject bad patches – we learn from them.
+
+1. Hook into patch rejection
+
+Find the part of the Tower pipeline where:
+
+an auto-patch is evaluated in the sandbox, and
+
+the result is marked as rejected (e.g. tests failed, or gatekeeper rules failed).
+
+At the point where a patch is definitively rejected:
+
+Call a small helper that creates a new investigation of type patch_failure (see below).
+
+This should happen for both:
+
+auto-generated patches (EVAL-006), and
+
+any future automated patch flows that feed through the same evaluation path.
+
+Do not change the acceptance logic; only add behaviour on rejection.
+
+2. New Investigation type: patch_failure
+
+Extend the existing Investigations storage (same table/collection as other investigations) with:
+
+source: "patch_failure"
+
+focus.kind: "patch"
+
+For each patch failure investigation, persist at least:
+
+original_investigation_id (the behaviour/tool/conversation investigation we were trying to fix)
+
+patch_id or some identifier for this patch attempt (or a hash of the diff)
+
+patch_diff (the code changes or summary that were attempted)
+
+sandbox_result (structured result from the test run – which tests failed, error messages, etc.)
+
+created_at, status, etc. (follow the existing Investigation schema)
+
+Do not break or change existing investigation types.
+
+3. LLM post-mortem worker
+
+Add a worker/evaluator that processes only source: "patch_failure" investigations.
+
+Workflow:
+
+Load the patch_failure investigation, plus the linked original_investigation (if available).
+
+Construct an LLM prompt that includes:
+
+Short description of the original problem (from original_investigation).
+
+The patch diff that was attempted.
+
+The sandbox evaluation output:
+
+which tests failed
+
+any error messages
+
+whether behaviour got worse or just didn’t fix the issue.
+
+Ask the LLM to answer in a structured way with:
+
+failure_reason: short description of why this patch was rejected (e.g. “broke other tests”, “didn’t actually change behaviour”, “misinterpreted the test requirement”, “belongs in UI repo, not this repo”, etc.).
+
+failure_category: one of a small enum, e.g.:
+
+broke_existing_tests
+
+did_not_fix_original_issue
+
+misinterpreted_requirement
+
+test_is_ambiguous_or_wrong
+
+wrong_repo_or_layer
+
+insufficient_context
+
+other
+
+next_step: human-readable recommendation for what should happen next, e.g.:
+
+“Generate a new patch with stricter constraints X/Y”
+
+“Tighten/clarify the behaviour test; it is underspecified.”
+
+“This change belongs in the UI/Supervisor repo, not here.”
+
+“Requires human review; model cannot confidently propose a safe change.”
+
+suggested_constraints_for_next_patch (optional): hints the auto-patch generator could use if we want a second attempt (e.g. “do not modify file X”, “only change prompt section Y”, “avoid touching routing logic”).
+
+Save this under a structured field on the investigation, e.g.:
+
+analysis: {
+  failure_reason: string;
+  failure_category: string;
+  next_step: string;
+  suggested_constraints_for_next_patch?: string;
+}
+
+
+Use the same LLM client / helper as other evaluators.
+
+4. Surfacing in the Tower UI
+
+In the Tower UI:
+
+Add patch_failure to whatever list/filter you use for Investigations, or add a small section such as “Patch Failures”.
+
+For each patch failure, show:
+
+original investigation reference
+
+failure_category
+
+analysis.failure_reason
+
+analysis.next_step
+
+On the detailed view, include:
+
+a diff or summary of the patch
+
+which tests failed in the sandbox
+
+the analysis object from above.
+
+This can be a simple table + detail panel; focus on making the data visible and understandable.
+
+5. Optional hook for future auto-retry (no logic yet)
+
+Design the analysis shape so that future work can use it to trigger a second patch attempt, but do not implement the re-try logic yet in this task.
+
+Just ensure:
+
+suggested_constraints_for_next_patch is clearly surfaced in the stored analysis.
+
+The investigation record is easy to query later (by status, failure_category, etc.).
+
+6. Tests & docs
+
+Add tests in the existing style to cover:
+
+Creating a patch_failure investigation when the sandbox rejects a patch.
+
+Running the LLM post-mortem on a fixture with:
+
+an original behaviour test failure,
+
+a patch diff,
+
+a simulated sandbox failure result.
+
+Verifying that analysis.failure_category, analysis.failure_reason, and analysis.next_step are populated.
+
+Update any relevant docs (replit.md, README, or status page help) to mention:
+
+what a patch failure investigation is,
+
+where it appears in the UI,
+
+and that it’s part of EVAL-016: Patch Failure Post-Mortem.
+
+Scope
+
+Only modify the Control Tower repo for this task.
+
+Do not change the UI or Supervisor repos.
+
+Follow existing patterns for routing, DB access, logging, and error handling.

@@ -4,7 +4,8 @@ export type InvestigationTrigger =
   | "timeout"
   | "tool_error"
   | "behaviour_flag"
-  | "conversation_quality";
+  | "conversation_quality"
+  | "patch_failure";
 
 export interface ConversationQualityAnalysis {
   failure_category: "prompt_issue" | "decision_logic_issue" | "missing_behaviour_test" | "missing_clarification_logic" | "unclear_or_ambiguous_user_input";
@@ -25,6 +26,32 @@ export interface ConversationQualityMeta {
   conversation_window: any[];
   user_note?: string;
   analysis?: ConversationQualityAnalysis;
+}
+
+export interface PatchFailureAnalysis {
+  failure_reason: string;
+  failure_category: "broke_existing_tests" | "did_not_fix_original_issue" | "misinterpreted_requirement" | "test_is_ambiguous_or_wrong" | "wrong_repo_or_layer" | "insufficient_context" | "other";
+  next_step: string;
+  suggested_constraints_for_next_patch?: string;
+}
+
+export interface PatchFailureMeta {
+  source: "patch_failure";
+  focus: {
+    kind: "patch";
+  };
+  original_investigation_id: string;
+  patch_id: string;
+  patch_diff: string;
+  sandbox_result: {
+    status: "rejected";
+    reasons: string[];
+    riskLevel?: string;
+    testResultsBefore?: any[];
+    testResultsAfter?: any[];
+    diff?: any;
+  };
+  analysis?: PatchFailureAnalysis;
 }
 
 export interface Investigation {
