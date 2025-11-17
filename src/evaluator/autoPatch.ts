@@ -5,6 +5,7 @@ import { db } from "../lib/db";
 import { investigations } from "../../shared/schema";
 import { eq } from "drizzle-orm";
 import type { PatchEvaluator } from "./patchEvaluator";
+import { createPatchFailureInvestigation } from "./patchFailureInvestigations";
 
 const SYSTEM_PROMPT = `You are a junior developer for the Wyshbone SaaS platform.
 Your only job is to produce small, targeted code patches in the form of unified diffs that fix a specific behavioural issue.
@@ -194,6 +195,31 @@ export async function requestAutoPatchForInvestigation(
   try {
     const evalResult = await evaluatePatchSuggestion(suggestion.id, patchEvaluator);
     console.log(`[AutoPatch] Evaluation complete: ${evalResult.evaluation.status}`);
+
+    // EVAL-016: Create patch failure investigation if rejected
+    if (evalResult.evaluation.status === "rejected") {
+      console.log(`[AutoPatch] Patch rejected, creating patch failure investigation`);
+      
+      const patchEvaluationResult = await patchEvaluator.getEvaluation(evalResult.evaluation.id);
+      
+      if (patchEvaluationResult) {
+        createPatchFailureInvestigation({
+          originalInvestigationId: investigationId,
+          patchId: evalResult.evaluation.id,
+          patchDiff: patchText,
+          sandboxResult: {
+            status: "rejected",
+            reasons: patchEvaluationResult.reasons,
+            riskLevel: patchEvaluationResult.riskLevel,
+            testResultsBefore: patchEvaluationResult.beforeResults,
+            testResultsAfter: patchEvaluationResult.afterResults,
+            diff: patchEvaluationResult.diff,
+          },
+        }).catch((err) => {
+          console.error(`[AutoPatch] Failed to create patch failure investigation:`, err);
+        });
+      }
+    }
 
     return {
       suggestionId: suggestion.id,

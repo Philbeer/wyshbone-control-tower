@@ -1564,6 +1564,10 @@ async function start() {
     const conversationQualityRoutesModule = await import('./server/routes-conversation-quality.ts');
     app.use('/tower', conversationQualityRoutesModule.default);
     
+    // Load patch failure routes (EVAL-016)
+    const patchFailureRoutesModule = await import('./server/routes-patch-failures.ts');
+    app.use('/tower', patchFailureRoutesModule.default);
+    
     // Ensure behaviour test definitions are seeded
     await ensureBehaviourTestsSeeded();
     
