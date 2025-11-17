@@ -35,6 +35,7 @@ export const investigations = pgTable("investigations", {
   diagnosis: text("diagnosis"),
   patch_suggestion: text("patch_suggestion"),
   replit_patch_prompt: text("replit_patch_prompt"),
+  approved_at: timestamp("approved_at"),
 });
 
 export const insertInvestigationSchema = createInsertSchema(investigations);

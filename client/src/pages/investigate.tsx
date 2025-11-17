@@ -82,15 +82,21 @@ export default function InvestigatePage() {
 
   const approvePatchMutation = useMutation({
     mutationFn: async () => {
-      // Send patch to Replit via existing API
-      return await apiRequest("POST", `/tower/patch/approve/${id}`, {
+      const response = await apiRequest("POST", `/tower/patch/approve/${id}`, {
         investigationId: id,
       });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to approve patch");
+      }
+      
+      return await response.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       toast({
         title: "Patch Approved",
-        description: "The patch has been sent to Replit for application.",
+        description: data.message || "Copy the generated prompt and apply it in Replit UI.",
       });
       
       // Invalidate queries so dashboard updates
@@ -182,7 +188,7 @@ export default function InvestigatePage() {
 
   const generatePromptMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest("POST", `/tower/patch/approve/${id}`, {});
+      const response = await apiRequest("POST", `/tower/investigations/${id}/generate-prompt`, {});
       return await response.json();
     },
     onSuccess: (data) => {
