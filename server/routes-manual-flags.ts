@@ -82,6 +82,88 @@ router.post("/runs/:id/flag", async (req, res) => {
   }
 });
 
+// POST /tower/conversations/:conversationRunId/flag - Flag a conversation manually
+router.post("/conversations/:conversationRunId/flag", async (req, res) => {
+  try {
+    const { conversationRunId } = req.params;
+    const { reason } = req.body;
+
+    // Fetch all runs in this conversation
+    const conversationRuns = await db.query.runs.findMany({
+      where: eq(runs.conversation_run_id, conversationRunId),
+      orderBy: (r, { asc }) => [asc(r.created_at)],
+    });
+
+    if (!conversationRuns || conversationRuns.length === 0) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
+
+    const firstRun = conversationRuns[0];
+
+    // Check for existing manual flag within 24 hours for this conversation
+    const windowStart = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const existing = await db.query.investigations.findFirst({
+      where: and(
+        gte(investigations.created_at, windowStart),
+        eq(investigations.run_id, conversationRunId),
+        eq(investigations.trigger, "manual_flag")
+      ),
+    });
+
+    if (existing) {
+      // Update existing investigation with new reason if provided
+      const updatedNotes = `${existing.notes || ""}\n\n[${new Date().toISOString()}] Updated manual flag${reason ? `: ${reason}` : ""}`;
+      
+      await db
+        .update(investigations)
+        .set({ notes: updatedNotes })
+        .where(eq(investigations.id, existing.id));
+
+      return res.json({
+        investigation_id: existing.id,
+        status: "updated",
+        message: "Existing manual flag updated",
+      });
+    }
+
+    // Create new manual flag investigation for the conversation
+    const investigationId = `manual-conv-${conversationRunId}-${Date.now()}`;
+    const investigation = {
+      id: investigationId,
+      trigger: "manual_flag",
+      run_id: conversationRunId,
+      notes: reason || "Manually flagged conversation for review",
+      run_logs: [],
+      run_meta: {
+        userId: firstRun.user_identifier || undefined,
+        source: "manual_flag",
+        flagged_at: new Date().toISOString(),
+        original_source: firstRun.source,
+        goal_summary: firstRun.goal_summary,
+        status: firstRun.status,
+        conversation_run_id: conversationRunId,
+        event_count: conversationRuns.length,
+      } as any,
+    };
+
+    await db.insert(investigations).values([investigation]);
+
+    console.log(`[ManualFlags] Created manual flag investigation ${investigationId} for conversation ${conversationRunId} (${conversationRuns.length} events)`);
+
+    res.json({
+      investigation_id: investigationId,
+      status: "created",
+      message: "Conversation flagged successfully",
+    });
+  } catch (error: any) {
+    console.error("[ManualFlags] Error flagging conversation:", error);
+    res.status(500).json({
+      error: "Failed to flag conversation",
+      details: error.message,
+    });
+  }
+});
+
 // GET /tower/manual-flags - Get all manually flagged runs
 router.get("/manual-flags", async (req, res) => {
   try {
