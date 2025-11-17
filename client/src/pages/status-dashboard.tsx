@@ -4,6 +4,7 @@ import { RecentRunsTable } from "@/components/RecentRunsTable";
 import { BehaviourTestsCard } from "@/components/BehaviourTestsCard";
 import { LiveUserRunsCard } from "@/components/LiveUserRunsCard";
 import { ConversationQualityCard } from "@/components/ConversationQualityCard";
+import { AutoConversationQualityCard } from "@/components/AutoConversationQualityCard";
 import { PatchFailuresCard } from "@/components/PatchFailuresCard";
 import { TowerNavTabs } from "@/components/TowerNavTabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -62,8 +63,11 @@ export default function StatusDashboard() {
               {/* EVAL-008: Live User Runs */}
               <LiveUserRunsCard />
 
-              {/* EVAL-009: Conversation Quality */}
+              {/* EVAL-009: Conversation Quality (Manual Flags) */}
               <ConversationQualityCard />
+
+              {/* EVAL-009: Auto Conversation Quality (Automatic Detection) */}
+              <AutoConversationQualityCard />
 
               {/* EVAL-016: Patch Failures */}
               <PatchFailuresCard />

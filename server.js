@@ -1185,6 +1185,7 @@ let createLiveUserRun;  // EVAL-008
 
 // EVAL-009: Automatic conversation quality analysis
 let createAutoConversationQualityInvestigation;
+let getAllAutoConversationQualityInvestigations;
 
 // Behaviour test modules - loaded at startup
 let runBehaviourTest;
@@ -1562,6 +1563,7 @@ async function start() {
     // EVAL-009: Load automatic conversation quality investigation module
     const autoConversationQualityModule = await import('./src/evaluator/autoConversationQualityInvestigations.ts');
     createAutoConversationQualityInvestigation = autoConversationQualityModule.createAutoConversationQualityInvestigation;
+    getAllAutoConversationQualityInvestigations = autoConversationQualityModule.getAllAutoConversationQualityInvestigations;
     
     // EVAL-007: Backfill legacy behaviour test investigations (one-time migration)
     try {
@@ -1583,9 +1585,13 @@ async function start() {
     juniorDevRoutesModule.initializeJuniorDevRoutes(autoDetectAndTriggerInvestigation);
     app.use('/tower', juniorDevRoutesModule.default);
     
-    // Load conversation quality routes (EVAL-009)
+    // Load conversation quality routes (EVAL-009 manual flagging)
     const conversationQualityRoutesModule = await import('./server/routes-conversation-quality.ts');
     app.use('/tower', conversationQualityRoutesModule.default);
+    
+    // Load auto conversation quality routes (EVAL-009 automatic detection)
+    const autoConversationQualityRoutesModule = await import('./server/routes-auto-conversation-quality.ts');
+    app.use('/tower', autoConversationQualityRoutesModule.default);
     
     // Load patch failure routes (EVAL-016)
     const patchFailureRoutesModule = await import('./server/routes-patch-failures.ts');
