@@ -1210,6 +1210,31 @@ app.get('/tower/runs', async (req, res) => {
   }
 });
 
+// Conversation-level API endpoints
+app.get('/tower/conversations', async (req, res) => {
+  try {
+    const { listConversations } = require('./src/evaluator/runStore.ts');
+    const limit = parseInt(req.query.limit) || 50;
+    const conversations = await listConversations(limit);
+    res.status(200).json(conversations);
+  } catch (err) {
+    console.error('Error listing conversations', err);
+    res.status(500).json({ error: 'Failed to list conversations: ' + err.message });
+  }
+});
+
+app.get('/tower/conversations/:conversationRunId/events', async (req, res) => {
+  try {
+    const { getConversationEvents } = require('./src/evaluator/runStore.ts');
+    const { conversationRunId } = req.params;
+    const events = await getConversationEvents(conversationRunId);
+    res.status(200).json(events);
+  } catch (err) {
+    console.error('Error fetching conversation events', err);
+    res.status(500).json({ error: 'Failed to fetch conversation events: ' + err.message });
+  }
+});
+
 // EVAL-008: Live user runs endpoint (must come before /:id route)
 app.get('/tower/runs/live', async (req, res) => {
   try {

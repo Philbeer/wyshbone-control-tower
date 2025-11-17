@@ -111,8 +111,9 @@ export type LiveUserRunPayload = {
 
 export async function createLiveUserRun(
   payload: LiveUserRunPayload
-): Promise<{ id: string; status: string }> {
-  const runId = payload.runId || `live-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+): Promise<{ id: string; conversationRunId: string; status: string }> {
+  const conversationRunId = payload.runId || `conv-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const eventId = `${conversationRunId}-evt-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
   
   const inputText = payload.request?.inputText || "";
   const outputText = payload.response?.outputText || "";
@@ -129,7 +130,8 @@ export async function createLiveUserRun(
   }
   
   console.log("📥 Tower run log received", {
-    runId,
+    eventId,
+    conversationRunId,
     source: payload.source,
     createdAt: createdAt.toISOString(),
     hasInput: !!inputText,
@@ -142,7 +144,8 @@ export async function createLiveUserRun(
                       (inputText ? inputText.substring(0, 200) : null);
   
   await db.insert(runs).values({
-    id: runId,
+    id: eventId,
+    conversation_run_id: conversationRunId,
     source: payload.source ?? "live_user",
     user_identifier: payload.userId ?? payload.userEmail ?? null,
     goal_summary: goalSummary,
@@ -165,5 +168,73 @@ export async function createLiveUserRun(
     },
   });
 
-  return { id: runId, status: payload.status };
+  return { id: eventId, conversationRunId, status: payload.status };
+}
+
+export interface ConversationSummary {
+  conversation_run_id: string;
+  first_event_time: string;
+  latest_event_time: string;
+  event_count: number;
+  status: string;
+  input_summary: string | null;
+  output_summary: string | null;
+  source: string;
+  user_identifier: string | null;
+}
+
+export async function listConversations(limit = 50): Promise<ConversationSummary[]> {
+  const conversationGroups = await db
+    .select({
+      conversation_run_id: runs.conversation_run_id,
+      first_event_time: sql<string>`MIN(${runs.created_at})`,
+      latest_event_time: sql<string>`MAX(${runs.created_at})`,
+      event_count: sql<number>`COUNT(*)`,
+      latest_status: sql<string>`(ARRAY_AGG(${runs.status} ORDER BY ${runs.created_at} DESC))[1]`,
+      first_input: sql<string>`(ARRAY_AGG(${runs.goal_summary} ORDER BY ${runs.created_at} ASC) FILTER (WHERE ${runs.goal_summary} IS NOT NULL))[1]`,
+      latest_output: sql<string>`(ARRAY_AGG(${runs.meta} ORDER BY ${runs.created_at} DESC))[1]`,
+      source: sql<string>`(ARRAY_AGG(${runs.source} ORDER BY ${runs.created_at} ASC))[1]`,
+      user_identifier: sql<string>`(ARRAY_AGG(${runs.user_identifier} ORDER BY ${runs.created_at} ASC) FILTER (WHERE ${runs.user_identifier} IS NOT NULL))[1]`,
+    })
+    .from(runs)
+    .where(sql`${runs.conversation_run_id} IS NOT NULL`)
+    .groupBy(runs.conversation_run_id)
+    .orderBy(sql`MAX(${runs.created_at}) DESC`)
+    .limit(limit);
+
+  return conversationGroups.map((group) => {
+    const latestMeta = group.latest_output as any || {};
+    const outputText = latestMeta.responseText || latestMeta.outputText || latestMeta.output || "";
+    const outputSummary = outputText ? outputText.substring(0, 160) : null;
+
+    return {
+      conversation_run_id: group.conversation_run_id || "",
+      first_event_time: group.first_event_time,
+      latest_event_time: group.latest_event_time,
+      event_count: Number(group.event_count),
+      status: group.latest_status || "unknown",
+      input_summary: group.first_input,
+      output_summary: outputSummary,
+      source: group.source || "unknown",
+      user_identifier: group.user_identifier || null,
+    };
+  });
+}
+
+export async function getConversationEvents(conversationRunId: string): Promise<RunSummary[]> {
+  const events = await db
+    .select()
+    .from(runs)
+    .where(eq(runs.conversation_run_id, conversationRunId))
+    .orderBy(sql`${runs.created_at} ASC`);
+
+  return events.map((r) => ({
+    id: r.id,
+    created_at: r.created_at.toISOString(),
+    source: r.source,
+    user_identifier: r.user_identifier ?? null,
+    goal_summary: r.goal_summary ?? null,
+    status: r.status,
+    meta: r.meta ?? undefined,
+  }));
 }

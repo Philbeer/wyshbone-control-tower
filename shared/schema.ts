@@ -42,6 +42,7 @@ export type Investigation = typeof investigations.$inferSelect;
 
 export const runs = pgTable("runs", {
   id: varchar("id").primaryKey(),
+  conversation_run_id: text("conversation_run_id"),
   created_at: timestamp("created_at").notNull().defaultNow(),
   source: text("source").notNull(),
   user_identifier: text("user_identifier"),
