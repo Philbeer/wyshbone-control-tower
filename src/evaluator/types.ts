@@ -5,6 +5,7 @@ export type InvestigationTrigger =
   | "tool_error"
   | "behaviour_flag"
   | "conversation_quality"
+  | "auto_conversation_quality"
   | "patch_failure";
 
 export interface ConversationQualityAnalysis {
@@ -26,6 +27,29 @@ export interface ConversationQualityMeta {
   conversation_window: any[];
   user_note?: string;
   analysis?: ConversationQualityAnalysis;
+}
+
+export interface WyshboneConversationAnalysis {
+  failure_type: "greeting_flow" | "domain_followup" | "misinterpreted_intent" | "repetition" | "dead_end" | "other";
+  severity: "low" | "medium" | "high";
+  summary: string;
+  user_intent: string;
+  expected_behaviour: string;
+  actual_behaviour: string;
+  suggested_fix: string;
+  suggested_tests: string[];
+}
+
+export interface AutoConversationQualityMeta {
+  source: "auto_conversation_quality";
+  focus: {
+    kind: "conversation";
+  };
+  runId: string;
+  sessionId?: string;
+  userId?: string | null;
+  conversation_transcript: any[];
+  analysis?: WyshboneConversationAnalysis;
 }
 
 export interface PatchFailureAnalysis {
