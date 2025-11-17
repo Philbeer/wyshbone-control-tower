@@ -1,0 +1,51 @@
+You are my coding assistant for the Wyshbone Control Tower repl.
+
+We have made a large number of changes recently (conversation_run_id, unified runId ingestion, conversation grouping, conversation timelines, flagging, new routes, updated React components, etc.) and I need you to perform a **full structural audit**.
+
+Before we do the audit, I need you to **collect and show me all key files** that define:
+- database schema (schema.prisma or any equivalent)
+- run ingestion logic
+- run storage utilities (runStore, evaluator logic, meta storage)
+- Tower API routes for runs, conversations, flags
+- Any Zod/TS types for run logs
+- Any server helpers that process request/response bodies
+- React UI components related to: 
+  - Recent Runs / Conversations cards
+  - Manual Flags
+  - Auto Flags
+  - Investigate / Timeline views
+  - Any shared components used by those views
+- Any React pages or routes that load conversation data
+- Any context/state providers used for run/conversation state
+- Any new utility functions created during the conversation grouping implementation
+- Any new documentation files created or modified (e.g. replit.md)
+
+Your task:
+
+1. Search the entire repository and list **all files** that match any of these categories.
+2. Show the **full contents** of each file *one by one*, without skipping sections.
+3. If any file is large, break it into multiple messages automatically.
+4. Maintain ordering so I can follow the architecture clearly:
+   A. Database schema  
+   B. Server ingestion logic  
+   C. runStore utilities  
+   D. API routes  
+   E. Types / Zod schemas  
+   F. Shared server helpers  
+   G. React components (cards, lists, timeline, flags)  
+   H. React pages  
+   I. Shared UI utilities  
+   J. Documentation  
+
+5. Do NOT rewrite or refactor anything yet.  
+   This step is purely for **complete source visibility**.
+
+6. After showing all files, produce a summary list confirming:
+   - Total files found
+   - Which architectural layers they belong to
+   - Any potential duplicate logic, inconsistencies, or legacy files that need cleanup
+
+7. Stop after summarizing.  
+   Do not fix anything until I explicitly ask.
+
+Start by scanning the repo and listing all matching files, then ask me to confirm before printing their full contents to avoid flooding me.
