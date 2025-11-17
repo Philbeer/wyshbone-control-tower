@@ -1183,6 +1183,9 @@ let getRunById;
 let createRun;
 let createLiveUserRun;  // EVAL-008
 
+// EVAL-009: Automatic conversation quality analysis
+let createAutoConversationQualityInvestigation;
+
 // Behaviour test modules - loaded at startup
 let runBehaviourTest;
 let runAllBehaviourTests;
@@ -1439,6 +1442,22 @@ app.post('/tower/runs/log', async (req, res) => {
         // Don't fail the request if auto-detection fails
       }
     }
+
+    // EVAL-009: Automatic conversation quality analysis for all live user runs
+    if (createAutoConversationQualityInvestigation && payload.meta?.messages && Array.isArray(payload.meta.messages)) {
+      try {
+        console.log(`[EVAL-009] Auto-analyzing conversation quality for run ${result.id}`);
+        await createAutoConversationQualityInvestigation({
+          runId: result.id,
+          sessionId: payload.sessionId,
+          userId: payload.userId,
+          conversationTranscript: payload.meta.messages,
+        });
+      } catch (autoAnalysisErr) {
+        console.error('[EVAL-009 AutoAnalysis] Error during conversation analysis:', autoAnalysisErr.message);
+        // Don't fail the request if auto-analysis fails
+      }
+    }
     
     res.status(200).json(result);
   } catch (err) {
@@ -1539,6 +1558,10 @@ async function start() {
     // EVAL-008: Load live user investigation module
     const liveUserInvestigationsModule = await import('./src/evaluator/liveUserInvestigations.ts');
     ensureLiveUserInvestigationForRun = liveUserInvestigationsModule.ensureLiveUserInvestigationForRun;
+
+    // EVAL-009: Load automatic conversation quality investigation module
+    const autoConversationQualityModule = await import('./src/evaluator/autoConversationQualityInvestigations.ts');
+    createAutoConversationQualityInvestigation = autoConversationQualityModule.createAutoConversationQualityInvestigation;
     
     // EVAL-007: Backfill legacy behaviour test investigations (one-time migration)
     try {
