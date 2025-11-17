@@ -1,5 +1,9 @@
 import express from 'express';
 import { PatchEvaluator } from '../src/evaluator/patchEvaluator';
+import { db } from '../src/lib/db';
+import { investigations } from '@shared/schema';
+import { eq } from 'drizzle-orm';
+import { generateReplitPatchPrompt } from '../src/evaluator/promptGenerator';
 
 const router = express.Router();
 
@@ -65,6 +69,56 @@ router.get('/:id', async (req, res) => {
     res.status(500).json({ 
       error: 'Failed to fetch patch evaluation', 
       details: error.message 
+    });
+  }
+});
+
+router.post('/approve/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    console.log(`[PatchRoutes] Approving patch for investigation ${id}`);
+
+    // Load the investigation
+    const investigation = await db.query.investigations.findFirst({
+      where: eq(investigations.id, id),
+    });
+
+    if (!investigation) {
+      return res.status(404).json({ error: 'Investigation not found' });
+    }
+
+    // Check if patch_suggestion exists
+    if (!investigation.patch_suggestion) {
+      return res.status(400).json({ 
+        error: 'Cannot approve: investigation has no patch suggestion' 
+      });
+    }
+
+    // Generate the Replit patch prompt
+    const replitPatchPrompt = generateReplitPatchPrompt(investigation.patch_suggestion);
+
+    // Update the investigation with the generated prompt
+    await db
+      .update(investigations)
+      .set({
+        replit_patch_prompt: replitPatchPrompt,
+      })
+      .where(eq(investigations.id, id));
+
+    console.log(`[PatchRoutes] Generated Replit patch prompt for investigation ${id}`);
+
+    // Return the updated investigation
+    const updatedInvestigation = await db.query.investigations.findFirst({
+      where: eq(investigations.id, id),
+    });
+
+    res.json(updatedInvestigation);
+  } catch (error: any) {
+    console.error('[PatchRoutes] Error approving patch:', error);
+    res.status(500).json({
+      error: 'Failed to approve patch',
+      details: error.message,
     });
   }
 });
