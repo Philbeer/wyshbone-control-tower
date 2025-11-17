@@ -25,7 +25,12 @@ The system incorporates a sophisticated evaluation suite (EVAL-001 to EVAL-016) 
 *   **Conversation Quality Investigator (EVAL-009):** Analyzes flagged and automatically detects Wyshbone-specific conversation quality issues using GPT-4o-mini, classifying failures, providing summaries, and suggesting fixes/tests. Includes dashboard integration for viewing and managing issues.
 *   **Patch Failure Post-Mortem (EVAL-016):** Automatically analyzes rejected auto-generated patches (from EVAL-006) to classify failure reasons, recommend next steps, and provide suggested constraints for future patch attempts.
 
-UI/UX decisions include a hybrid architecture with server-rendered routes and a React SPA dashboard. The dashboard features a two-column layout showing status metrics, recent runs, an evaluator console, and a roadmap visualization with interactive task modals.
+UI/UX decisions include a hybrid architecture with server-rendered routes and a React SPA dashboard. The dashboard features a clean, focused two-column layout prioritizing live quality monitoring:
+
+*   **Always Visible (Expanded):** Live User Runs (EVAL-008), Auto Conversation Quality (EVAL-009 Auto), Conversation Quality (EVAL-009 Manual), and Patch Failures (EVAL-016).
+*   **Collapsed by Default:** Tower Status metrics, Behaviour Tests (EVAL-002), All Runs table, and Evaluator Console (EVAL-005) in the right sidebar.
+
+This design ensures the dashboard highlights user conversations and automatic quality checks while keeping auxiliary tools accessible but non-intrusive.
 
 ## External Dependencies
 
