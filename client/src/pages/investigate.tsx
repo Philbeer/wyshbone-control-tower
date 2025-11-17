@@ -9,6 +9,14 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 interface Investigation {
   id: string;
@@ -27,6 +35,7 @@ export default function InvestigatePage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [rejectionReason, setRejectionReason] = useState("");
+  const [showRejectDialog, setShowRejectDialog] = useState(false);
 
   const { data: investigation, isLoading } = useQuery<Investigation>({
     queryKey: ["/tower/investigations", id],
@@ -45,6 +54,14 @@ export default function InvestigatePage() {
         title: "Patch Approved",
         description: "The patch has been sent to Replit for application.",
       });
+      
+      // Invalidate queries so dashboard updates
+      queryClient.invalidateQueries({ queryKey: ["/tower/runs"] });
+      queryClient.invalidateQueries({ queryKey: ["/tower/manual-flags"] });
+      queryClient.invalidateQueries({ queryKey: ["/tower/auto-conversation-quality"] });
+      queryClient.invalidateQueries({ queryKey: ["/tower/conversation-quality"] });
+      queryClient.invalidateQueries({ queryKey: ["/tower/patch-failures"] });
+      
       navigate("/dashboard");
     },
     onError: (error: any) => {
@@ -57,10 +74,10 @@ export default function InvestigatePage() {
   });
 
   const rejectPatchMutation = useMutation({
-    mutationFn: async (reason: string) => {
+    mutationFn: async () => {
       return await apiRequest("POST", `/tower/patch/reject/${id}`, {
         investigationId: id,
-        reason,
+        reason: rejectionReason.trim(),
       });
     },
     onSuccess: () => {
@@ -68,6 +85,16 @@ export default function InvestigatePage() {
         title: "Patch Rejected",
         description: "Your feedback has been recorded.",
       });
+      setShowRejectDialog(false);
+      setRejectionReason("");
+      
+      // Invalidate queries so dashboard updates
+      queryClient.invalidateQueries({ queryKey: ["/tower/runs"] });
+      queryClient.invalidateQueries({ queryKey: ["/tower/manual-flags"] });
+      queryClient.invalidateQueries({ queryKey: ["/tower/auto-conversation-quality"] });
+      queryClient.invalidateQueries({ queryKey: ["/tower/conversation-quality"] });
+      queryClient.invalidateQueries({ queryKey: ["/tower/patch-failures"] });
+      
       navigate("/dashboard");
     },
     onError: (error: any) => {
@@ -76,6 +103,7 @@ export default function InvestigatePage() {
         description: error.message || "Failed to reject patch",
         variant: "destructive",
       });
+      // Dialog stays open so user can fix the issue
     },
   });
 
@@ -84,15 +112,16 @@ export default function InvestigatePage() {
   };
 
   const handleReject = () => {
-    if (rejectionReason.trim()) {
-      rejectPatchMutation.mutate(rejectionReason);
-    } else {
+    // Explicit front-end validation before mutation
+    if (!rejectionReason.trim()) {
       toast({
         title: "Reason Required",
         description: "Please provide a reason for rejecting this patch.",
         variant: "destructive",
       });
+      return;
     }
+    rejectPatchMutation.mutate();
   };
 
   const getOriginalInput = (inv: Investigation): string => {
@@ -250,20 +279,13 @@ export default function InvestigatePage() {
                   </Button>
                   <Button
                     variant="destructive"
-                    onClick={() => {
-                      // Show rejection reason input
-                      const reason = prompt("What was wrong with this patch?");
-                      if (reason) {
-                        setRejectionReason(reason);
-                        handleReject();
-                      }
-                    }}
+                    onClick={() => setShowRejectDialog(true)}
                     disabled={rejectPatchMutation.isPending}
                     className="flex-1"
                     data-testid="button-reject-patch"
                   >
                     <XCircle className="h-4 w-4 mr-2" />
-                    {rejectPatchMutation.isPending ? "Rejecting..." : "Reject Patch"}
+                    Reject Patch
                   </Button>
                 </div>
               </>
@@ -275,6 +297,56 @@ export default function InvestigatePage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Rejection Dialog */}
+        <Dialog open={showRejectDialog} onOpenChange={setShowRejectDialog}>
+          <DialogContent data-testid="dialog-reject-patch">
+            <DialogHeader>
+              <DialogTitle>Reject This Patch?</DialogTitle>
+              <DialogDescription>
+                Please explain what was wrong with this patch so we can improve future suggestions.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-2">
+              <Label htmlFor="rejection-reason">Reason for Rejection <span className="text-destructive">*</span></Label>
+              <Textarea
+                id="rejection-reason"
+                placeholder="e.g., This would break the login flow, The fix doesn't address the root cause, etc."
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                rows={4}
+                data-testid="textarea-rejection-reason"
+              />
+              {!rejectionReason.trim() && (
+                <p className="text-sm text-muted-foreground">
+                  Please provide a reason to help improve future patch suggestions.
+                </p>
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowRejectDialog(false);
+                  setRejectionReason("");
+                }}
+                data-testid="button-cancel-reject"
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleReject}
+                disabled={rejectPatchMutation.isPending || !rejectionReason.trim()}
+                data-testid="button-confirm-reject"
+              >
+                {rejectPatchMutation.isPending ? "Rejecting..." : "Reject Patch"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

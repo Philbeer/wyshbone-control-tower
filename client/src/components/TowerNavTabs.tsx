@@ -1,38 +1,18 @@
-import { useLocation } from "wouter";
+import { Activity } from "lucide-react";
 
 export function TowerNavTabs() {
-  const [location] = useLocation();
-  
-  const isStatusActive = location === "/status";
-  const isDashboardActive = location === "/dashboard" || location === "/";
-  
   return (
-    <div className="border-b bg-background">
-      <div className="container mx-auto px-4">
-        <nav className="flex gap-6 py-3">
-          <a
-            href="/status"
-            className={`text-sm font-medium transition-colors hover:text-foreground ${
-              isStatusActive
-                ? "text-foreground border-b-2 border-primary pb-3"
-                : "text-muted-foreground pb-3"
-            }`}
-            data-testid="link-status"
-          >
-            Status & Plan
-          </a>
-          <a
-            href="/dashboard"
-            className={`text-sm font-medium transition-colors hover:text-foreground ${
-              isDashboardActive
-                ? "text-foreground border-b-2 border-primary pb-3"
-                : "text-muted-foreground pb-3"
-            }`}
-            data-testid="link-dashboard"
-          >
-            Evaluator Console
-          </a>
-        </nav>
+    <div className="bg-background">
+      <div className="container mx-auto px-4 py-4">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center">
+            <Activity className="h-5 w-5 text-primary-foreground" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold">Wyshbone Control Tower</h1>
+            <p className="text-xs text-muted-foreground">Monitor & Fix Quality Issues</p>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,13 +16,14 @@ interface Investigation {
 }
 
 export function AutoFlaggedCard() {
+  const [, navigate] = useLocation();
   const { data: investigations, isLoading } = useQuery<Investigation[]>({
     queryKey: ["/tower/auto-conversation-quality"],
     refetchInterval: 10000,
   });
 
   const handleInvestigateClick = (investigationId: string) => {
-    window.location.href = `/dashboard/investigate/${investigationId}`;
+    navigate(`/dashboard/investigate/${investigationId}`);
   };
 
   const formatTime = (timestamp: string) => {

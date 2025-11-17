@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +30,7 @@ interface Run {
 
 export function RecentRunsSimple() {
   const { toast } = useToast();
+  const [, navigate] = useLocation();
   const [flagDialogOpen, setFlagDialogOpen] = useState(false);
   const [selectedRun, setSelectedRun] = useState<Run | null>(null);
   const [flagReason, setFlagReason] = useState("");
@@ -72,9 +74,27 @@ export function RecentRunsSimple() {
     }
   };
 
+  const investigateMutation = useMutation({
+    mutationFn: async (runId: string) => {
+      // Create an investigation for this run
+      const response = await apiRequest("POST", "/tower/investigate-run", { runId });
+      const data = await response.json();
+      return data.investigation_id;
+    },
+    onSuccess: (investigationId: string) => {
+      navigate(`/dashboard/investigate/${investigationId}`);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create investigation",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleInvestigateClick = (runId: string) => {
-    // Navigate to investigation detail page
-    window.location.href = `/dashboard/investigate/${runId}`;
+    investigateMutation.mutate(runId);
   };
 
   const formatTime = (timestamp: string) => {

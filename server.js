@@ -1605,6 +1605,10 @@ async function start() {
     const investigateRoutesModule = await import('./server/routes-investigate.ts');
     app.use('/tower', investigateRoutesModule.default);
     
+    // Load investigate-run routes (create investigation for a run)
+    const investigateRunRoutesModule = await import('./server/routes-investigate-run.ts');
+    app.use('/tower', investigateRunRoutesModule.default);
+    
     // Load reset routes (clear all flags and investigations)
     const resetRoutesModule = await import('./server/routes-reset.ts');
     app.use('/tower', resetRoutesModule.default);
