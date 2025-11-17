@@ -29,10 +29,25 @@ UI/UX decisions have been completely simplified for ease of use. The dashboard n
 
 **Simplified Dashboard Design:**
 
-*   **Recent Runs:** Shows all user conversations from Wyshbone UI with "Flag this run" and "Investigate & Fix" buttons. Displays input, output, time, and status for each conversation.
+*   **Recent Runs:** Shows all user conversations from Wyshbone UI with conversation-level grouping. Multiple messages with the same `runId` are grouped as a single conversation card. Each card displays:
+    *   Event count badge (e.g., "3 messages")
+    *   First message input summary
+    *   Time range (first message to latest message)
+    *   Status indicator
+    *   "View Timeline" button to see all messages chronologically
+    *   "Flag conversation" button to mark entire conversation for review
 *   **Auto-Flagged Runs:** Automatically detected quality issues (bad reasoning, hallucinations, unhelpful tone, etc.). Each entry shows the original input and reason it was flagged.
-*   **Manual Flags:** Runs that users manually flagged for review. Shows original input and optional user-provided reason.
+*   **Manual Flags:** Conversations that users manually flagged for review. Shows original input and optional user-provided reason.
 *   **Advanced Tools (Collapsed):** Contains Tower Status metrics, Automated Tests, Patch Failures, and Complete Run History. Includes a "Clear All Flags" button to reset investigation data.
+
+**Conversation Timeline View:**
+
+When clicking "View Timeline" from any conversation, users see a detailed chronological view of all messages in that conversation, including:
+*   Message number and timestamp for each event
+*   Input and output text for each message
+*   Status badges (success, error, etc.)
+*   Duration and tool usage metadata
+*   Model information when available
 
 **Simplified Investigation Workflow:**
 
