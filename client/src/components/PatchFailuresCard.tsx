@@ -60,6 +60,7 @@ export function PatchFailuresCard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedInvestigation, setSelectedInvestigation] = useState<PatchFailureInvestigation | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   const { setActiveInvestigationId } = useEvaluator();
   const { toast } = useToast();
 
@@ -84,6 +85,10 @@ export function PatchFailuresCard() {
       
       console.log(`[PatchFailuresCard] Loaded ${investigations.length} investigation(s)`);
       
+      // Reset retry count on success
+      setRetryCount(0);
+      
+      // Only show success toast if we had an error before
       if (error) {
         toast({
           title: "Investigations loaded",
@@ -96,12 +101,16 @@ export function PatchFailuresCard() {
       
       setError(errorMessage);
       setInvestigations([]);
+      setRetryCount((prev) => prev + 1);
       
-      toast({
-        variant: "destructive",
-        title: "Failed to load investigations",
-        description: errorMessage,
-      });
+      // Only show toast on first error to prevent spam
+      if (retryCount === 0) {
+        toast({
+          variant: "destructive",
+          title: "Failed to load investigations",
+          description: errorMessage,
+        });
+      }
     } finally {
       setLoading(false);
     }

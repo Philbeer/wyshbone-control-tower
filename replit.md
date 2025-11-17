@@ -132,6 +132,43 @@ A sophisticated evaluation system is integrated to automate testing, diagnosis, 
         *   Requires `OPENAI_API_KEY` for LLM analysis
         *   Server runs on port 5000
         *   See `docs/EVAL-009_CONVERSATION_QUALITY.md` for complete documentation
+*   **Patch Failure Post-Mortem (EVAL-016):**
+    *   Automatically captures and analyzes rejected auto-generated patches to understand failure reasons.
+    *   **Automatic Triggering:** When auto-generated patches (EVAL-006) are rejected by the gatekeeper (EVAL-004), creates investigation with `source: "patch_failure"` and `focus.kind: "patch"`
+    *   **LLM-Powered Analysis** using GPT-4o-mini to classify failures into categories:
+        *   `broke_existing_tests`: Patch caused regressions in passing tests
+        *   `did_not_fix_original_issue`: Patch didn't solve the intended problem
+        *   `misinterpreted_requirement`: Patch implemented wrong solution
+        *   `test_is_ambiguous_or_wrong`: Test itself may be incorrect
+        *   `wrong_repo_or_layer`: Change belongs in different codebase
+        *   `insufficient_context`: Not enough information to generate correct patch
+        *   `other`: Unusual or complex failure
+    *   **Structured Analysis Output** includes:
+        *   Failure reason (concise 1-2 sentence explanation)
+        *   Failure category classification
+        *   Next step recommendations
+        *   Suggested constraints for next patch attempt (optional)
+    *   **Dashboard Integration:**
+        *   "Patch Failures" panel showing recent rejected patches
+        *   Color-coded badges for failure categories and risk levels
+        *   Modal view with full analysis, sandbox results, and patch diff
+        *   Links back to original investigation
+        *   "Open in Console" button for detailed investigation
+    *   **Tracking Multiple Patch Failures:**
+        *   Each rejected patch generates its own investigation record
+        *   Multiple patches for the same investigation are linked via `original_investigation_id`
+        *   No deduplication - enables tracking iteration history and learning from repeated failures
+    *   **Testing:**
+        *   Integration test: `npx tsx scripts/test-patch-failure.ts`
+        *   Verifies automatic investigation creation, analysis, and deduplication
+    *   **API Endpoint:**
+        *   `GET /tower/patch-failures`: Retrieves all patch failure investigations
+    *   Analysis runs asynchronously and stores results in `run_meta.analysis` and `diagnosis`
+    *   Creates feedback loop for improving auto-patch quality over time
+    *   **Production Notes:**
+        *   Requires `OPENAI_API_KEY` for LLM analysis
+        *   Hooks into `src/evaluator/autoPatch.ts` rejection flow
+        *   See `docs/EVAL-016_PATCH_FAILURE.md` for complete documentation
 
 **UI/UX:**
 

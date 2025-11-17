@@ -163,19 +163,22 @@ async function runTest() {
       console.warn("  The investigation was created successfully, but LLM analysis requires API key");
     }
     
-    // Test 5: Deduplication test
-    console.log("\nTest 5: Testing deduplication...");
-    const samePatch = await createPatchFailureInvestigation({
+    // Test 5: Multiple patch failures for same investigation
+    console.log("\nTest 5: Testing multiple patch failures...");
+    const secondPatch = await createPatchFailureInvestigation({
       originalInvestigationId: mockPatchFailure.originalInvestigationId, // Same original investigation
       patchId: `test-patch-2-${Date.now()}`, // Different patch ID
       patchDiff: mockPatchFailure.patchDiff,
       sandboxResult: mockPatchFailure.sandboxResult
     });
     
-    if (samePatch.id === investigation.id) {
-      console.log(`✓ Deduplication works - returned same investigation ID`);
+    if (secondPatch.id !== investigation.id) {
+      console.log(`✓ Created separate investigation for second patch failure`);
+      console.log(`  First investigation: ${investigation.id}`);
+      console.log(`  Second investigation: ${secondPatch.id}`);
+      console.log(`  Both linked to original investigation: ${mockPatchFailure.originalInvestigationId}`);
     } else {
-      console.log(`ℹ Created new investigation (different patch ID) - this is expected behavior`);
+      throw new Error("Expected separate investigations for different patches");
     }
     
     console.log("\n=== All Tests Passed! ===\n");

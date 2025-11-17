@@ -1,10 +1,8 @@
 import { db } from "../lib/db";
 import { investigations } from "../../shared/schema";
-import { eq, and, desc, gte, sql } from "drizzle-orm";
+import { desc, sql } from "drizzle-orm";
 import type { Investigation, PatchFailureMeta } from "./types";
 import { storeInvestigation } from "./storeInvestigation";
-
-const DEDUP_WINDOW_HOURS = 24;
 
 export async function createPatchFailureInvestigation(params: {
   originalInvestigationId: string;
@@ -20,71 +18,13 @@ export async function createPatchFailureInvestigation(params: {
   };
 }): Promise<Investigation> {
   const now = new Date();
-  const investigationId = `pf-${params.originalInvestigationId}-${Date.now()}`;
+  const investigationId = `pf-${params.patchId}-${Date.now()}`;
 
-  console.log(`[PatchFailureInvestigations] Creating patch failure investigation ${investigationId} for investigation ${params.originalInvestigationId}`);
+  console.log(`[PatchFailureInvestigations] Creating patch failure investigation ${investigationId} for patch ${params.patchId}`);
 
-  // Check for existing patch failure investigation within dedup window
-  const dedupCutoff = new Date(now.getTime() - DEDUP_WINDOW_HOURS * 60 * 60 * 1000);
-  
-  const dedupConditions = [
-    sql`${investigations.created_at} >= ${dedupCutoff.toISOString()}`,
-    sql`${investigations.run_meta}->>'source' = 'patch_failure'`,
-    sql`${investigations.run_meta}->>'original_investigation_id' = ${params.originalInvestigationId}`,
-  ];
+  // Each patch failure gets its own investigation - no deduplication
+  // Multiple patches for the same investigation are tracked separately
 
-  const existing = await db.query.investigations.findFirst({
-    where: and(...dedupConditions),
-    orderBy: (investigations, { desc }) => [desc(investigations.created_at)],
-  });
-
-  if (existing) {
-    console.log(
-      `[PatchFailureInvestigations] Found existing patch failure investigation ${existing.id} for originalInvestigationId=${params.originalInvestigationId} within ${DEDUP_WINDOW_HOURS}h window`
-    );
-
-    // Update notes to include this additional failure
-    const updatedNotes = `${existing.notes || ''}\n\n[${now.toISOString()}] Additional patch failure for same investigation\nPatch ID: ${params.patchId}\nReasons: ${params.sandboxResult.reasons.join(', ')}`;
-    
-    // Update metadata with the latest failure
-    const existingMeta = existing.run_meta as any;
-    const updatedMeta: PatchFailureMeta = {
-      ...existingMeta,
-      patch_id: params.patchId,
-      patch_diff: params.patchDiff,
-      sandbox_result: params.sandboxResult,
-    };
-
-    await db
-      .update(investigations)
-      .set({ 
-        notes: updatedNotes,
-        run_meta: updatedMeta as any,
-      })
-      .where(sql`${investigations.id} = ${existing.id}`);
-    
-    // Trigger reanalysis for the updated failure
-    console.log(`[PatchFailureInvestigations] Triggering reanalysis for updated investigation ${existing.id}`);
-    processPatchFailureInvestigation(existing.id).catch((err) => {
-      console.error(`[PatchFailureInvestigations] Failed to reprocess investigation ${existing.id}:`, err);
-    });
-
-    return {
-      id: existing.id,
-      createdAt: existing.created_at,
-      trigger: existing.trigger as any,
-      runId: existing.run_id ?? undefined,
-      notes: updatedNotes,
-      runLogs: existing.run_logs ?? [],
-      runMeta: updatedMeta,
-      uiSnapshot: existing.ui_snapshot ?? null,
-      supervisorSnapshot: existing.supervisor_snapshot ?? null,
-      diagnosis: existing.diagnosis ?? null,
-      patchSuggestion: existing.patch_suggestion ?? null,
-    };
-  }
-
-  // Create new investigation
   const runMeta: PatchFailureMeta = {
     source: "patch_failure",
     focus: {
