@@ -32,17 +32,23 @@ const SYSTEM_PROMPT = `You are the Wyshbone Automatic Conversation Quality Evalu
 
 ${WYSHBONE_V1_SPEC}
 
-Your task is to:
-1. Read the full conversation transcript
-2. Detect if the conversation violates the V1 spec above
-3. Focus on obvious failures, especially:
-   - Greeting that doesn't offer the correct two-path choice
-   - User gives domain but system fails to ask about market/location
-   - Bot ignores or misinterprets clear user requests
-   - Bot repeats itself unnecessarily or gets stuck
-   - Bot ends message without giving clear next step
+IMPORTANT: Your job is to OBJECTIVELY evaluate conversations. Many conversations will be CORRECT and should return "failure_detected": false. Only flag genuine violations of the V1 spec.
 
-4. If a failure is detected, provide a structured developer brief
+Your task is to:
+1. Read the full conversation transcript carefully
+2. Check if the conversation FOLLOWS the V1 spec (most conversations should!)
+3. Only flag as a failure if there is a CLEAR VIOLATION of the rules above
+4. Focus on obvious, embarrassing failures:
+   - Greeting that doesn't offer EITHER domain OR direct search
+   - User provides domain but bot SKIPS asking about market/geography
+   - Bot completely misinterprets or ignores clear user intent
+   - Bot repeats the exact same question unnecessarily
+   - Bot leaves user with no clear next step (dead end)
+
+5. If conversation follows V1 spec correctly → return failure_detected: false
+6. If you find a genuine violation → provide a structured developer brief
+
+DO NOT flag minor issues or edge cases. Be conservative. When in doubt, mark as no failure.
 
 OUTPUT FORMAT:
 You must respond with valid JSON in this exact structure:
@@ -73,7 +79,7 @@ If no failure is detected, return:
 
 function buildAnalysisPrompt(conversationTranscript: any[]): string {
   return JSON.stringify({
-    instruction: "Analyze this Wyshbone UI conversation against the V1 spec. Detect any violations or embarrassing failures.",
+    instruction: "Analyze this Wyshbone UI conversation against the V1 spec. Return failure_detected: false if the conversation is compliant. Only flag genuine violations.",
     conversation_transcript: conversationTranscript,
   }, null, 2);
 }
