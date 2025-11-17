@@ -1,0 +1,62 @@
+You are my coding assistant for the Wyshbone Tower repl.
+Implement EVAL-009: Conversation Quality Investigator.
+
+Goal:
+Automatically detect and diagnose conversation quality issues in Wyshbone UI chats
+and generate structured developer briefs that can be used by auto-patch or human
+developers to improve behaviour.
+
+Context:
+- We already store run logs and run_meta for UI/Supervisor runs.
+- Earlier EVAL tasks handle technical issues and basic behaviour checks.
+- Now we care mainly about obvious "embarrassing" chat failures, especially
+  around greeting, domain-based personalisation, and onboarding to lead search.
+
+Desired behaviour v1:
+1. Analyse completed runs (or failed runs) by reading the full conversation transcript.
+2. Detect issues such as:
+   - greeting that does not offer the correct two-path choice
+     (domain for personalisation vs jump straight into search)
+   - user gives a domain but the system fails to ask where to search / what market
+   - bot ignores or misinterprets a clear user request
+   - bot repeats itself unnecessarily or gets stuck
+   - bot ends a message without giving a clear next step
+3. Use the following v1 spec for "good" behaviour:
+   - First message: friendly greeting + short explanation of Wyshbone
+     + explicit choice:
+       a) provide website/domain for personalisation, or
+       b) describe what kind of leads and where.
+   - If the user provides a domain, the system acknowledges it and asks about
+     target market / geography before starting lead search.
+   - If the user skips the domain and describes leads directly, the system
+     confirms product + target + location and then searches, without nagging
+     again for the domain.
+4. For any detected failure, create a structured developer brief object and
+   persist it into run_meta.analysis (or a similar field) with fields like:
+   - failure_type (enum: greeting_flow, domain_followup, misinterpreted_intent,
+                  repetition, dead_end, other)
+   - severity (low/medium/high)
+   - summary (1–3 sentence plain-English description)
+   - user_intent (short description of what the user was trying to do)
+   - expected_behaviour (short description of what should have happened,
+                         based on the v1 spec above)
+   - actual_behaviour (what the bot actually did)
+   - suggested_fix (natural language recommendation)
+   - suggested_tests (1–3 bullet points for behaviour tests we should add/update)
+5. Ensure EVAL-009 integrates with the existing investigation / patch-failure
+   pipeline so that:
+   - When EVAL-009 flags a high-severity failure, Tower creates or updates
+     an investigation for that run and surfaces the analysis in the UI.
+   - The developer brief is visible in the Evaluator Console for that investigation.
+
+Implementation notes:
+- Reuse any existing utilities for reading conversation logs and updating run_meta.
+- Keep the analysis logic in a separate module (e.g. eval009_conversation_quality.ts)
+  so it is easy to iterate.
+- Write unit tests for the analysis function with a few example transcripts:
+  - good onboarding flows
+  - a domain given but no location follow-up
+  - greeting that does not offer the two options
+  - a run where the bot ignores a clear lead search request.
+
+Produce actual code and any config/wiring changes needed, not high-level instructions.
