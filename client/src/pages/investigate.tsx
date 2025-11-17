@@ -3,7 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, CheckCircle, XCircle, Clock, AlertTriangle, Loader2 } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Clock, AlertTriangle, Loader2, Copy } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Textarea } from "@/components/ui/textarea";
@@ -28,6 +28,7 @@ interface Investigation {
   run_meta: any;
   diagnosis: string | null;
   patch_suggestion: string | null;
+  replit_patch_prompt: string | null;
 }
 
 export default function InvestigatePage() {
@@ -160,6 +161,45 @@ export default function InvestigatePage() {
     }
     rejectPatchMutation.mutate();
   };
+
+  const handleCopyPrompt = async () => {
+    if (!investigation?.replit_patch_prompt) return;
+    
+    try {
+      await navigator.clipboard.writeText(investigation.replit_patch_prompt);
+      toast({
+        title: "Copied!",
+        description: "Prompt copied to clipboard. Paste it into Replit UI.",
+      });
+    } catch (error) {
+      toast({
+        title: "Copy Failed",
+        description: "Failed to copy to clipboard. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const generatePromptMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", `/tower/patch/approve/${id}`, {});
+      return await response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(["/tower/investigations", id], data);
+      toast({
+        title: "Prompt Generated",
+        description: "The Replit prompt has been generated and is ready to copy.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Generation Failed",
+        description: error.message || "Failed to generate prompt",
+        variant: "destructive",
+      });
+    },
+  });
 
   const getOriginalInput = (inv: Investigation): string => {
     const messages = inv.run_meta?.conversation_window;
@@ -341,6 +381,68 @@ export default function InvestigatePage() {
                 <AlertTriangle className="h-4 w-4" />
                 <span>Patch suggestion is being generated. Please check back in a moment.</span>
               </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Copy & Paste Prompt for Replit */}
+        <Card data-testid="card-replit-prompt">
+          <CardHeader>
+            <CardTitle>Copy & Paste Prompt for Replit (Auto-Generated)</CardTitle>
+            <CardDescription>
+              A ready-to-use prompt you can paste directly into Replit UI to implement this fix
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {investigation.replit_patch_prompt ? (
+              <>
+                <div className="relative">
+                  <pre className="p-4 rounded-md bg-muted text-xs overflow-x-auto whitespace-pre-wrap border">
+                    {investigation.replit_patch_prompt}
+                  </pre>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCopyPrompt}
+                    className="absolute top-2 right-2"
+                    data-testid="button-copy-prompt"
+                  >
+                    <Copy className="h-4 w-4 mr-2" />
+                    Copy
+                  </Button>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Click "Copy" above, then paste this prompt into Replit UI's chat to implement the fix.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Generate a formatted prompt that you can copy and paste directly into Replit UI to implement this patch.
+                </p>
+                <Button
+                  onClick={() => generatePromptMutation.mutate()}
+                  disabled={generatePromptMutation.isPending || !investigation.patch_suggestion}
+                  data-testid="button-generate-prompt"
+                >
+                  {generatePromptMutation.isPending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="h-4 w-4 mr-2" />
+                      Generate Replit Prompt
+                    </>
+                  )}
+                </Button>
+                {!investigation.patch_suggestion && (
+                  <p className="text-sm text-muted-foreground italic">
+                    A patch suggestion is required before generating the prompt
+                  </p>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
