@@ -1,0 +1,210 @@
+You are my coding assistant for the Wyshbone Control Tower.
+Your task is to simplify the entire Tower dashboard and investigation workflow so it is easy for a human to use.
+Implement the following changes exactly as described.
+
+1. Replace the existing section names with these THREE sections only
+(A) Recent Runs
+
+Shows ALL user chats from Wyshbone UI.
+Each run must include:
+
+Input
+
+Output
+
+Time
+
+Status
+
+Button: “Flag this run”
+
+Button: “Investigate & Fix”
+
+Remove all other metadata unless needed internally.
+
+(B) Auto-Flagged Runs
+
+These are runs Tower automatically identifies as having issues.
+Rename the section to:
+
+“Auto-Flagged Runs (Automatically Detected Issues)”
+
+Each entry must include:
+
+The original input
+
+The reason it was flagged (short sentence)
+
+Button: “Investigate & Fix”
+
+Tower should auto-flag issues such as:
+• bad reasoning
+• hallucination
+• contradicting earlier chat
+• unhelpful tone
+• failure to follow user request
+
+(C) Manually-Flagged Runs
+
+Rename the section to:
+
+“Manual Flags (Runs You Marked as Needing Fix)”
+
+Every run flagged by a human (from Recent Runs) goes here.
+Each entry must include:
+
+The original input
+
+The reason the user selected (optional)
+
+Button: “Investigate & Fix”
+
+2. Add a “Flag this Run” button to Recent Runs
+
+When clicked:
+
+Create a new Manual Investigation entry
+
+Store:
+
+runId
+
+input
+
+output
+
+timestamp
+
+userId
+
+optional “reason” field
+
+Add the entry to the Manual Flags section
+
+No need to open the right-hand console.
+
+3. Implement a simple “Investigate & Fix” workflow
+
+When clicked (from any section):
+
+Open a clean investigation page
+
+Show:
+
+Run input
+
+Run output
+
+Auto diagnosis (brief)
+
+Tower must:
+
+Determine what was wrong
+
+Suggest a patch (one or more file edits)
+
+Display:
+“Approve Patch” and “Reject Patch”
+
+When the user clicks Approve
+→ send structured patch suggestions to Replit via existing API.
+When the user clicks Reject
+→ ask the user what was wrong with the patch.
+
+This replaces the Evaluator sidebar for user-flow purposes.
+
+4. Remove or collapse unused sections
+
+Collapse these by default under a heading called “Advanced Tools”:
+
+Tower Status
+
+Behaviour Tests
+
+All Runs
+
+Evaluator Console
+
+These should be hidden unless intentionally expanded.
+
+5. Remove confusing language
+
+Replace all references to:
+
+“conversation quality”
+
+“manual investigation”
+
+“auto conversation quality”
+
+“patch lifecycle”
+
+“junior developer agent”
+
+“EVAL-005/006/…”
+
+“sandbox evaluation”
+
+With the simpler terms:
+
+“Auto-Flagged Runs”
+
+“Manual Flags”
+
+“Investigate & Fix”
+
+“Patch Suggestion”
+
+6. Keep only the essentials visible
+
+Default visible (expanded):
+
+Recent Runs
+
+Auto-Flagged Runs
+
+Manual Flags
+
+Everything else should be hidden behind one collapsible section.
+
+7. Reset the dashboard data (optional)
+
+Include a button in the Advanced Tools section:
+
+“Clear all flags and investigations (Reset Tower)”
+
+This should clear:
+
+Auto-flagged items
+
+Manual-flagged items
+
+Past investigations
+
+Patch attempts
+
+But must NOT delete recent runs or system schema.
+
+8. Ensure the right-hand sidebar only shows live investigations
+
+The Evaluator sidebar should only appear when a user clicks Investigate & Fix.
+
+It must NOT appear during normal use or when selecting Recent Runs.
+
+🔧 Implementation Notes (for Replit)
+
+Modify dashboard UI templates
+
+Add two new endpoints:
+
+POST /tower/runs/:id/flag
+
+POST /tower/investigate/:id
+
+Add logic to insert flagged runs into the correct lists
+
+Ensure all patch API output remains unchanged
+
+No changes to database schema unless needed
+
+Keep the system behaviour identical, only change presentation + UX

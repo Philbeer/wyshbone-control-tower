@@ -1597,6 +1597,10 @@ async function start() {
     const patchFailureRoutesModule = await import('./server/routes-patch-failures.ts');
     app.use('/tower', patchFailureRoutesModule.default);
     
+    // Load manual flags routes (simplified flagging workflow)
+    const manualFlagsRoutesModule = await import('./server/routes-manual-flags.ts');
+    app.use('/tower', manualFlagsRoutesModule.default);
+    
     // Ensure behaviour test definitions are seeded
     await ensureBehaviourTestsSeeded();
     
