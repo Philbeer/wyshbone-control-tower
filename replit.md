@@ -160,7 +160,7 @@ A sophisticated evaluation system is integrated to automate testing, diagnosis, 
         *   No deduplication - enables tracking iteration history and learning from repeated failures
     *   **Testing:**
         *   Integration test: `npx tsx scripts/test-patch-failure.ts`
-        *   Verifies automatic investigation creation, analysis, and deduplication
+        *   Verifies automatic investigation creation, analysis, and multiple patch tracking
     *   **API Endpoint:**
         *   `GET /tower/patch-failures`: Retrieves all patch failure investigations
     *   Analysis runs asynchronously and stores results in `run_meta.analysis` and `diagnosis`

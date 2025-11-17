@@ -201,7 +201,7 @@ This test verifies:
 - Data persistence and retrieval
 - LLM analysis (requires OPENAI_API_KEY)
 - Failure category validation
-- Deduplication logic
+- Multiple patch failures for same investigation tracked separately
 
 ## Troubleshooting
 
@@ -220,10 +220,10 @@ This test verifies:
 - Check that PatchEvaluator.getEvaluation() returns data
 - Review auto-patch generation logs
 
-**Duplicate investigations:**
-- Verify original investigation IDs are consistent
-- Check deduplication window (24 hours)
-- Review investigation creation logs
+**Multiple investigations for same patch:**
+- Each patch failure creates a unique investigation
+- Investigation ID includes patch ID to ensure uniqueness
+- Multiple patches for same original investigation are linked via `original_investigation_id`
 
 ## Integration with Auto-Patch Pipeline
 

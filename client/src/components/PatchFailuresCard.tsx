@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -60,7 +60,7 @@ export function PatchFailuresCard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedInvestigation, setSelectedInvestigation] = useState<PatchFailureInvestigation | null>(null);
-  const [retryCount, setRetryCount] = useState(0);
+  const lastErrorToastRef = useRef<number>(0);
   const { setActiveInvestigationId } = useEvaluator();
   const { toast } = useToast();
 
@@ -85,8 +85,8 @@ export function PatchFailuresCard() {
       
       console.log(`[PatchFailuresCard] Loaded ${investigations.length} investigation(s)`);
       
-      // Reset retry count on success
-      setRetryCount(0);
+      // Reset error toast throttle on success
+      lastErrorToastRef.current = 0;
       
       // Only show success toast if we had an error before
       if (error) {
@@ -101,10 +101,12 @@ export function PatchFailuresCard() {
       
       setError(errorMessage);
       setInvestigations([]);
-      setRetryCount((prev) => prev + 1);
       
-      // Only show toast on first error to prevent spam
-      if (retryCount === 0) {
+      // Only show toast if at least 5 seconds passed since last error toast
+      const now = Date.now();
+      const MIN_TOAST_INTERVAL = 5000;
+      if (now - lastErrorToastRef.current > MIN_TOAST_INTERVAL) {
+        lastErrorToastRef.current = now;
         toast({
           variant: "destructive",
           title: "Failed to load investigations",

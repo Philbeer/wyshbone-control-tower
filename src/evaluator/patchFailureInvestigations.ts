@@ -83,15 +83,6 @@ async function processPatchFailureInvestigation(investigationId: string): Promis
 }
 
 export async function getAllPatchFailureInvestigations(): Promise<Investigation[]> {
-  const rows = await db.query.investigations.findFirst({
-    where: sql`${investigations.run_meta}->>'source' = 'patch_failure'`,
-    orderBy: desc(investigations.created_at),
-  });
-
-  if (!rows) {
-    return [];
-  }
-
   const allRows = await db
     .select()
     .from(investigations)
