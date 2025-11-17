@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import StatusDashboard from "@/pages/status-dashboard";
 import InvestigatePage from "@/pages/investigate";
+import ConversationTimeline from "@/pages/conversation-timeline";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -12,6 +13,7 @@ function Router() {
     <Switch>
       <Route path="/dashboard" component={StatusDashboard} />
       <Route path="/dashboard/investigate/:id" component={InvestigatePage} />
+      <Route path="/dashboard/conversation/:conversationRunId" component={ConversationTimeline} />
       <Route path="/" component={StatusDashboard} />
       {/* Fallback to 404 */}
       <Route component={NotFound} />

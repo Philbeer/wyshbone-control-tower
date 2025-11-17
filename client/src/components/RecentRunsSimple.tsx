@@ -18,83 +18,66 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 
-interface Run {
-  id: string;
-  created_at: string;
+interface Conversation {
+  conversation_run_id: string;
+  first_event_time: string;
+  latest_event_time: string;
+  event_count: number;
+  status: string;
+  input_summary: string | null;
+  output_summary: string | null;
   source: string;
   user_identifier: string | null;
-  goal_summary: string | null;
-  status: string;
-  meta: any;
 }
 
 export function RecentRunsSimple() {
   const { toast } = useToast();
   const [, navigate] = useLocation();
   const [flagDialogOpen, setFlagDialogOpen] = useState(false);
-  const [selectedRun, setSelectedRun] = useState<Run | null>(null);
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [flagReason, setFlagReason] = useState("");
 
-  const { data: runs, isLoading } = useQuery<Run[]>({
-    queryKey: ["/tower/runs"],
+  const { data: conversations, isLoading } = useQuery<Conversation[]>({
+    queryKey: ["/tower/conversations"],
     refetchInterval: 5000,
   });
 
   const flagMutation = useMutation({
-    mutationFn: async ({ runId, reason }: { runId: string; reason?: string }) => {
-      return await apiRequest("POST", `/tower/runs/${runId}/flag`, { reason });
+    mutationFn: async ({ conversationRunId, reason }: { conversationRunId: string; reason?: string }) => {
+      return await apiRequest("POST", `/tower/conversations/${conversationRunId}/flag`, { reason });
     },
     onSuccess: () => {
       toast({
-        title: "Run Flagged",
-        description: "This run has been flagged for review and added to Manual Flags.",
+        title: "Conversation Flagged",
+        description: "This conversation has been flagged for review and added to Manual Flags.",
       });
       queryClient.invalidateQueries({ queryKey: ["/tower/manual-flags"] });
       setFlagDialogOpen(false);
-      setSelectedRun(null);
+      setSelectedConversation(null);
       setFlagReason("");
     },
     onError: (error: any) => {
       toast({
         title: "Error",
-        description: error.message || "Failed to flag run",
+        description: error.message || "Failed to flag conversation",
         variant: "destructive",
       });
     },
   });
 
-  const handleFlagClick = (run: Run) => {
-    setSelectedRun(run);
+  const handleFlagClick = (conversation: Conversation) => {
+    setSelectedConversation(conversation);
     setFlagDialogOpen(true);
   };
 
   const handleFlagSubmit = () => {
-    if (selectedRun) {
-      flagMutation.mutate({ runId: selectedRun.id, reason: flagReason || undefined });
+    if (selectedConversation) {
+      flagMutation.mutate({ conversationRunId: selectedConversation.conversation_run_id, reason: flagReason || undefined });
     }
   };
 
-  const investigateMutation = useMutation({
-    mutationFn: async (runId: string) => {
-      // Create an investigation for this run
-      const response = await apiRequest("POST", "/tower/investigate-run", { runId });
-      const data = await response.json();
-      return data.investigation_id;
-    },
-    onSuccess: (investigationId: string) => {
-      navigate(`/dashboard/investigate/${investigationId}`);
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to create investigation",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleInvestigateClick = (runId: string) => {
-    investigateMutation.mutate(runId);
+  const handleViewConversationClick = (conversationRunId: string) => {
+    navigate(`/dashboard/conversation/${conversationRunId}`);
   };
 
   const formatTime = (timestamp: string) => {
@@ -122,22 +105,16 @@ export function RecentRunsSimple() {
     });
   };
 
-  const getInputText = (run: Run): string => {
-    return run.goal_summary || 
-           run.meta?.inputText || 
-           run.meta?.requestText || 
-           "No input captured";
+  const getInputText = (conversation: Conversation): string => {
+    return conversation.input_summary || "No input captured";
   };
 
-  const getOutputText = (run: Run): string => {
-    return run.meta?.output || 
-           run.meta?.responseText || 
-           run.meta?.outputText || 
-           "No response captured";
+  const getOutputText = (conversation: Conversation): string => {
+    return conversation.output_summary || "No response captured";
   };
 
-  // Filter to only show Wyshbone UI user runs
-  const userRuns = runs?.filter(run => run.source === "live_user") || [];
+  // Filter to only show Wyshbone UI user conversations
+  const userConversations = conversations?.filter(conv => conv.source === "live_user") || [];
 
   return (
     <>
@@ -150,55 +127,60 @@ export function RecentRunsSimple() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="text-sm text-muted-foreground">Loading runs...</div>
-          ) : userRuns.length === 0 ? (
-            <div className="text-sm text-muted-foreground">No recent runs</div>
+            <div className="text-sm text-muted-foreground">Loading conversations...</div>
+          ) : userConversations.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No recent conversations</div>
           ) : (
             <div className="space-y-3">
-              {userRuns.slice(0, 10).map((run) => (
+              {userConversations.slice(0, 10).map((conversation) => (
                 <div
-                  key={run.id}
+                  key={conversation.conversation_run_id}
                   className="flex flex-col gap-3 p-4 rounded-md border hover-elevate"
-                  data-testid={`run-item-${run.id}`}
+                  data-testid={`conversation-item-${conversation.conversation_run_id}`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0 space-y-2">
                       <div className="flex items-center gap-2 flex-wrap">
                         <Clock className="h-3 w-3 text-muted-foreground flex-shrink-0" />
                         <span className="text-xs text-muted-foreground">
-                          {formatTime(run.created_at)}
+                          {formatTime(conversation.first_event_time)}
                         </span>
-                        {run.user_identifier && (
+                        {conversation.event_count > 1 && (
+                          <Badge variant="secondary" className="ml-2">
+                            {conversation.event_count} messages
+                          </Badge>
+                        )}
+                        {conversation.user_identifier && (
                           <>
                             <User className="h-3 w-3 text-muted-foreground flex-shrink-0 ml-2" />
                             <span className="text-xs text-muted-foreground truncate">
-                              {run.user_identifier}
+                              {conversation.user_identifier}
                             </span>
                           </>
                         )}
                         <Badge
                           variant={
-                            run.status === "success" || run.status === "completed" 
+                            conversation.status === "success" || conversation.status === "completed" 
                               ? "default" 
-                              : run.status === "error" || run.status === "fail"
+                              : conversation.status === "error" || conversation.status === "fail"
                               ? "destructive"
                               : "secondary"
                           }
                           className="ml-auto flex-shrink-0"
                         >
-                          {run.status}
+                          {conversation.status}
                         </Badge>
                       </div>
 
                       <div>
                         <div className="text-xs text-muted-foreground mb-1">Input:</div>
-                        <div className="text-sm line-clamp-2">{getInputText(run)}</div>
+                        <div className="text-sm line-clamp-2">{getInputText(conversation)}</div>
                       </div>
 
                       <div>
-                        <div className="text-xs text-muted-foreground mb-1">Output:</div>
+                        <div className="text-xs text-muted-foreground mb-1">Latest Output:</div>
                         <div className="text-sm text-muted-foreground line-clamp-2">
-                          {getOutputText(run)}
+                          {getOutputText(conversation)}
                         </div>
                       </div>
                     </div>
@@ -208,20 +190,20 @@ export function RecentRunsSimple() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleFlagClick(run)}
-                      data-testid={`button-flag-${run.id}`}
+                      onClick={() => handleViewConversationClick(conversation.conversation_run_id)}
+                      data-testid={`button-view-${conversation.conversation_run_id}`}
                     >
-                      <Flag className="h-3 w-3 mr-1" />
-                      Flag this run
+                      <Wrench className="h-3 w-3 mr-1" />
+                      View Timeline
                     </Button>
                     <Button
                       size="sm"
-                      variant="default"
-                      onClick={() => handleInvestigateClick(run.id)}
-                      data-testid={`button-investigate-${run.id}`}
+                      variant="outline"
+                      onClick={() => handleFlagClick(conversation)}
+                      data-testid={`button-flag-${conversation.conversation_run_id}`}
                     >
-                      <Wrench className="h-3 w-3 mr-1" />
-                      Investigate & Fix
+                      <Flag className="h-3 w-3 mr-1" />
+                      Flag conversation
                     </Button>
                   </div>
                 </div>
@@ -241,11 +223,11 @@ export function RecentRunsSimple() {
           </DialogHeader>
 
           <div className="space-y-4">
-            {selectedRun?.goal_summary && (
+            {selectedConversation?.input_summary && (
               <div>
-                <Label className="text-sm font-medium">Run Input</Label>
+                <Label className="text-sm font-medium">Conversation Input</Label>
                 <div className="text-sm text-muted-foreground mt-1">
-                  {selectedRun.goal_summary}
+                  {selectedConversation.input_summary}
                 </div>
               </div>
             )}

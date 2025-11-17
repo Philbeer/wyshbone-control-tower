@@ -1179,6 +1179,8 @@ let createInvestigationForRun;
 // Run tracking modules - loaded at startup
 let listRecentRuns;
 let listLiveUserRuns;  // EVAL-008
+let listConversations;  // Conversation-level queries
+let getConversationEvents;  // Conversation-level queries
 let getRunById;
 let createRun;
 let createLiveUserRun;  // EVAL-008
@@ -1213,7 +1215,6 @@ app.get('/tower/runs', async (req, res) => {
 // Conversation-level API endpoints
 app.get('/tower/conversations', async (req, res) => {
   try {
-    const { listConversations } = require('./src/evaluator/runStore.ts');
     const limit = parseInt(req.query.limit) || 50;
     const conversations = await listConversations(limit);
     res.status(200).json(conversations);
@@ -1225,7 +1226,6 @@ app.get('/tower/conversations', async (req, res) => {
 
 app.get('/tower/conversations/:conversationRunId/events', async (req, res) => {
   try {
-    const { getConversationEvents } = require('./src/evaluator/runStore.ts');
     const { conversationRunId } = req.params;
     const events = await getConversationEvents(conversationRunId);
     res.status(200).json(events);
@@ -1554,6 +1554,8 @@ async function start() {
     
     listRecentRuns = runStoreModule.listRecentRuns;
     listLiveUserRuns = runStoreModule.listLiveUserRuns;  // EVAL-008
+    listConversations = runStoreModule.listConversations;  // Conversation-level
+    getConversationEvents = runStoreModule.getConversationEvents;  // Conversation-level
     getRunById = runStoreModule.getRunById;
     createRun = runStoreModule.createRun;
     createLiveUserRun = runStoreModule.createLiveUserRun;  // EVAL-008
