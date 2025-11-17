@@ -3,12 +3,12 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, CheckCircle, XCircle, Clock, AlertTriangle } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Clock, AlertTriangle, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -36,11 +36,48 @@ export default function InvestigatePage() {
   const { toast } = useToast();
   const [rejectionReason, setRejectionReason] = useState("");
   const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [isEvaluating, setIsEvaluating] = useState(false);
 
   const { data: investigation, isLoading } = useQuery<Investigation>({
     queryKey: ["/tower/investigations", id],
     enabled: !!id,
   });
+
+  // Auto-trigger evaluation if diagnosis and patch_suggestion are empty
+  useEffect(() => {
+    const triggerEvaluation = async () => {
+      if (!investigation || !id) return;
+      
+      // Check if both fields are empty
+      const needsEvaluation = !investigation.diagnosis || !investigation.patch_suggestion;
+      
+      if (needsEvaluation && !isEvaluating) {
+        console.log(`[InvestigatePage] Triggering evaluation for investigation ${id}`);
+        setIsEvaluating(true);
+        
+        try {
+          const response = await apiRequest("POST", `/tower/investigations/${id}/evaluate`, {});
+          const updatedInvestigation = await response.json();
+          
+          // Update the cache with the evaluated investigation
+          queryClient.setQueryData(["/tower/investigations", id], updatedInvestigation);
+          
+          console.log(`[InvestigatePage] Evaluation completed successfully`);
+        } catch (error: any) {
+          console.error(`[InvestigatePage] Evaluation failed:`, error);
+          toast({
+            title: "Evaluation Failed",
+            description: error.message || "Failed to generate diagnosis and patch suggestion",
+            variant: "destructive",
+          });
+        } finally {
+          setIsEvaluating(false);
+        }
+      }
+    };
+
+    triggerEvaluation();
+  }, [investigation, id, isEvaluating, toast]);
 
   const approvePatchMutation = useMutation({
     mutationFn: async () => {
@@ -243,6 +280,11 @@ export default function InvestigatePage() {
               <div className="prose prose-sm max-w-none">
                 <p className="whitespace-pre-wrap">{investigation.diagnosis}</p>
               </div>
+            ) : isEvaluating ? (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Generating diagnosis using OpenAI...</span>
+              </div>
             ) : (
               <div className="flex items-center gap-2 text-muted-foreground">
                 <AlertTriangle className="h-4 w-4" />
@@ -289,6 +331,11 @@ export default function InvestigatePage() {
                   </Button>
                 </div>
               </>
+            ) : isEvaluating ? (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Generating patch suggestion using OpenAI...</span>
+              </div>
             ) : (
               <div className="flex items-center gap-2 text-muted-foreground">
                 <AlertTriangle className="h-4 w-4" />
