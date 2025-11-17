@@ -34,6 +34,7 @@ export const investigations = pgTable("investigations", {
   supervisor_snapshot: jsonb("supervisor_snapshot"),
   diagnosis: text("diagnosis"),
   patch_suggestion: text("patch_suggestion"),
+  replit_patch_prompt: text("replit_patch_prompt"),
 });
 
 export const insertInvestigationSchema = createInsertSchema(investigations);

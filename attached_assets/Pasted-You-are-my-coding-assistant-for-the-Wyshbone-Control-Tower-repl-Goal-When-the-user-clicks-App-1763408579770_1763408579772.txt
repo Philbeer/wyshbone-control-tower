@@ -1,0 +1,97 @@
+You are my coding assistant for the Wyshbone Control Tower repl.
+
+Goal:
+When the user clicks “Approve Patch” on an investigation, Tower should automatically generate a fully formatted “Copy & Paste prompt for Replit UI” based on the patch_suggestion text from the evaluator.
+
+This allows the user to skip writing a detailed engineering prompt manually. Tower should compose it.
+
+Implement the following:
+
+------------------------------------------------------------
+1. Add a new field to investigations table:
+------------------------------------------------------------
+Add a nullable text field:  replit_patch_prompt
+
+This will store the fully generated “copy & paste prompt” that Tower produces.
+
+If the field already exists, skip.
+
+------------------------------------------------------------
+2. Add backend logic to generate prompt on Approve Patch
+------------------------------------------------------------
+
+When the user hits:
+POST /tower/investigations/:id/approve
+
+Add logic:
+
+- Load the investigation.
+- Read investigation.patch_suggestion.
+- Construct a new long-form prompt:
+
+  “You are my coding assistant for the Wyshbone UI repl…”  
+  (Use the full structure of the prompt we just used for deep research clarification.  
+  Substitute the patch_suggestion contents into the template.)
+
+Template structure:
+
+---
+BEGIN_PROMPT
+You are my coding assistant for the Wyshbone UI repl.
+
+Wyshbone Control Tower has analysed a conversation and produced this suggested patch:
+
+\"{patch_suggestion}\"
+
+Your task is to implement this behaviour in the Wyshbone UI codebase.
+
+[Insert standard instructions: 
+where to integrate, behaviour change, implementation details, 
+Tower logging integration, backward compatibility, output format.]
+END_PROMPT
+---
+
+- Insert the patch_suggestion text into {patch_suggestion}.
+- Write this assembled string into investigations.replit_patch_prompt.
+- Save the updated investigation.
+
+------------------------------------------------------------
+3. Expose this in the API
+------------------------------------------------------------
+
+Modify the GET /tower/investigations/:id endpoint so it returns:
+
+{
+  ...investigation,
+  replit_patch_prompt
+}
+
+------------------------------------------------------------
+4. Update UI (Investigate & Fix page)
+------------------------------------------------------------
+
+Below the diagnosis + patch suggestion sections, add a new panel:
+
+“Copy & Paste Prompt for Replit (Auto-Generated)”
+
+If replit_patch_prompt is empty:
+  Show a button “Generate Replit Prompt”
+  → POST /tower/investigations/:id/approve (which now triggers generation)
+  → After update, show the prompt in a code block.
+
+If replit_patch_prompt exists:
+  Render it inside a styled copyable code block with a “Copy” button.
+
+No patch auto-apply, no sandboxing yet — just generation.
+
+------------------------------------------------------------
+5. Summary
+------------------------------------------------------------
+
+At the end, output:
+
+- files changed
+- new schema field
+- new API behaviour
+- updated React component sections
+- full code for the backend function that assembles the prompt
