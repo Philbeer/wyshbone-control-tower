@@ -1,0 +1,61 @@
+You are my coding assistant for the Wyshbone Tower repl (Evaluator + Run Ingestion).
+
+Task:
+Verify and fix the ingestion pipeline so Tower correctly receives, stores, and indexes ALL run logs from ALL users, not just demo/test users. Confirm the routing, schemas, and evaluator views support multi-user ingestion.
+
+Steps:
+
+1. Locate the ingestion routes and handlers:
+   • /routes/ingestRun.ts or similar
+   • /routes/ingestConversation.ts (if present)
+   • /lib/ingestion/runIngestor.ts
+   • /lib/db/runLogs.ts or wherever runs are stored
+
+2. Inspect the following:
+   - Does Tower expect a specific userId (e.g., “demo”) or fallback?
+   - Does schema validation reject unknown/missing userId/sessionId?
+   - Is the DB keyed on userId or does it silently drop entries without one?
+   - Does Tower overwrite or deduplicate by user incorrectly?
+   - Are there hidden assumptions in `groupRunsByUser` or `findConversationsForUser`?
+
+3. Update ingestion logic so:
+   - Any valid userId/sessionId pair is accepted
+   - If userId is missing, generate an anonymous stable hash and DO NOT discard it
+   - No demo-specific routing is required
+   - Every run is persisted with:
+        {
+          userId,
+          sessionId,
+          runId,
+          timestamp,
+          role,
+          content,
+          tool,
+          success,
+          error
+        }
+
+4. Update the evaluator logic so:
+   - Conversation groups correctly cluster multi-user conversations
+   - Timeline view supports all users
+   - No view or dashboard assumes "demo" or uses fake user values
+
+5. Add/Modify a helper:
+   validateIncomingRun(event)
+   - Ensure userId/sessionId/runId/timestamp exist
+   - Auto-fill timestamp if missing
+   - Create a stable anonymous userId if none provided, but do NOT filter out
+
+6. Add a test routine:
+   - Simulate ingestion for several fake users (user A, user B, user C)
+   - Send 3–4 runs from each
+   - Verify the DB stores all runs separately
+   - Verify evaluator views display them independently
+
+7. Output:
+   - Full file contents for all new files
+   - Complete diffs for modified files
+   - All updated imports/exports
+   - Any schema updates (Zod/Typescript types)
+
+Do not describe intentions — output only the specific code changes required.

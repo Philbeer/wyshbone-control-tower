@@ -1184,6 +1184,8 @@ let getConversationEvents;  // Conversation-level queries
 let getRunById;
 let createRun;
 let createLiveUserRun;  // EVAL-008
+let validateIncomingRun;  // Run ingestion validator
+let validateEventMetadata;  // Run ingestion metadata validator
 
 // EVAL-009: Automatic conversation quality analysis
 let createAutoConversationQualityInvestigation;
@@ -1419,41 +1421,26 @@ app.post('/tower/behaviour-tests/:testId/investigate', async (req, res) => {
 
 // EVAL-008: Live User Run Logging & Investigation Bridge
 
-// Log a new live user run from Wyshbone UI
+// Log a new run from any Wyshbone source (UI, Supervisor, etc.)
 app.post('/tower/runs/log', async (req, res) => {
   try {
-    const payload = req.body;
+    // Validate and normalize incoming run event
+    const normalizedPayload = validateIncomingRun(req.body);
     
-    // Basic validation - source and status are required
-    if (!payload.source || payload.source !== 'live_user') {
-      return res.status(400).json({ 
-        error: 'Invalid payload: source must be "live_user"' 
-      });
-    }
+    // Log warnings for missing metadata
+    validateEventMetadata(normalizedPayload);
     
-    if (!['success', 'error', 'timeout', 'fail'].includes(payload.status)) {
-      return res.status(400).json({ 
-        error: 'Invalid status: must be one of success, error, timeout, or fail' 
-      });
-    }
-    
-    if (typeof payload.durationMs !== 'number' || !Number.isFinite(payload.durationMs)) {
-      return res.status(400).json({ 
-        error: 'Invalid durationMs: must be a finite number' 
-      });
-    }
-    
-    const result = await createLiveUserRun(payload);
+    const result = await createLiveUserRun(normalizedPayload);
     
     // EVAL-008: Auto-detection for live runs (conservative triggers only)
-    if (ensureLiveUserInvestigationForRun && payload.status === 'error') {
+    if (ensureLiveUserInvestigationForRun && normalizedPayload.status === 'error') {
       try {
-        const inputText = payload.request?.inputText || payload.goal || 'Error run';
+        const inputText = normalizedPayload.request?.inputText || normalizedPayload.goal || 'Error run';
         console.log(`[EVAL-008] Auto-investigating error run ${result.id}`);
         await ensureLiveUserInvestigationForRun({
           runId: result.id,
-          userId: payload.userId,
-          sessionId: payload.sessionId,
+          userId: normalizedPayload.userId,
+          sessionId: normalizedPayload.sessionId,
           inputText,
           triggerReason: 'Auto-detected error from live user run',
           seriousness: 'error',
@@ -1465,14 +1452,14 @@ app.post('/tower/runs/log', async (req, res) => {
     }
 
     // EVAL-009: Automatic conversation quality analysis for all live user runs
-    if (createAutoConversationQualityInvestigation && payload.meta?.messages && Array.isArray(payload.meta.messages)) {
+    if (createAutoConversationQualityInvestigation && normalizedPayload.meta?.messages && Array.isArray(normalizedPayload.meta.messages)) {
       try {
         console.log(`[EVAL-009] Auto-analyzing conversation quality for run ${result.id}`);
         await createAutoConversationQualityInvestigation({
           runId: result.id,
-          sessionId: payload.sessionId,
-          userId: payload.userId,
-          conversationTranscript: payload.meta.messages,
+          sessionId: normalizedPayload.sessionId,
+          userId: normalizedPayload.userId,
+          conversationTranscript: normalizedPayload.meta.messages,
         });
       } catch (autoAnalysisErr) {
         console.error('[EVAL-009 AutoAnalysis] Error during conversation analysis:', autoAnalysisErr.message);
@@ -1559,6 +1546,11 @@ async function start() {
     getRunById = runStoreModule.getRunById;
     createRun = runStoreModule.createRun;
     createLiveUserRun = runStoreModule.createLiveUserRun;  // EVAL-008
+    
+    // Load run ingestion validator
+    const validatorModule = await import('./src/evaluator/runIngestionValidator.ts');
+    validateIncomingRun = validatorModule.validateIncomingRun;
+    validateEventMetadata = validatorModule.validateEventMetadata;
     
     // Load behaviour test modules
     const behaviourTestsModule = await import('./src/evaluator/behaviourTests.ts');
