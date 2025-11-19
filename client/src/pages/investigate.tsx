@@ -189,6 +189,12 @@ export default function InvestigatePage() {
   const generatePromptMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", `/tower/investigations/${id}/generate-prompt`, {});
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to generate prompt");
+      }
+      
       return await response.json();
     },
     onSuccess: (data) => {

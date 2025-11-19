@@ -1,5 +1,8 @@
 import express from 'express';
 import { PatchEvaluator } from '../src/evaluator/patchEvaluator';
+import { db } from '../src/lib/db';
+import { investigations } from '@shared/schema';
+import { eq } from 'drizzle-orm';
 
 const router = express.Router();
 
@@ -76,9 +79,24 @@ router.post('/approve/:id', async (req, res) => {
     
     console.log(`[PatchRoutes] Approving patch for investigation ${id}`);
 
-    // Note: Actual patch application to Replit is not yet implemented
-    // This endpoint acknowledges the approval but doesn't auto-apply the patch
-    // The user will copy the generated prompt and apply it manually in Replit UI
+    // Load the investigation
+    const investigation = await db.query.investigations.findFirst({
+      where: eq(investigations.id, id),
+    });
+
+    if (!investigation) {
+      return res.status(404).json({ error: 'Investigation not found' });
+    }
+
+    // Update investigation with approval timestamp
+    await db
+      .update(investigations)
+      .set({
+        approved_at: new Date(),
+      })
+      .where(eq(investigations.id, id));
+
+    console.log(`[PatchRoutes] Patch approved for investigation ${id}`);
 
     res.json({
       success: true,

@@ -1,0 +1,57 @@
+You are my coding assistant for the Wyshbone Supervisor repl.
+
+Task:
+Investigate and fix the issue where only demo-user runs or conversations are being forwarded to the Tower ingestion endpoint. Update the Supervisor so that ALL users’ runs, plans, tool executions, and progress events are always sent to Tower, regardless of user identity.
+
+Steps:
+
+1. Identify the modules handling run/event logging in Supervisor, likely:
+   • /lib/towerClient.ts
+   • /lib/supervisorLogger.ts
+   • /core/executePlan.ts
+   • /core/handleToolExecution.ts
+   • /routes/chat.ts or /routes/supervisor.ts (if run messages originate there)
+
+2. Inspect the code for any of the following:
+   - Hardcoded user IDs such as “demo”, “demoUser”, “testUser”
+   - Conditionals restricting ingestion to demo accounts
+   - Missing userId/sessionId propagation from requests to Tower payloads
+   - Run logs triggered only from demo/test routes
+
+3. Fix the Supervisor so that:
+   - Every plan execution step sends a Tower event (start, progress, success, failure)
+   - Every tool execution sends a Tower event
+   - All events include dynamic:
+       userId
+       sessionId
+       runId
+       timestamp
+       planStep / toolName
+       status
+   - No conditional filtering based on username or environment
+
+4. Ensure that Supervisor extracts userId and sessionId from:
+   - Incoming HTTP request context
+   - Or from the plan metadata (if UI passed it)
+   - Or from the session tokens used in your architecture
+
+   Whichever source is canonical — use that consistently.
+
+5. Add a new helper function:
+   sendToTower(event: TowerEvent)
+   - Centralise the call
+   - Validate event structure
+   - Ensure all Supervisor operations call this helper
+
+6. Add a “simulate non-demo user” integration test:
+   - Create a fake userId and sessionId
+   - Trigger a test plan
+   - Confirm Tower receives all event types
+
+7. Finally:
+   - Output ALL modified files in full
+   - Include diffs for line-level edits
+   - Include full implementations for any new files created
+   - Add necessary imports/exports
+
+Do not write explanations — produce the exact code updates.
