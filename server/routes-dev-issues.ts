@@ -138,6 +138,12 @@ router.post("/issues/:id/suggest-patch", async (req, res) => {
     });
   } catch (err: any) {
     console.error("[DevIssues] Error generating patch suggestions:", err);
+    
+    // Return 404 for not found errors
+    if (err.message && err.message.includes("Issue not found")) {
+      return res.status(404).json({ error: "Issue not found" });
+    }
+    
     res.status(500).json({ error: "Failed to generate patch suggestions: " + err.message });
   }
 });
