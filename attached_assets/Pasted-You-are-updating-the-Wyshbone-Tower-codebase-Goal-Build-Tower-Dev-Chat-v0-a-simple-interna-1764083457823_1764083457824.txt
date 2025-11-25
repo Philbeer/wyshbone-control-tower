@@ -1,0 +1,90 @@
+You are updating the Wyshbone Tower codebase. 
+
+Goal: Build “Tower Dev Chat v0” – a simple internal developer chat interface that:
+1. Allows me to describe an issue and upload a screenshot.
+2. Tower stores the issue in a new database table.
+3. Tower automatically gathers context for the issue:
+   - Finds relevant source files in the repo using string search.
+   - Fetches the last 50 backend log lines that contain related error messages.
+4. Tower displays the issue + context inside a new UI page in Tower.
+
+IMPORTANT:
+Do NOT implement any patch generation or GitHub commits.
+This version ONLY:
+- captures issue descriptions/screenshots
+- stores them
+- finds relevant files
+- grabs logs
+- displays them
+
+### PHASE 1 – Database + API
+Create new tables in Supabase/Drizzle:
+
+Table: dev_issues
+- id (uuid, pk)
+- title (text)
+- description (text)
+- screenshot_url (text)
+- created_at (timestamp)
+- status (text, default "new")
+
+Table: dev_issue_context
+- id (uuid, pk)
+- issue_id (uuid, fk → dev_issues.id)
+- file_path (text)
+- file_contents (text)
+- log_excerpt (text)
+- created_at (timestamp)
+
+Create API endpoints under /api/dev/issues:
+POST /create   – create issue
+POST /context  – given issue_id, run search+log gathering and store results
+GET /:id       – get issue + context
+GET /          – list issues
+
+### PHASE 2 – Context Gathering Logic
+Implement a backend service that:
+- Takes the issue description and screenshot filename
+- Extracts search keywords:
+  - UI labels (e.g., “Add Customer”, “Failed to create customer”)
+  - Error messages
+- Searches repo for matching files:
+  - Search in /app, /src, /components, /pages, /lib, /api
+  - For each match → store file path + contents in dev_issue_context
+- Fetch recent logs:
+  - For now, use the Tower server logs (tail last ~200 lines)
+  - Filter for keywords
+  - Store in dev_issue_context.log_excerpt
+
+### PHASE 3 – Tower UI Page
+Create a new page in Tower UI:
+Path: /dev/issues
+
+This page must:
+- Show a form with:
+  - Title
+  - Description textarea
+  - Screenshot upload
+  - Button: “Create Issue”
+- After submission:
+  - Call /api/dev/issues/create
+  - Then call /api/dev/issues/context with returned issue_id
+  - Show a spinner while gathering context
+  - Show a final panel:
+     - Issue details
+     - Screenshot preview
+     - List of relevant files (click to expand contents)
+     - Log excerpts
+
+Also add a sidebar link:
+“Developer Issues”
+
+### RULES:
+- Work incrementally.
+- After each phase, report what files were created/modified.
+- DO NOT vibing-expand the scope.
+- Do not build patch/auto-fix code.
+- Do not refactor unrelated files.
+- Keep everything minimal and clean.
+
+When finished with Phase 3, STOP and wait for my confirmation.

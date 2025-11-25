@@ -93,7 +93,7 @@
     "app": "supervisor",
     "title": "Background monitor for user goals",
     "description": "Supervisor periodically wakes up, looks at active user goals, and decides whether to suggest new segments, new experiments, or new monitors to the user based on past performance.",
-    "status": "planned",
+    "status": "done",
     "priority": "medium",
     "type": "replit_prompt",
     "replitPrompt": "You are my coding assistant for the Wyshbone Supervisor repl. Add a lightweight background monitor job that, on a schedule, iterates over active user goals / lead-generation projects and evaluates simple performance metrics (e.g. leads found, emails sent). Based on thresholds, generate suggestions like 'try this new region', 'try targeting bottle shops as well as pubs', or 'increase or decrease volume'. For now, log these suggestions and expose them via an internal API; later we will wire them into UI and email.",
@@ -103,7 +103,7 @@
       "mustContain": "runGoalMonitor"
     },
     "createdAt": "2025-11-13T00:00:00.000Z",
-    "updatedAt": "2025-11-13T00:00:00.000Z",
+    "updatedAt": "2025-11-19T11:59:43.467Z",
     "layer": 1,
     "group": "Layer 1 – Agentic Core",
     "complexity": "M",
