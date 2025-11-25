@@ -76,7 +76,7 @@ All technical jargon has been removed:
 
 **Tower Dev Chat v0 (Developer Issues):**
 
-A dedicated interface for developers to report issues with automatic context gathering:
+A dedicated interface for developers to report issues with automatic context gathering and AI-powered patch suggestions:
 
 *   **Developer Issues Page (/dev/issues):** Accessible via "Developer Issues" button in the navigation header
 *   **Issue Submission Form:** Title, description, and optional screenshot URL
@@ -88,11 +88,17 @@ A dedicated interface for developers to report issues with automatic context gat
 *   **Context Display:** The right panel shows the issue details along with:
     *   Relevant source files (collapsible with syntax highlighting)
     *   Log excerpts (if applicable)
+*   **AI Patch Suggestions:** Developers can click "Generate Patch Suggestions" to:
+    *   Analyze the issue description and gathered context using OpenAI GPT-4o-mini
+    *   Generate code patch suggestions with file paths, summaries, and full file contents
+    *   Display patches in collapsible cards with copy-to-clipboard functionality
+    *   Note: Patches are stored in database only - no modifications to source files
 *   **Issue Status Tracking:** Issues progress through states: new → context_gathered → investigating → resolved → closed
 
 Database tables:
 *   `dev_issues`: Stores issue metadata (id, title, description, screenshotUrl, status, createdAt)
 *   `dev_issue_context`: Stores gathered context (filePath, fileContents, logExcerpt) linked to issues
+*   `dev_issue_patches`: Stores AI-generated patch suggestions (filePath, newContents, summary) linked to issues
 
 API Routes:
 *   GET /api/dev/issues - List all issues
@@ -100,6 +106,8 @@ API Routes:
 *   POST /api/dev/issues/context - Trigger context gathering
 *   GET /api/dev/issues/:id - Get issue with context
 *   PATCH /api/dev/issues/:id/status - Update issue status
+*   POST /api/dev/issues/:id/suggest-patch - Generate AI patch suggestions using OpenAI
+*   GET /api/dev/issues/:id/patches - Get all patches for an issue
 
 ## External Dependencies
 
