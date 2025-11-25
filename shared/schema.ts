@@ -135,3 +135,37 @@ export const patchSuggestions = pgTable("patch_suggestions", {
 export const insertPatchSuggestionSchema = createInsertSchema(patchSuggestions);
 export type InsertPatchSuggestion = z.infer<typeof insertPatchSuggestionSchema>;
 export type PatchSuggestion = typeof patchSuggestions.$inferSelect;
+
+// Dev Issues - Tower Dev Chat v0
+export const devIssues = pgTable("dev_issues", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  screenshotUrl: text("screenshot_url"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  status: text("status").notNull().default("new"),
+});
+
+export const insertDevIssueSchema = createInsertSchema(devIssues).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertDevIssue = z.infer<typeof insertDevIssueSchema>;
+export type DevIssue = typeof devIssues.$inferSelect;
+
+// Dev Issue Context - stores relevant files and logs for each issue
+export const devIssueContext = pgTable("dev_issue_context", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  issueId: varchar("issue_id").notNull(),
+  filePath: text("file_path"),
+  fileContents: text("file_contents"),
+  logExcerpt: text("log_excerpt"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertDevIssueContextSchema = createInsertSchema(devIssueContext).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertDevIssueContext = z.infer<typeof insertDevIssueContextSchema>;
+export type DevIssueContext = typeof devIssueContext.$inferSelect;
