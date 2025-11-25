@@ -1,0 +1,173 @@
+📌 REPLIT AGENT PROMPT — STAGE 2 (Patch Suggestions Only)
+
+You are updating the Wyshbone Control Tower codebase.
+
+Stage 1 has already been completed.
+You must not change or break Stage 1 functionality.
+
+🎯 Goal of Stage 2
+
+Add Patch Suggestions to Developer Issues:
+
+Tower will call OpenAI with issue + context
+
+Tower will generate code patch suggestions
+
+Tower will store them in a new DB table
+
+Tower will show them in the UI
+
+Do NOT write to GitHub or modify any repo files
+
+This version produces suggestions only — I will apply the patches manually
+
+PHASE 1 — Database
+
+Create a new table:
+
+dev_issue_patches
+- id (uuid, pk)
+- issue_id (uuid, fk → dev_issues.id)
+- file_path (text)
+- new_contents (text)        -- full updated file content
+- summary (text)             -- short summary of the change
+- created_at (timestamp)
+
+
+No other schema changes.
+
+PHASE 2 — Backend API (Patch Suggestion Generation)
+
+Add a new endpoint:
+
+POST /api/dev/issues/:id/suggest-patch
+
+Behaviour:
+
+Load:
+
+dev_issues row
+
+all dev_issue_context rows for the issue (file_path, file_contents, log_excerpt)
+
+Build an OpenAI prompt that includes:
+
+Issue title + description
+
+Error logs
+
+Relevant file contents
+
+Instructions to:
+
+identify the bug or improvement
+
+return FULL updated contents of the changed files
+
+avoid touching unrelated files
+
+keep changes minimal
+
+Parse the OpenAI response and create:
+
+one dev_issue_patches row per file change:
+
+issue_id
+
+file_path
+
+summary
+
+new_contents
+
+Return JSON:
+
+{
+  issue: { … },
+  patches: [
+    { id, file_path, summary }
+  ]
+}
+
+
+IMPORTANT RULES:
+
+Do NOT write to GitHub
+
+Do NOT modify any actual repo files
+
+Store only suggestions in the DB
+
+Follow the existing Tower API patterns
+
+PHASE 3 — Frontend (Tower UI Update)
+
+Modify the /dev/issues UI:
+
+Add a button:
+
+“Generate Patch Suggestions”
+
+Calls POST /api/dev/issues/:id/suggest-patch
+
+Shows loading spinner
+
+Add a new panel under context:
+
+“Patch Suggestions”
+
+For each entry in dev_issue_patches:
+
+Show:
+
+file_path
+
+summary
+
+a collapsible code block showing new_contents
+
+a “Copy code” button
+
+If empty:
+
+Show: “No patch suggestions yet. Click ‘Generate Patch Suggestions’.”
+
+Everything must update without requiring a page refresh (use existing state patterns).
+
+PHASE 4 — OpenAI Prompting
+
+When calling OpenAI:
+
+System prompt must be:
+
+“You are a senior TypeScript/React/Node developer working inside the Wyshbone codebase. You will receive an issue, logs, and relevant files. Identify the bug and propose minimal changes. Return the FULL updated file contents for each file you change. Do not invent new files unless strictly necessary. Prefer small, surgical edits.”
+
+Model must return JSON that is easy to parse:
+
+[
+  {
+    "file_path": "...",
+    "summary": "...",
+    "new_contents": "..."
+  }
+]
+
+RULES (Critical)
+
+❌ DO NOT modify repo files
+
+❌ DO NOT write to GitHub
+
+❌ DO NOT touch unrelated parts of Tower
+
+✔ Follow existing code structure and patterns
+
+✔ Keep implementation minimal but fully functional
+
+WHEN YOU FINISH
+
+Return:
+
+List of files created/modified
+
+Instructions on how to use the new “Generate Patch Suggestions” feature in the Tower UI
