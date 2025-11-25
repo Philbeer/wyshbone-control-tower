@@ -1627,6 +1627,10 @@ async function start() {
     const resetRoutesModule = await import('./server/routes-reset.ts');
     app.use('/tower', resetRoutesModule.default);
     
+    // Load dev issues routes (Tower Dev Chat v0)
+    const devIssuesRoutesModule = await import('./server/routes-dev-issues.ts');
+    app.use('/api/dev', devIssuesRoutesModule.default);
+    
     // Ensure behaviour test definitions are seeded
     await ensureBehaviourTestsSeeded();
     
