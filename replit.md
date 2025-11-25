@@ -74,6 +74,33 @@ All technical jargon has been removed:
 - "Patch lifecycle" → "Patch suggestions"
 - "Sandbox evaluation" → (removed, happens transparently)
 
+**Tower Dev Chat v0 (Developer Issues):**
+
+A dedicated interface for developers to report issues with automatic context gathering:
+
+*   **Developer Issues Page (/dev/issues):** Accessible via "Developer Issues" button in the navigation header
+*   **Issue Submission Form:** Title, description, and optional screenshot URL
+*   **Automatic Context Gathering:** When an issue is created, the system:
+    *   Extracts keywords from the issue text (file patterns, error messages, technical terms)
+    *   Searches the codebase for relevant files matching keywords
+    *   Fetches recent log excerpts if errors are mentioned
+    *   Stores all gathered context in the database
+*   **Context Display:** The right panel shows the issue details along with:
+    *   Relevant source files (collapsible with syntax highlighting)
+    *   Log excerpts (if applicable)
+*   **Issue Status Tracking:** Issues progress through states: new → context_gathered → investigating → resolved → closed
+
+Database tables:
+*   `dev_issues`: Stores issue metadata (id, title, description, screenshotUrl, status, createdAt)
+*   `dev_issue_context`: Stores gathered context (filePath, fileContents, logExcerpt) linked to issues
+
+API Routes:
+*   GET /api/dev/issues - List all issues
+*   POST /api/dev/issues/create - Create new issue
+*   POST /api/dev/issues/context - Trigger context gathering
+*   GET /api/dev/issues/:id - Get issue with context
+*   PATCH /api/dev/issues/:id/status - Update issue status
+
 ## External Dependencies
 
 *   **Node.js:** Runtime environment.
