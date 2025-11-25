@@ -169,3 +169,20 @@ export const insertDevIssueContextSchema = createInsertSchema(devIssueContext).o
 });
 export type InsertDevIssueContext = z.infer<typeof insertDevIssueContextSchema>;
 export type DevIssueContext = typeof devIssueContext.$inferSelect;
+
+// Dev Issue Patches - AI-suggested code changes for each issue
+export const devIssuePatches = pgTable("dev_issue_patches", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  issueId: varchar("issue_id").notNull(),
+  filePath: text("file_path").notNull(),
+  newContents: text("new_contents").notNull(),
+  summary: text("summary").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertDevIssuePatchSchema = createInsertSchema(devIssuePatches).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertDevIssuePatch = z.infer<typeof insertDevIssuePatchSchema>;
+export type DevIssuePatch = typeof devIssuePatches.$inferSelect;

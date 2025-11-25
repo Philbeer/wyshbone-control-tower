@@ -1,0 +1,128 @@
+You are updating the Wyshbone Tower codebase.
+
+Stage 1 is already implemented:
+- dev_issues and dev_issue_context tables exist.
+- /api/dev/issues endpoints exist.
+- There is a Tower UI page (/dev/issues) where I can:
+  - create an issue (title, description, screenshot),
+  - trigger context gathering (repo search + logs),
+  - see a list of relevant files and log excerpts.
+
+Do NOT change any of that behaviour.
+
+Goal for Stage 2:
+Add “Patch Suggestions” to Dev Issues:
+- Tower will call OpenAI with the issue + context and ask for proposed code changes.
+- Store the proposed changes in the database.
+- Show them in the UI as per-file code suggestions that I can manually copy into my editor.
+- IMPORTANT: Do NOT write directly to GitHub or modify repo files.
+- This version ONLY suggests patches; I will apply them manually.
+
+### PHASE 1 – Database
+
+Add a new table:
+
+Table: dev_issue_patches
+- id (uuid, pk)
+- issue_id (uuid, fk → dev_issues.id)
+- file_path (text)
+- new_contents (text)        -- the full proposed new content for that file
+- summary (text)             -- short human-readable summary of the change
+- created_at (timestamp)
+
+We assume dev_issue_context already stores:
+- file_path
+- file_contents
+- log_excerpt
+
+### PHASE 2 – Backend API for patch suggestions
+
+Add API endpoints under /api/dev/issues:
+
+POST /api/dev/issues/:id/suggest-patch
+
+Behaviour:
+- Input: issue_id from the URL.
+- Load:
+  - dev_issues row (title, description, etc.)
+  - all dev_issue_context rows for that issue (file_path, file_contents, log_excerpt).
+- Build an OpenAI prompt that:
+  - Describes the issue (title + description).
+  - Shows the error logs.
+  - Shows the relevant files.
+  - Asks the model to:
+    - Identify the bug or improvement.
+    - Propose new FULL content for each file that needs to change.
+    - Limit to as few files as possible.
+- Parse the model response into:
+  - one dev_issue_patches row per file_path:
+    - issue_id
+    - file_path
+    - new_contents (full updated file content)
+    - summary (e.g. “Make phone optional in customer validation and improve error logging”)
+- Save these dev_issue_patches rows.
+- Return JSON containing:
+  - issue
+  - patches (id, file_path, summary)
+
+IMPORTANT:
+- Use the existing OpenAI client/config patterns already in the Tower codebase.
+- If the model does not propose any changes, handle gracefully and return an empty list.
+- DO NOT write changes back into the repo or GitHub. Only store suggestions.
+
+### PHASE 3 – Tower Dev Issues UI: Patch Suggestions
+
+Update the /dev/issues page:
+
+For each issue detail view:
+- Add a new button: “Generate Patch Suggestions”
+  - Calls POST /api/dev/issues/:id/suggest-patch
+  - Shows a loading state while waiting.
+
+- Below the existing context (files + logs), add a “Patch Suggestions” panel:
+  - Show a list of dev_issue_patches for that issue.
+  - For each patch:
+    - Show:
+      - file_path
+      - summary
+      - a collapsible code block with the new_contents
+      - a “Copy code” button to copy the entire new_contents to clipboard.
+
+Behaviour:
+- If no patches exist yet for the issue, show:
+  - “No patch suggestions yet. Click ‘Generate Patch Suggestions’ to ask OpenAI for proposed fixes.”
+- After generating patches, they should appear in the UI without needing a page refresh (use the existing front-end patterns for data refresh).
+
+### PROMPTING GUIDANCE FOR THE MODEL (BACKEND)
+
+In the backend code that calls OpenAI, use a clear system / instruction prompt, something like:
+
+- You are a senior TypeScript/React/Node developer working on the Wyshbone codebase.
+- You will receive:
+  - Issue description
+  - Error logs
+  - Relevant files (file_path + content)
+- Your job:
+  - Identify the bug or problematic behaviour.
+  - Propose minimal changes to fix it.
+  - For each file you change, return the FULL updated file content.
+  - Do not invent new files unless strictly necessary.
+  - Prefer small, surgical edits over large refactors.
+
+Return format:
+- A machine-readable structure describing:
+  - file_path
+  - summary
+  - new_contents
+
+You may choose a JSON-like structure that is easy to parse in TypeScript.
+
+### RULES:
+
+- Do NOT commit or write directly to GitHub.
+- Do NOT modify the actual source files on disk; only store patches in dev_issue_patches.
+- Keep the implementation minimal and consistent with existing Tower patterns (API routes, DB access, frontend state).
+- Do NOT touch unrelated parts of the Tower codebase.
+- When done, report:
+  - which files you created/modified,
+  - how to use the new “Generate Patch Suggestions” feature from the UI.
