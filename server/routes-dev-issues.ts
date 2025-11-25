@@ -8,6 +8,10 @@ import {
   gatherContextForIssue,
   updateDevIssueStatus,
 } from "../src/evaluator/devIssueContextService";
+import {
+  generatePatchSuggestions,
+  getPatchesForIssue,
+} from "../src/evaluator/devIssuePatchService";
 import { insertDevIssueSchema } from "../shared/schema";
 
 const router = Router();
@@ -115,6 +119,40 @@ router.patch("/issues/:id/status", async (req, res) => {
   } catch (err: any) {
     console.error("[DevIssues] Error updating issue status:", err);
     res.status(500).json({ error: "Failed to update status: " + err.message });
+  }
+});
+
+// POST /api/dev/issues/:id/suggest-patch - Generate AI patch suggestions
+router.post("/issues/:id/suggest-patch", async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    console.log(`[DevIssues] Generating patch suggestions for issue ${id}`);
+    
+    const result = await generatePatchSuggestions(id);
+    
+    res.status(200).json({
+      success: true,
+      issue: result.issue,
+      patches: result.patches,
+    });
+  } catch (err: any) {
+    console.error("[DevIssues] Error generating patch suggestions:", err);
+    res.status(500).json({ error: "Failed to generate patch suggestions: " + err.message });
+  }
+});
+
+// GET /api/dev/issues/:id/patches - Get all patches for an issue
+router.get("/issues/:id/patches", async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const patches = await getPatchesForIssue(id);
+    
+    res.status(200).json(patches);
+  } catch (err: any) {
+    console.error("[DevIssues] Error fetching patches:", err);
+    res.status(500).json({ error: "Failed to fetch patches: " + err.message });
   }
 });
 

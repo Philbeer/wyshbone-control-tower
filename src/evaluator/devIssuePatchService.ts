@@ -1,5 +1,5 @@
 import { openai } from "../lib/openai";
-import { db } from "../db";
+import { db } from "../lib/db";
 import { devIssues, devIssueContext, devIssuePatches } from "../../shared/schema";
 import { eq } from "drizzle-orm";
 import type { DevIssue, DevIssueContext, DevIssuePatch, InsertDevIssuePatch } from "../../shared/schema";
