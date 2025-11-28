@@ -1679,11 +1679,16 @@ async function start() {
     console.warn('⚠️  Failed to load evaluator modules:', err.message);
   }
   
-  // Setup Vite middleware for React app (development mode)
+  // Setup Vite middleware for React app (development) or serve static files (production)
   if (process.env.NODE_ENV !== 'production') {
     const { setupVite } = await import('./server/vite.ts');
     await setupVite(app, server);
-    console.log('✓ Vite middleware loaded');
+    console.log('✓ Vite middleware loaded (development)');
+  } else {
+    // Production: serve pre-built static files
+    const { serveStatic } = await import('./server/vite.ts');
+    serveStatic(app);
+    console.log('✓ Static files middleware loaded (production)');
   }
   
   // Start polling

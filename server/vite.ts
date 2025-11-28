@@ -68,18 +68,31 @@ export async function setupVite(app: Express, server: Server) {
 }
 
 export function serveStatic(app: Express) {
-  const distPath = path.resolve(import.meta.dirname, "public");
+  // Vite builds to dist/public relative to project root
+  const distPath = path.resolve(import.meta.dirname, "..", "dist", "public");
 
   if (!fs.existsSync(distPath)) {
-    throw new Error(
-      `Could not find the build directory: ${distPath}, make sure to build the client first`,
-    );
+    console.warn(`Static build directory not found: ${distPath}`);
+    console.warn('React dashboard will not be available. Run "npm run build" to build the frontend.');
+    return;
   }
 
   app.use(express.static(distPath));
 
-  // fall through to index.html if the file doesn't exist
-  app.use("*", (_req, res) => {
+  // fall through to index.html for SPA routing (but not for API routes)
+  app.use("*", (req, res, next) => {
+    // Don't intercept API routes or server-rendered pages
+    if (req.originalUrl.startsWith('/api/') || 
+        req.originalUrl.startsWith('/tower/') ||
+        req.originalUrl.startsWith('/status') ||
+        req.originalUrl.startsWith('/health') ||
+        req.originalUrl.startsWith('/tasks') ||
+        req.originalUrl.startsWith('/investigations') ||
+        req.originalUrl.startsWith('/critical-path') ||
+        req.originalUrl.startsWith('/evaluator-tasks') ||
+        req.originalUrl.startsWith('/proxy/')) {
+      return next();
+    }
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }
