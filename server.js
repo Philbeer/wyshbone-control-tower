@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import { createServer } from 'http';
 import { poller } from './lib/poller.js';
 import { tasksManager } from './lib/tasks.js';
@@ -7,8 +8,41 @@ const app = express();
 const server = createServer(app);
 const PORT = process.env.PORT || 3000;
 
+// CORS configuration for cross-origin requests
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:5000',
+  process.env.FRONTEND_URL,
+  process.env.UI_URL,
+  process.env.SUPERVISOR_URL,
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app') || origin.endsWith('.onrender.com')) {
+      return callback(null, true);
+    }
+    callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-EXPORT-KEY', 'X-TOWER-API-KEY']
+}));
+
 // Middleware
 app.use(express.json());
+
+// Health check endpoint for load balancers
+app.get('/health', (_req, res) => {
+  res.status(200).json({
+    status: 'healthy',
+    service: 'wyshbone-tower',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
 
 // Utility functions for rendering
 function formatRelativeTime(isoString) {
@@ -229,20 +263,26 @@ function renderEvaluatorRoadmapSection() {
 }
 
 function renderUsageMeter() {
-  const BILLING_STEP_USD = 50; // each extra charge is about $50 (~£45)
+  // Optional usage tracking - set HOSTING_USAGE_USD to display a usage meter
+  // This is generic and works with any hosting provider
+  const rawUsage = process.env.HOSTING_USAGE_USD || '';
   
-  // Read from environment variable
-  const rawUsage = process.env.REPLIT_ADDITIONAL_USAGE_USD || '0';
+  // If no usage value is set, don't render the meter
+  if (!rawUsage) {
+    return '';
+  }
+  
+  const BILLING_STEP_USD = parseFloat(process.env.HOSTING_BILLING_STEP || '50');
   const currentUsageUsd = Number(rawUsage) || 0;
   
-  // Work out the next $50 boundary (50, 100, 150, ...)
+  // Work out the next billing boundary
   const nextBillAt = currentUsageUsd <= 0
     ? BILLING_STEP_USD
     : Math.ceil(currentUsageUsd / BILLING_STEP_USD) * BILLING_STEP_USD;
   
   const remainingUsd = nextBillAt - currentUsageUsd;
   
-  // Progress within the current $50 block
+  // Progress within the current billing block
   const progressWithinStep = currentUsageUsd <= 0
     ? 0
     : (currentUsageUsd % BILLING_STEP_USD) / BILLING_STEP_USD;
@@ -252,7 +292,7 @@ function renderUsageMeter() {
   
   return `
     <div style="border: 2px solid #3b82f6; border-radius: 8px; padding: 20px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 24px;">
-      <h3 style="margin: 0 0 16px 0; font-size: 18px; font-weight: 600; color: #1f2937;">💰 Replit Usage Meter</h3>
+      <h3 style="margin: 0 0 16px 0; font-size: 18px; font-weight: 600; color: #1f2937;">💰 Hosting Usage Meter</h3>
       
       <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px;">
         <div>
@@ -272,7 +312,7 @@ function renderUsageMeter() {
       
       <div style="margin-top: 12px;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-          <span style="font-size: 12px; color: #6b7280;">Progress to next $50 charge</span>
+          <span style="font-size: 12px; color: #6b7280;">Progress to next $${BILLING_STEP_USD} charge</span>
           <span style="font-size: 12px; font-weight: 600; color: #1f2937;">${percent.toFixed(1)}%</span>
         </div>
         <div style="height: 12px; border-radius: 999px; background: #e5e7eb; overflow: hidden;">
@@ -282,8 +322,8 @@ function renderUsageMeter() {
       
       <div style="margin-top: 12px; padding: 8px 12px; background: #f9fafb; border-radius: 4px; border-left: 3px solid #3b82f6;">
         <small style="color: #6b7280; font-size: 11px;">
-          💡 Update <code style="background: #e5e7eb; padding: 2px 6px; border-radius: 3px; font-family: monospace;">REPLIT_ADDITIONAL_USAGE_USD</code> 
-          in Replit Secrets when you check <a href="https://replit.com/account/usage" target="_blank" style="color: #3b82f6;">your usage page</a>
+          💡 Update <code style="background: #e5e7eb; padding: 2px 6px; border-radius: 3px; font-family: monospace;">HOSTING_USAGE_USD</code> 
+          in environment variables to track your hosting costs
         </small>
       </div>
     </div>
