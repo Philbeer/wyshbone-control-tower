@@ -1631,6 +1631,11 @@ async function start() {
     const devIssuesRoutesModule = await import('./server/routes-dev-issues.ts');
     app.use('/api/dev', devIssuesRoutesModule.default);
     
+    // TOW-1: Load event intake route
+    const eventsRoutesModule = await import('./server/routes-events.ts');
+    app.use('/', eventsRoutesModule.default);
+    console.log('✓ Event intake endpoint loaded (POST /events)');
+    
     // Ensure behaviour test definitions are seeded
     await ensureBehaviourTestsSeeded();
     
