@@ -53,12 +53,15 @@ export type NormalizedEvent = Required<Pick<IncomingEvent, "type" | "source" | "
 
 /**
  * Response returned by the POST /events endpoint.
+ * TOW-3: Extended with optional evaluation field.
  */
 export type EventIntakeResponse = {
   status: "accepted";
   eventType: string;
   correlationId: string;
   receivedAt: string;
+  /** TOW-3: Evaluation result from the evaluator stub (optional for backwards compatibility) */
+  evaluation?: import("./evaluation").EvaluationResult;
 };
 
 /**
