@@ -1,3 +1,8 @@
+/**
+ * TOW-5: Lead quality label type
+ */
+export type LeadQualityLabel = "low" | "medium" | "high";
+
 export type RunSummary = {
   id: string;
   createdAt: string;
@@ -6,6 +11,10 @@ export type RunSummary = {
   goalSummary?: string | null;
   status: string;
   meta?: any;
+  /** TOW-5: Lead quality score (0-100), only for Lead Finder runs */
+  leadQualityScore?: number | null;
+  /** TOW-5: Lead quality label (low/medium/high), only for Lead Finder runs */
+  leadQualityLabel?: LeadQualityLabel | null;
 };
 
 export type Investigation = {

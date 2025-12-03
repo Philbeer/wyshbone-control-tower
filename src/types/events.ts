@@ -11,6 +11,49 @@
 export type EventSource = "supervisor" | "ui" | "tower";
 
 /**
+ * TOW-4: Lead Finder specific constants and types
+ */
+
+/** Source identifier for Lead Finder runs */
+export const LEAD_FINDER_SOURCE = "lead_finder" as const;
+
+/** Event types that indicate a Lead Finder search */
+export const LEAD_FINDER_EVENT_TYPES = [
+  "LeadFinderSearch",
+  "LeadFinderRun", 
+  "lead_finder_search",
+  "lead_finder.search",
+] as const;
+
+/**
+ * Checks if an event type represents a Lead Finder search.
+ */
+export function isLeadFinderEvent(eventType: string): boolean {
+  return LEAD_FINDER_EVENT_TYPES.some(
+    (t) => t.toLowerCase() === eventType.toLowerCase()
+  );
+}
+
+/**
+ * Lead Finder payload structure.
+ * These are the fields we extract from Lead Finder events for run logging.
+ */
+export interface LeadFinderPayload {
+  /** The search query text */
+  query?: string;
+  /** Geographic location for the search */
+  location?: string;
+  /** Business vertical/industry */
+  vertical?: string;
+  /** Number of results requested */
+  limit?: number;
+  /** Number of leads found */
+  resultsCount?: number;
+  /** Any additional metadata */
+  [key: string]: unknown;
+}
+
+/**
  * IncomingEvent represents a generic event received by Tower's /events endpoint.
  * 
  * Design notes:

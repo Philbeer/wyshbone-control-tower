@@ -1,0 +1,101 @@
+# Wyshbone Tower – Task Plan (TOWER Series)
+
+Tower is the orchestrator and overseer of the whole Wyshbone ecosystem.
+It communicates with Supervisor, displays run results, and provides UI
+tools for debugging, evaluation, and workflow triggering.
+
+Each TOWER task should be implemented in its own feature branch.
+
+---
+
+## TOWER-1 – Recent Runs View (Supervisor Feed)
+Goal: Allow users to see a list of Supervisor runs.
+
+Includes:
+- Fetching run summaries from Supervisor
+- Displaying: run ID, agent, status, duration, timestamp
+- Pagination or infinite-scroll
+- Click handler to open run detail view
+
+---
+
+## TOWER-2 – Run Detail Viewer
+Goal: View the full trace/log of a single run.
+
+Includes:
+- Inputs + outputs
+- Logs (grouped by timestamp)
+- Error stack / failure cause
+- Timeline markers for events
+- UX for collapsing/expanding log groups
+
+---
+
+## TOWER-3 – Trigger Panel (Manual Execution)
+Goal: Start a Supervisor run from Tower.
+
+Includes:
+- Form to choose:
+  - Agent
+  - Task type
+  - Parameters (JSON editor or form fields)
+- “Start Run” button
+- Validation & error handling
+- Loading states
+
+---
+
+## TOWER-4 – Supervisor Health Panel
+Goal: Show whether Supervisor is alive + its basic metrics.
+
+Includes:
+- Uptime
+- Last heartbeat timestamp
+- # of runs in last 24h
+- Link to “view all logs”
+- Error states when Supervisor is down
+
+---
+
+## TOWER-5 – Configuration Surface (Read-only for now)
+Goal: Display Supervisor config values.
+
+Includes:
+- Basic environment info
+- Agent registry snapshot
+- Feature flags
+- Logging level
+- State before/after a run
+
+---
+
+## TOWER-6 – Failed Run Insights
+Goal: UX for spotting and investigating failures.
+
+Includes:
+- List of recent failures
+- Error message surface
+- Link to run detail
+- Suggested causes
+- Supervisor logs cross-referenced
+
+---
+
+## TOWER-7 – Evaluation & Scoring Hooks
+Goal: Prepare UI for Evaluator / Monitor agents.
+
+Includes:
+- Placeholder components
+- Data models
+- Run scoring hooks
+- Ability to attach evaluation metadata
+
+---
+
+## TOWER-8 – Workflow View (future)
+Goal: Visual representation of workflows.
+
+Includes:
+- Task graphs
+- Step-by-step visualisation
+- Future integration with Supervisor workflows

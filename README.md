@@ -114,6 +114,48 @@ GET /proxy/file?src=Wyshbone%20UI&path=src/components/Button.tsx
 }
 ```
 
+### POST /events
+
+Receives events from Supervisor, UI, or Tower itself. This is the primary ingestion point for the Tower event system.
+
+**Request Body (IncomingEvent):**
+- `type` (string, required): Event identifier, e.g. "LeadCreated", "SearchRunStarted"
+- `source` (string, optional): "supervisor" | "ui" | "tower" (defaults to "supervisor")
+- `payload` (any, optional): Event-specific data
+- `correlationId` (string, optional): For linking related events
+- `sessionId` (string, optional): Conversation/session identifier
+- `createdAt` (string, optional): ISO timestamp (auto-filled if missing)
+
+**Example Request:**
+```bash
+curl -X POST http://localhost:3000/events \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "LeadCreated",
+    "source": "supervisor",
+    "payload": { "leadId": "123", "source": "google-places" },
+    "correlationId": "test-corr-1"
+  }'
+```
+
+**Success Response (202 Accepted):**
+```json
+{
+  "status": "accepted",
+  "eventType": "LeadCreated",
+  "correlationId": "test-corr-1",
+  "receivedAt": "2024-01-01T12:00:00.000Z"
+}
+```
+
+**Error Response (400 Bad Request):**
+```json
+{
+  "error": "Invalid event payload",
+  "details": "Event type is required and must be a non-empty string"
+}
+```
+
 ## Task Acceptance Checking
 
 The dashboard automatically monitors task completion through three mechanisms (checked in priority order):

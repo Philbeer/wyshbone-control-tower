@@ -1,14 +1,18 @@
 /**
  * TOW-1: Event intake service
+ * TOW-4: Extended with Lead Finder run logging
  * 
  * Handles normalization and logging of incoming events.
- * Future TOW-2/TOW-3 work will extend this to:
- * - Persist events to the database (Signal model)
- * - Fan out to the evaluator for processing
+ * - TOW-1: Basic event intake
+ * - TOW-2: Signal model (pending)
+ * - TOW-3: Evaluator stub integration
+ * - TOW-4: Lead Finder run logging
  */
 
 import { nanoid } from "nanoid";
-import type { IncomingEvent, NormalizedEvent, EventSource } from "../types/events";
+import type { IncomingEvent, NormalizedEvent, EventSource, LeadFinderPayload } from "../types/events";
+import { isLeadFinderEvent } from "../types/events";
+import { createLeadFinderRun, type LeadFinderRunPayload } from "../evaluator/runStore";
 
 /**
  * In-memory queue for events (temporary for TOW-1).
@@ -128,5 +132,102 @@ export function getEventQueue(): readonly NormalizedEvent[] {
  */
 export function clearEventQueue(): void {
   eventQueue.length = 0;
+}
+
+/**
+ * TOW-4: Extracts Lead Finder payload fields from an event payload.
+ * Handles various payload structures gracefully.
+ */
+function extractLeadFinderPayload(payload: unknown): LeadFinderPayload {
+  if (!payload || typeof payload !== "object") {
+    return {};
+  }
+
+  const p = payload as Record<string, unknown>;
+  
+  return {
+    query: typeof p.query === "string" ? p.query : undefined,
+    location: typeof p.location === "string" ? p.location : undefined,
+    vertical: typeof p.vertical === "string" ? p.vertical : undefined,
+    limit: typeof p.limit === "number" ? p.limit : undefined,
+    resultsCount: typeof p.resultsCount === "number" 
+      ? p.resultsCount 
+      : typeof p.results_count === "number"
+      ? p.results_count
+      : undefined,
+  };
+}
+
+/**
+ * TOW-4: Creates a Lead Finder run from a normalized event.
+ * 
+ * This is called when an incoming event is detected as a Lead Finder search.
+ * It extracts relevant fields from the payload and creates a run record.
+ * 
+ * @param event - The normalized event
+ * @returns The created run's ID, or null if creation failed
+ */
+export async function createLeadFinderRunFromEvent(
+  event: NormalizedEvent
+): Promise<{ id: string; status: string } | null> {
+  try {
+    const lfPayload = extractLeadFinderPayload(event.payload);
+    
+    // Extract status from payload if available
+    let status: "completed" | "error" | "timeout" = "completed";
+    if (event.payload && typeof event.payload === "object") {
+      const p = event.payload as Record<string, unknown>;
+      if (p.status === "error") status = "error";
+      else if (p.status === "timeout") status = "timeout";
+    }
+
+    // Build the run payload
+    const runPayload: LeadFinderRunPayload = {
+      correlationId: event.correlationId,
+      sessionId: event.sessionId,
+      query: lfPayload.query,
+      location: lfPayload.location,
+      vertical: lfPayload.vertical,
+      resultsCount: lfPayload.resultsCount,
+      status,
+      startedAt: event.createdAt ? Date.parse(event.createdAt) : undefined,
+      meta: event.payload && typeof event.payload === "object" 
+        ? event.payload as Record<string, unknown>
+        : undefined,
+    };
+
+    const result = await createLeadFinderRun(runPayload);
+    
+    console.info("[TOW-4 EventIntake] Lead Finder run created:", result.id);
+    
+    return result;
+  } catch (error) {
+    console.error(
+      "[TOW-4 EventIntake] Failed to create Lead Finder run:",
+      error instanceof Error ? error.message : error
+    );
+    return null;
+  }
+}
+
+/**
+ * TOW-4: Processes an incoming event and creates a run if it's a Lead Finder event.
+ * 
+ * This is the main entry point for TOW-4 functionality.
+ * Call this after normalizing an event to automatically log Lead Finder runs.
+ * 
+ * @param event - The normalized event
+ * @returns The run result if a Lead Finder run was created, null otherwise
+ */
+export async function processLeadFinderEvent(
+  event: NormalizedEvent
+): Promise<{ id: string; status: string } | null> {
+  if (!isLeadFinderEvent(event.type)) {
+    return null;
+  }
+
+  console.info("[TOW-4 EventIntake] Detected Lead Finder event:", event.type);
+  
+  return createLeadFinderRunFromEvent(event);
 }
 

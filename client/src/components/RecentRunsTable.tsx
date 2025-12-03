@@ -34,6 +34,21 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
 import { Search, AlertCircle } from "lucide-react";
+import type { LeadQualityLabel } from "@/lib/evaluatorApi";
+
+// TOW-5: Get quality badge color based on label
+function getQualityBadgeClasses(label: LeadQualityLabel): string {
+  switch (label) {
+    case "high":
+      return "bg-green-100 text-green-700 hover:bg-green-100";
+    case "medium":
+      return "bg-yellow-100 text-yellow-700 hover:bg-yellow-100";
+    case "low":
+      return "bg-red-100 text-red-700 hover:bg-red-100";
+    default:
+      return "";
+  }
+}
 
 export function RecentRunsTable() {
   const { data: runs, isLoading, error } = useQuery({
@@ -149,9 +164,24 @@ export function RecentRunsTable() {
                         {formatDistanceToNow(new Date(run.createdAt), { addSuffix: true })}
                       </TableCell>
                       <TableCell data-testid={`text-source-${run.id}`}>
-                        <Badge variant={run.source === "UI" ? "default" : "secondary"}>
-                          {run.source}
-                        </Badge>
+                        <div className="flex flex-wrap gap-1 items-center">
+                          <Badge 
+                            variant={run.source === "UI" ? "default" : "secondary"}
+                            className={run.source === "lead_finder" ? "bg-purple-100 text-purple-700 hover:bg-purple-100" : ""}
+                          >
+                            {run.source === "lead_finder" ? "Lead Finder" : run.source}
+                          </Badge>
+                          {/* TOW-5: Show lead quality badge for Lead Finder runs */}
+                          {run.source === "lead_finder" && run.leadQualityScore != null && run.leadQualityLabel && (
+                            <Badge 
+                              variant="secondary"
+                              className={getQualityBadgeClasses(run.leadQualityLabel)}
+                              title={`Lead Quality Score: ${run.leadQualityScore}/100`}
+                            >
+                              {run.leadQualityScore} ({run.leadQualityLabel.charAt(0).toUpperCase() + run.leadQualityLabel.slice(1)})
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-sm" data-testid={`text-user-${run.id}`}>
                         {run.userIdentifier || "—"}

@@ -1,6 +1,7 @@
 /**
  * TOW-1: Event intake endpoint
  * TOW-3: Added evaluator stub integration
+ * TOW-4: Added Lead Finder run logging
  * 
  * POST /events - Receives events from Supervisor, UI, or Tower itself.
  * This is the primary ingestion point for the Tower event system.
@@ -9,7 +10,8 @@
 import { Router, Request, Response } from "express";
 import { 
   validateIncomingEvent, 
-  handleIncomingEvent 
+  handleIncomingEvent,
+  processLeadFinderEvent
 } from "../src/services/eventIntake";
 import { evaluateSignal } from "../src/services/evaluator";
 import type { EventIntakeResponse, EventIntakeError } from "../src/types/events";
@@ -57,6 +59,12 @@ router.post("/events", async (req: Request, res: Response) => {
     // TOW-3: Run the evaluator stub on the signal
     const evaluation = evaluateSignal(normalized);
     console.info("[EventIntake] Evaluator stub completed:", evaluation.outcome);
+
+    // TOW-4: Create a Lead Finder run if this is a Lead Finder event
+    const leadFinderRun = await processLeadFinderEvent(normalized);
+    if (leadFinderRun) {
+      console.info("[EventIntake] Lead Finder run logged:", leadFinderRun.id);
+    }
 
     // Return success response with evaluation result
     const response: EventIntakeResponse = {
