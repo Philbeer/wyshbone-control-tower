@@ -56,6 +56,13 @@ export function validateIncomingRun(event: any): LiveUserRunPayload {
     }
   }
 
+  // TOW-8: Extract verticalId from event or meta, default to "brewery"
+  let verticalId = event.verticalId;
+  if (!verticalId && event.meta && typeof event.meta === 'object') {
+    verticalId = event.meta.verticalId;
+  }
+  verticalId = verticalId ?? "brewery";
+
   // Build normalized payload
   const normalized: LiveUserRunPayload = {
     runId: event.runId || undefined,
@@ -73,6 +80,8 @@ export function validateIncomingRun(event: any): LiveUserRunPayload {
     model: event.model || undefined,
     mode: event.mode || undefined,
     meta: event.meta || undefined,
+    // TOW-8: Include verticalId
+    verticalId,
   };
 
   return normalized;

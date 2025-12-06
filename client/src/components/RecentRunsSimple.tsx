@@ -134,9 +134,35 @@ export function RecentRunsSimple() {
     }
   };
 
-  // Filter to show Wyshbone UI user conversations AND Lead Finder runs
+  // TOW-7: Get source badge styling
+  const getSourceBadgeClasses = (source: string): string => {
+    switch (source) {
+      case "lead_finder":
+        return "bg-purple-50 text-purple-700 border-purple-200";
+      case "subconscious":
+        return "bg-indigo-50 text-indigo-700 border-indigo-200";
+      default:
+        return "";
+    }
+  };
+
+  // TOW-7: Get human-readable source label
+  const getSourceLabel = (source: string): string => {
+    switch (source) {
+      case "lead_finder":
+        return "Lead Finder";
+      case "subconscious":
+        return "Subconscious";
+      case "live_user":
+        return "User";
+      default:
+        return source;
+    }
+  };
+
+  // Filter to show Wyshbone UI user conversations, Lead Finder runs, AND Subconscious runs (TOW-7)
   const userConversations = conversations?.filter(
-    conv => conv.source === "live_user" || conv.source === "lead_finder"
+    conv => conv.source === "live_user" || conv.source === "lead_finder" || conv.source === "subconscious"
   ) || [];
 
   return (
@@ -168,22 +194,24 @@ export function RecentRunsSimple() {
                         <span className="text-xs text-muted-foreground">
                           {formatTime(conversation.first_event_time)}
                         </span>
-                        {conversation.source === "lead_finder" && (
-                          <>
-                            <Badge variant="outline" className="ml-2 bg-purple-50 text-purple-700 border-purple-200">
-                              Lead Finder
-                            </Badge>
-                            {/* TOW-5: Show lead quality for Lead Finder runs */}
-                            {conversation.leadQualityScore != null && conversation.leadQualityLabel && (
-                              <Badge 
-                                variant="outline" 
-                                className={`ml-1 ${getQualityBadgeClasses(conversation.leadQualityLabel)}`}
-                                title={`Lead Quality Score: ${conversation.leadQualityScore}/100`}
-                              >
-                                Quality: {conversation.leadQualityScore} ({conversation.leadQualityLabel.charAt(0).toUpperCase() + conversation.leadQualityLabel.slice(1)})
-                              </Badge>
-                            )}
-                          </>
+                        {/* TOW-7: Show source badge for Lead Finder and Subconscious runs */}
+                        {(conversation.source === "lead_finder" || conversation.source === "subconscious") && (
+                          <Badge 
+                            variant="outline" 
+                            className={`ml-2 ${getSourceBadgeClasses(conversation.source)}`}
+                          >
+                            {getSourceLabel(conversation.source)}
+                          </Badge>
+                        )}
+                        {/* TOW-5: Show lead quality for Lead Finder runs */}
+                        {conversation.source === "lead_finder" && conversation.leadQualityScore != null && conversation.leadQualityLabel && (
+                          <Badge 
+                            variant="outline" 
+                            className={`ml-1 ${getQualityBadgeClasses(conversation.leadQualityLabel)}`}
+                            title={`Lead Quality Score: ${conversation.leadQualityScore}/100`}
+                          >
+                            Quality: {conversation.leadQualityScore} ({conversation.leadQualityLabel.charAt(0).toUpperCase() + conversation.leadQualityLabel.slice(1)})
+                          </Badge>
                         )}
                         {conversation.event_count > 1 && (
                           <Badge variant="secondary" className="ml-2">

@@ -97,6 +97,8 @@ export interface Investigation {
       testId?: string;
       testName?: string;
     };
+    /** TOW-8: Vertical/industry identifier */
+    verticalId?: string;
     [key: string]: any;
   };
 
@@ -105,6 +107,9 @@ export interface Investigation {
 
   diagnosis?: string | null;
   patchSuggestion?: string | null;
+  
+  /** TOW-8: Vertical/industry identifier for filtering by business vertical */
+  verticalId?: string | null;
 }
 
 export interface SnapshotBundle {

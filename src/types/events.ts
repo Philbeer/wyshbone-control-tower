@@ -17,6 +17,20 @@ export type EventSource = "supervisor" | "ui" | "tower";
 /** Source identifier for Lead Finder runs */
 export const LEAD_FINDER_SOURCE = "lead_finder" as const;
 
+/**
+ * TOW-7: Subconscious nudge logging constants
+ */
+
+/** Source identifier for Subconscious runs */
+export const SUBCONSCIOUS_SOURCE = "subconscious" as const;
+
+/** Trigger types for subconscious run logging */
+export type SubconsciousTrigger = 
+  | "list_nudges"     // GET /api/subconscious/nudges
+  | "dismiss_nudge"   // POST /api/subconscious/nudges/:id/dismiss
+  | "snooze_nudge"    // POST /api/subconscious/nudges/:id/snooze
+  | "rank_nudges";    // Direct call to rankSubconsciousNudges
+
 /** Event types that indicate a Lead Finder search */
 export const LEAD_FINDER_EVENT_TYPES = [
   "LeadFinderSearch",
@@ -63,6 +77,7 @@ export interface LeadFinderPayload {
  * - `correlationId` links related events across the system
  * - `sessionId` groups events within a conversation/run session
  * - `createdAt` is auto-filled if not provided
+ * - `verticalId` (TOW-8) identifies the business vertical for filtering/analysis
  */
 export type IncomingEvent = {
   /** Event type identifier, e.g. "LeadCreated", "SearchRunStarted" */
@@ -82,16 +97,22 @@ export type IncomingEvent = {
   
   /** ISO timestamp when the event was created - auto-filled if missing */
   createdAt?: string;
+  
+  /** TOW-8: Vertical/industry identifier (e.g., "brewery", "coffee") */
+  verticalId?: string;
 };
 
 /**
  * NormalizedEvent is an IncomingEvent with all optional fields filled in.
  * This is what gets stored/logged after intake processing.
+ * TOW-8: Includes verticalId for business vertical filtering.
  */
 export type NormalizedEvent = Required<Pick<IncomingEvent, "type" | "source" | "createdAt">> & {
   payload: unknown;
   correlationId: string;
   sessionId: string | null;
+  /** TOW-8: Vertical/industry identifier (defaults to "brewery" if not provided) */
+  verticalId: string | null;
 };
 
 /**

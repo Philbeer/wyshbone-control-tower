@@ -1,7 +1,7 @@
 import { db } from "../lib/db";
 import { runs } from "../../shared/schema";
 import { eq, desc, sql, or } from "drizzle-orm";
-import { LEAD_FINDER_SOURCE, LeadFinderPayload } from "../types/events";
+import { LEAD_FINDER_SOURCE, SUBCONSCIOUS_SOURCE, LeadFinderPayload } from "../types/events";
 import { computeLeadQualityScore, type LeadQualityLabel } from "./leadQuality";
 
 export type RunSummary = {
@@ -16,6 +16,8 @@ export type RunSummary = {
   leadQualityScore?: number | null;
   /** TOW-5: Lead quality label (low/medium/high), only for Lead Finder runs */
   leadQualityLabel?: LeadQualityLabel | null;
+  /** TOW-8: Vertical/industry identifier (e.g., "brewery", "coffee") */
+  verticalId?: string | null;
 };
 
 export async function listRecentRuns(limit = 20): Promise<RunSummary[]> {
@@ -44,6 +46,8 @@ export async function listRecentRuns(limit = 20): Promise<RunSummary[]> {
       leadQualityLabel: isLeadFinder 
         ? (meta?.leadQualityLabel as LeadQualityLabel) ?? null 
         : null,
+      // TOW-8: Include verticalId
+      verticalId: r.vertical_id ?? null,
     };
   });
 }
@@ -67,6 +71,8 @@ export async function listLiveUserRuns(limit = 20): Promise<RunSummary[]> {
     // TOW-5: Live user runs don't have lead quality (always null)
     leadQualityScore: null,
     leadQualityLabel: null,
+    // TOW-8: Include verticalId
+    verticalId: r.vertical_id ?? null,
   }));
 }
 
@@ -95,6 +101,8 @@ export async function getRunById(id: string): Promise<RunSummary | null> {
     leadQualityLabel: isLeadFinder 
       ? (meta?.leadQualityLabel as LeadQualityLabel) ?? null 
       : null,
+    // TOW-8: Include verticalId
+    verticalId: row.vertical_id ?? null,
   };
 }
 
@@ -105,6 +113,8 @@ export async function createRun(data: {
   goalSummary?: string;
   status?: string;
   meta?: any;
+  /** TOW-8: Vertical/industry identifier */
+  verticalId?: string | null;
 }): Promise<void> {
   await db.insert(runs).values({
     id: data.id,
@@ -112,6 +122,8 @@ export async function createRun(data: {
     user_identifier: data.userIdentifier ?? null,
     goal_summary: data.goalSummary ?? null,
     status: data.status ?? "completed",
+    // TOW-8: Store verticalId, default to "brewery" for current phase
+    vertical_id: data.verticalId ?? "brewery",
     meta: data.meta ?? null,
   });
 }
@@ -138,11 +150,13 @@ export type LiveUserRunPayload = {
   model?: string;
   mode?: string;
   meta?: Record<string, any>;
+  /** TOW-8: Vertical/industry identifier (e.g., "brewery", "coffee") */
+  verticalId?: string | null;
 };
 
 export async function createLiveUserRun(
   payload: LiveUserRunPayload
-): Promise<{ id: string; conversationRunId: string; status: string }> {
+): Promise<{ id: string; conversationRunId: string; status: string; verticalId: string }> {
   const conversationRunId = payload.runId || `conv-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   const eventId = `${conversationRunId}-evt-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
   
@@ -160,10 +174,14 @@ export async function createLiveUserRun(
     createdAt = new Date();
   }
   
+  // TOW-8: Derive verticalId from payload or default to "brewery"
+  const verticalId = payload.verticalId ?? "brewery";
+  
   console.log("📥 Tower run log received", {
     eventId,
     conversationRunId,
     source: payload.source,
+    verticalId,
     createdAt: createdAt.toISOString(),
     hasInput: !!inputText,
     hasOutput: !!outputText,
@@ -182,6 +200,8 @@ export async function createLiveUserRun(
     goal_summary: goalSummary,
     status: payload.status,
     created_at: createdAt,
+    // TOW-8: Store verticalId
+    vertical_id: verticalId,
     meta: {
       sessionId: payload.sessionId,
       requestText: inputText || undefined,
@@ -199,7 +219,7 @@ export async function createLiveUserRun(
     },
   });
 
-  return { id: eventId, conversationRunId, status: payload.status };
+  return { id: eventId, conversationRunId, status: payload.status, verticalId };
 }
 
 export interface ConversationSummary {
@@ -216,6 +236,8 @@ export interface ConversationSummary {
   leadQualityScore?: number | null;
   /** TOW-5: Lead quality label (low/medium/high), only for Lead Finder conversations */
   leadQualityLabel?: LeadQualityLabel | null;
+  /** TOW-8: Vertical/industry identifier (e.g., "brewery", "coffee") */
+  verticalId?: string | null;
 }
 
 export async function listConversations(limit = 50): Promise<ConversationSummary[]> {
@@ -230,6 +252,8 @@ export async function listConversations(limit = 50): Promise<ConversationSummary
       latest_output: sql<string>`(ARRAY_AGG(${runs.meta} ORDER BY ${runs.created_at} DESC))[1]`,
       source: sql<string>`(ARRAY_AGG(${runs.source} ORDER BY ${runs.created_at} ASC))[1]`,
       user_identifier: sql<string>`(ARRAY_AGG(${runs.user_identifier} ORDER BY ${runs.created_at} ASC) FILTER (WHERE ${runs.user_identifier} IS NOT NULL))[1]`,
+      // TOW-8: Get verticalId from first event in conversation
+      vertical_id: sql<string>`(ARRAY_AGG(${runs.vertical_id} ORDER BY ${runs.created_at} ASC) FILTER (WHERE ${runs.vertical_id} IS NOT NULL))[1]`,
     })
     .from(runs)
     .where(sql`${runs.conversation_run_id} IS NOT NULL`)
@@ -263,6 +287,8 @@ export async function listConversations(limit = 50): Promise<ConversationSummary
       user_identifier: group.user_identifier || null,
       leadQualityScore,
       leadQualityLabel,
+      // TOW-8: Include verticalId
+      verticalId: group.vertical_id || null,
     };
   });
 }
@@ -292,6 +318,8 @@ export async function getConversationEvents(conversationRunId: string): Promise<
       leadQualityLabel: isLeadFinder 
         ? (meta?.leadQualityLabel as LeadQualityLabel) ?? null 
         : null,
+      // TOW-8: Include verticalId
+      verticalId: r.vertical_id ?? null,
     };
   });
 }
@@ -299,6 +327,7 @@ export async function getConversationEvents(conversationRunId: string): Promise<
 /**
  * TOW-4: Lead Finder run payload structure
  * TOW-5: Extended with lead quality fields
+ * TOW-8: Extended with verticalId field
  */
 export type LeadFinderRunPayload = {
   /** Optional run ID for idempotency/deduplication */
@@ -311,7 +340,7 @@ export type LeadFinderRunPayload = {
   query?: string;
   /** Geographic location for the search */
   location?: string;
-  /** Business vertical/industry */
+  /** Business vertical/industry (used in search context) */
   vertical?: string;
   /** Number of leads found */
   resultsCount?: number;
@@ -327,21 +356,24 @@ export type LeadFinderRunPayload = {
   leadQualityScore?: number;
   /** TOW-5: Pre-computed lead quality label (optional, computed if not provided) */
   leadQualityLabel?: LeadQualityLabel;
+  /** TOW-8: Vertical/industry identifier for run-level tagging (e.g., "brewery", "coffee") */
+  verticalId?: string | null;
 };
 
 /**
  * TOW-4: Creates a Lead Finder run record in the database.
  * TOW-5: Extended to compute and store lead quality score.
+ * TOW-8: Extended to store verticalId.
  * 
  * This is called when a Lead Finder event is received via the /events endpoint.
  * The run will appear in the Tower UI alongside other runs.
  * 
  * @param payload - Lead Finder run details
- * @returns The created run's ID, status, and lead quality
+ * @returns The created run's ID, status, lead quality, and verticalId
  */
 export async function createLeadFinderRun(
   payload: LeadFinderRunPayload
-): Promise<{ id: string; status: string; leadQualityScore: number; leadQualityLabel: LeadQualityLabel }> {
+): Promise<{ id: string; status: string; leadQualityScore: number; leadQualityLabel: LeadQualityLabel; verticalId: string }> {
   // Use correlationId as the base for run ID, or generate a new one
   const runId = payload.runId || `lf-${payload.correlationId}`;
   
@@ -390,7 +422,10 @@ export async function createLeadFinderRun(
     leadQualityLabel = qualityResult.label;
   }
 
-  console.log("[TOW-4/5] Creating Lead Finder run", {
+  // TOW-8: Derive verticalId from payload or default to "brewery"
+  const verticalId = payload.verticalId ?? "brewery";
+
+  console.log("[TOW-4/5/8] Creating Lead Finder run", {
     runId,
     correlationId: payload.correlationId,
     goalSummary,
@@ -398,6 +433,7 @@ export async function createLeadFinderRun(
     resultsCount: payload.resultsCount,
     leadQualityScore,
     leadQualityLabel,
+    verticalId,
   });
 
   await db.insert(runs).values({
@@ -408,6 +444,8 @@ export async function createLeadFinderRun(
     goal_summary: goalSummary,
     status,
     created_at: createdAt,
+    // TOW-8: Store verticalId
+    vertical_id: verticalId,
     meta: {
       correlationId: payload.correlationId,
       sessionId: payload.sessionId,
@@ -424,12 +462,13 @@ export async function createLeadFinderRun(
     },
   });
 
-  return { id: runId, status, leadQualityScore, leadQualityLabel };
+  return { id: runId, status, leadQualityScore, leadQualityLabel, verticalId };
 }
 
 /**
  * TOW-4: List recent Lead Finder runs
  * TOW-5: Includes lead quality score and label
+ * TOW-8: Includes verticalId
  * 
  * @param limit - Maximum number of runs to return (default 20)
  * @returns Array of Lead Finder run summaries with quality fields
@@ -455,6 +494,65 @@ export async function listLeadFinderRuns(limit = 20): Promise<RunSummary[]> {
       // TOW-5: Extract quality fields from meta
       leadQualityScore: typeof meta?.leadQualityScore === "number" ? meta.leadQualityScore : null,
       leadQualityLabel: (meta?.leadQualityLabel as LeadQualityLabel) ?? null,
+      // TOW-8: Include verticalId
+      verticalId: r.vertical_id ?? null,
+    };
+  });
+}
+
+/**
+ * TOW-7: Subconscious run summary with nudge metadata
+ * TOW-8: Inherits verticalId from RunSummary
+ */
+export type SubconsciousRunSummary = RunSummary & {
+  /** Trigger that caused this run */
+  trigger?: string | null;
+  /** Total number of nudges processed */
+  totalNudges?: number | null;
+  /** Count of high importance nudges */
+  highImportanceCount?: number | null;
+  /** Count of medium importance nudges */
+  mediumImportanceCount?: number | null;
+  /** Count of low importance nudges */
+  lowImportanceCount?: number | null;
+};
+
+/**
+ * TOW-7: List recent Subconscious runs
+ * TOW-8: Includes verticalId
+ * 
+ * @param limit - Maximum number of runs to return (default 20)
+ * @returns Array of Subconscious run summaries with nudge metadata
+ */
+export async function listSubconsciousRuns(limit = 20): Promise<SubconsciousRunSummary[]> {
+  const rows = await db
+    .select()
+    .from(runs)
+    .where(eq(runs.source, SUBCONSCIOUS_SOURCE))
+    .orderBy(desc(runs.created_at))
+    .limit(limit);
+
+  return rows.map((r) => {
+    const meta = r.meta as Record<string, unknown> | null;
+    return {
+      id: r.id,
+      created_at: r.created_at.toISOString(),
+      source: r.source,
+      user_identifier: r.user_identifier ?? null,
+      goal_summary: r.goal_summary ?? null,
+      status: r.status,
+      meta: meta ?? undefined,
+      // TOW-7: Extract subconscious-specific fields from meta
+      trigger: (meta?.trigger as string) ?? null,
+      totalNudges: typeof meta?.totalNudges === "number" ? meta.totalNudges : null,
+      highImportanceCount: typeof meta?.highImportanceCount === "number" ? meta.highImportanceCount : null,
+      mediumImportanceCount: typeof meta?.mediumImportanceCount === "number" ? meta.mediumImportanceCount : null,
+      lowImportanceCount: typeof meta?.lowImportanceCount === "number" ? meta.lowImportanceCount : null,
+      // Subconscious runs don't have lead quality
+      leadQualityScore: null,
+      leadQualityLabel: null,
+      // TOW-8: Include verticalId
+      verticalId: r.vertical_id ?? null,
     };
   });
 }

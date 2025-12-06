@@ -50,6 +50,32 @@ function getQualityBadgeClasses(label: LeadQualityLabel): string {
   }
 }
 
+// TOW-7: Get source badge styling
+function getSourceBadgeClasses(source: string): string {
+  switch (source) {
+    case "lead_finder":
+      return "bg-purple-100 text-purple-700 hover:bg-purple-100";
+    case "subconscious":
+      return "bg-indigo-100 text-indigo-700 hover:bg-indigo-100";
+    default:
+      return "";
+  }
+}
+
+// TOW-7: Get human-readable source label
+function getSourceLabel(source: string): string {
+  switch (source) {
+    case "lead_finder":
+      return "Lead Finder";
+    case "subconscious":
+      return "Subconscious";
+    case "live_user":
+      return "User";
+    default:
+      return source;
+  }
+}
+
 export function RecentRunsTable() {
   const { data: runs, isLoading, error } = useQuery({
     queryKey: ["/tower/runs"],
@@ -167,9 +193,9 @@ export function RecentRunsTable() {
                         <div className="flex flex-wrap gap-1 items-center">
                           <Badge 
                             variant={run.source === "UI" ? "default" : "secondary"}
-                            className={run.source === "lead_finder" ? "bg-purple-100 text-purple-700 hover:bg-purple-100" : ""}
+                            className={getSourceBadgeClasses(run.source)}
                           >
-                            {run.source === "lead_finder" ? "Lead Finder" : run.source}
+                            {getSourceLabel(run.source)}
                           </Badge>
                           {/* TOW-5: Show lead quality badge for Lead Finder runs */}
                           {run.source === "lead_finder" && run.leadQualityScore != null && run.leadQualityLabel && (

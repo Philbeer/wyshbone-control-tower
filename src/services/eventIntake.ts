@@ -73,9 +73,21 @@ export function validateIncomingEvent(event: unknown): asserts event is Incoming
 
 /**
  * Normalizes an incoming event by filling in defaults.
+ * TOW-8: Propagates verticalId from event payload.
  */
 export function normalizeEvent(event: IncomingEvent): NormalizedEvent {
   const now = new Date().toISOString();
+  
+  // TOW-8: Extract verticalId from event or payload, default to "brewery"
+  let verticalId: string | null = event.verticalId ?? null;
+  if (!verticalId && event.payload && typeof event.payload === "object") {
+    const p = event.payload as Record<string, unknown>;
+    if (typeof p.verticalId === "string") {
+      verticalId = p.verticalId;
+    }
+  }
+  // Default to "brewery" for current phase if not specified
+  verticalId = verticalId ?? "brewery";
   
   return {
     type: event.type.trim(),
@@ -84,6 +96,7 @@ export function normalizeEvent(event: IncomingEvent): NormalizedEvent {
     correlationId: event.correlationId ?? `evt-${nanoid(12)}`,
     sessionId: event.sessionId ?? null,
     createdAt: event.createdAt ?? now,
+    verticalId,
   };
 }
 
@@ -93,18 +106,22 @@ export function normalizeEvent(event: IncomingEvent): NormalizedEvent {
  * 2. Logs to console in structured format
  * 3. Stores in in-memory queue (temporary)
  * 
+ * TOW-8: Logs verticalId for filtering/analysis.
+ * 
  * @returns The normalized event with generated correlationId
  */
 export async function handleIncomingEvent(event: IncomingEvent): Promise<NormalizedEvent> {
   const normalized = normalizeEvent(event);
 
   // Structured console log for Tower visibility
+  // TOW-8: Include verticalId in log
   console.info("[EventIntake]", JSON.stringify({
     type: normalized.type,
     source: normalized.source,
     correlationId: normalized.correlationId,
     sessionId: normalized.sessionId,
     createdAt: normalized.createdAt,
+    verticalId: normalized.verticalId,
     hasPayload: normalized.payload !== null,
   }));
 
@@ -160,6 +177,7 @@ function extractLeadFinderPayload(payload: unknown): LeadFinderPayload {
 
 /**
  * TOW-4: Creates a Lead Finder run from a normalized event.
+ * TOW-8: Propagates verticalId from event.
  * 
  * This is called when an incoming event is detected as a Lead Finder search.
  * It extracts relevant fields from the payload and creates a run record.
@@ -169,7 +187,7 @@ function extractLeadFinderPayload(payload: unknown): LeadFinderPayload {
  */
 export async function createLeadFinderRunFromEvent(
   event: NormalizedEvent
-): Promise<{ id: string; status: string } | null> {
+): Promise<{ id: string; status: string; verticalId: string } | null> {
   try {
     const lfPayload = extractLeadFinderPayload(event.payload);
     
@@ -182,6 +200,7 @@ export async function createLeadFinderRunFromEvent(
     }
 
     // Build the run payload
+    // TOW-8: Include verticalId from normalized event
     const runPayload: LeadFinderRunPayload = {
       correlationId: event.correlationId,
       sessionId: event.sessionId,
@@ -194,11 +213,12 @@ export async function createLeadFinderRunFromEvent(
       meta: event.payload && typeof event.payload === "object" 
         ? event.payload as Record<string, unknown>
         : undefined,
+      verticalId: event.verticalId,
     };
 
     const result = await createLeadFinderRun(runPayload);
     
-    console.info("[TOW-4 EventIntake] Lead Finder run created:", result.id);
+    console.info("[TOW-4/8 EventIntake] Lead Finder run created:", result.id, "verticalId:", result.verticalId);
     
     return result;
   } catch (error) {
@@ -212,6 +232,7 @@ export async function createLeadFinderRunFromEvent(
 
 /**
  * TOW-4: Processes an incoming event and creates a run if it's a Lead Finder event.
+ * TOW-8: Includes verticalId in return value.
  * 
  * This is the main entry point for TOW-4 functionality.
  * Call this after normalizing an event to automatically log Lead Finder runs.
@@ -221,12 +242,12 @@ export async function createLeadFinderRunFromEvent(
  */
 export async function processLeadFinderEvent(
   event: NormalizedEvent
-): Promise<{ id: string; status: string } | null> {
+): Promise<{ id: string; status: string; verticalId: string } | null> {
   if (!isLeadFinderEvent(event.type)) {
     return null;
   }
 
-  console.info("[TOW-4 EventIntake] Detected Lead Finder event:", event.type);
+  console.info("[TOW-4/8 EventIntake] Detected Lead Finder event:", event.type, "verticalId:", event.verticalId);
   
   return createLeadFinderRunFromEvent(event);
 }

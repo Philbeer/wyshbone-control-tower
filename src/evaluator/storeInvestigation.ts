@@ -20,6 +20,8 @@ export async function storeInvestigation(
       supervisor_snapshot: inv.supervisorSnapshot ?? null,
       diagnosis: inv.diagnosis ?? null,
       patch_suggestion: inv.patchSuggestion ?? null,
+      // TOW-8: Store verticalId
+      vertical_id: inv.verticalId ?? inv.runMeta?.verticalId ?? "brewery",
     })
     .onConflictDoUpdate({
       target: investigations.id,
@@ -33,6 +35,8 @@ export async function storeInvestigation(
         supervisor_snapshot: inv.supervisorSnapshot ?? null,
         diagnosis: inv.diagnosis ?? null,
         patch_suggestion: inv.patchSuggestion ?? null,
+        // TOW-8: Update verticalId on conflict
+        vertical_id: inv.verticalId ?? inv.runMeta?.verticalId ?? "brewery",
       },
     });
 }
@@ -55,6 +59,8 @@ export async function getAllInvestigations(): Promise<InvestigationType[]> {
     supervisorSnapshot: r.supervisor_snapshot ?? null,
     diagnosis: r.diagnosis ?? null,
     patchSuggestion: r.patch_suggestion ?? null,
+    // TOW-8: Include verticalId
+    verticalId: r.vertical_id ?? null,
   }));
 }
 
@@ -79,5 +85,7 @@ export async function getInvestigationById(
     supervisorSnapshot: row.supervisor_snapshot ?? null,
     diagnosis: row.diagnosis ?? null,
     patchSuggestion: row.patch_suggestion ?? null,
+    // TOW-8: Include verticalId
+    verticalId: row.vertical_id ?? null,
   };
 }
