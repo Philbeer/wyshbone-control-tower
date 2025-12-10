@@ -1,12 +1,12 @@
 [
   {
     "name": "Wyshbone UI",
-    "baseUrl": "https://9fd6ae0d-ec2c-4634-bbc7-1c7ffcaec41e-00-3er27wtsynxbd.worf.replit.dev",
-    "exportKey": "4cea981352cd4624e10dd88ba49cdbcc"
+    "baseUrl": "http://localhost:5001",
+    "exportKey": "dev-wyshbone-ui"
   },
   {
     "name": "Wyshbone Supervisor",
-    "baseUrl": "https://1bc41a6a-d1a1-4e3b-a406-834720587238-00-3049oma39mauf.worf.replit.dev",
-    "exportKey": "97189857d08155d60f5f15733ce5a863"
+    "baseUrl": "http://127.0.0.1:5000",
+    "exportKey": "dev-wyshbone-supervisor"
   }
 ]
