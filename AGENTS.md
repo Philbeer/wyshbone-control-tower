@@ -2,17 +2,31 @@
 
 This document defines the operating protocol for AI agents working on this codebase.
 
-## 🚨 CRITICAL: QA Gate Requirement
+## 🚨 CRITICAL: Smoke Test Requirement
 
-**NO TASK IS COMPLETE UNTIL IT PASSES THE QA GATE.**
+**NO TASK IS COMPLETE UNTIL SMOKE TEST PASSES.**
 
-Before declaring ANY task done, agents MUST run the full smoke test protocol defined in `.cursor/rules/qa-gate.mdc`.
+Before declaring ANY work done, agents MUST run:
+
+```bash
+npm run smoke
+```
+
+**Fix all failures until it passes.** No exceptions.
+
+### What the Smoke Test Checks
+
+1. **Server startup**: Tower boots without errors
+2. **Health check**: `GET /status.json` returns 200
+3. **Runs endpoint**: `GET /tower/runs` returns 200
+4. **Event ingestion**: `POST /tower/runs/log` accepts events
+5. **Behaviour tests**: `GET /tower/behaviour-tests` returns 200
 
 ### Minimum Requirements
 
-1. **Boot the service**: `npm run dev` must start without errors
-2. **Ingest a test event**: POST to `/events` must return 200/201
-3. **Verify output**: Confirm evaluation/run data is produced
+1. **Boot the service**: Server must start without errors
+2. **Ingest a test event**: POST to `/tower/runs/log` must return 200
+3. **Verify output**: Run data is logged and retrievable
 4. **Zero errors**: No 404s, 500s, or uncaught exceptions
 
 ### Task-Specific Verification
@@ -39,16 +53,12 @@ Every completed task MUST include:
 ```markdown
 ## QA Report
 
-### Smoke Tests
-- [ ] ✅ Tower boots: `npm run dev` → Server running
-- [ ] ✅ Event ingestion: POST /events → 200 OK  
-- [ ] ✅ Evaluation output: Run logged / investigation created
-- [ ] ✅ No errors: Zero 4xx/5xx, no uncaught exceptions
+### Smoke Test
+- [ ] ✅ `npm run smoke` → All checks passed
 
 ### Task-Specific Checks
 - [ ] ✅ [Check 1 based on changes]
 - [ ] ✅ [Check 2 based on changes]
-- [ ] ✅ [Check 3 based on changes]
 
 ### Issues Found & Fixed
 - [List any issues discovered and resolutions]
@@ -56,6 +66,20 @@ Every completed task MUST include:
 ### Files Changed
 - `file1.ts`
 - `file2.ts`
+```
+
+### Smoke Test Output Example
+
+```
+✅ Server startup
+✅ Health check (GET /status.json)
+✅ List runs (GET /tower/runs)
+✅ Event ingestion (POST /tower/runs/log)
+✅ Behaviour tests (GET /tower/behaviour-tests)
+
+Results: 5/5 passed (8.2s)
+
+✅ SMOKE TEST PASSED
 ```
 
 ---
