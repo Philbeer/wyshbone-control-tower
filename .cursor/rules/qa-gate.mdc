@@ -1,0 +1,111 @@
+---
+description: Mandatory QA gate that must be passed before declaring any task complete
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# 🚨 QA GATE - MANDATORY BEFORE TASK COMPLETION
+
+**DO NOT declare a task "done" until ALL smoke tests pass.**
+
+## Required Smoke Test Protocol
+
+Before completing ANY task that modifies Tower functionality, you MUST:
+
+### 1. Boot Tower Service Locally
+```bash
+npm run dev
+```
+- Confirm server starts without crash
+- Verify "Server running on http://localhost:3000" appears
+- Check for no unhandled startup errors in console
+
+### 2. Ingest a Sample Event
+Use the fixture at `tests/fixtures/sample-event.json` or create one if it doesn't exist:
+```bash
+curl -X POST http://localhost:3000/events \
+  -H "Content-Type: application/json" \
+  -d @tests/fixtures/sample-event.json
+```
+**Expected**: HTTP 200/201 response, no 4xx/5xx errors
+
+### 3. Confirm Evaluation Output
+Verify at least ONE of the following outputs exists after ingestion:
+- Run appears in `/tower/runs` endpoint
+- Log entry in console showing event processed
+- Database record created (check `tower-dev.db` if using SQLite)
+
+### 4. No Unhandled Errors
+- Check terminal output: no uncaught exceptions
+- No 404s on expected routes
+- No 500s from API calls
+
+## Task-Specific Checks (Add 1-3 Based on Change)
+
+For each task, add verification specific to what changed:
+
+| Change Type | Required Check |
+|-------------|----------------|
+| New API endpoint | Curl the endpoint, verify 200 response |
+| Database schema | Confirm migration ran, table exists |
+| UI component | Navigate to route, confirm renders |
+| Evaluator logic | Trigger evaluation, check output |
+| Event intake | Post event, verify ingestion |
+| Investigation | Create investigation, verify diagnosis |
+
+## Failure Protocol
+
+If ANY check fails:
+1. **Diagnose**: Read error messages, check logs
+2. **Fix**: Address the root cause
+3. **Re-run**: Execute full smoke test suite again
+4. **Iterate**: Repeat until ALL checks pass
+
+## QA Report Format
+
+Include this at the end of your task completion:
+
+```markdown
+## QA Report
+
+### Smoke Tests
+- [ ] ✅ Tower boots: `npm run dev` → Server running
+- [ ] ✅ Event ingestion: POST /events → 200 OK
+- [ ] ✅ Evaluation output: Run logged / investigation created
+- [ ] ✅ No errors: Zero 4xx/5xx, no uncaught exceptions
+
+### Task-Specific Checks
+- [ ] ✅ [Your check 1]
+- [ ] ✅ [Your check 2]
+- [ ] ✅ [Your check 3]
+
+### Issues Found & Fixed
+- [Describe any issues discovered during QA and how they were resolved]
+
+### Files Changed
+- `path/to/file1.ts`
+- `path/to/file2.ts`
+```
+
+## Test Fixture
+
+If `tests/fixtures/sample-event.json` doesn't exist, create it:
+
+```json
+{
+  "eventType": "qa_smoke_test",
+  "source": "tower_qa_gate",
+  "userId": "qa-test-user",
+  "sessionId": "qa-session-001",
+  "timestamp": "2024-01-01T00:00:00.000Z",
+  "payload": {
+    "action": "smoke_test",
+    "description": "QA gate verification event"
+  }
+}
+```
+
+---
+
+**Remember**: No shortcuts. Every task must pass QA before completion.
