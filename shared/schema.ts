@@ -186,3 +186,176 @@ export const insertDevIssuePatchSchema = createInsertSchema(devIssuePatches).omi
 });
 export type InsertDevIssuePatch = z.infer<typeof insertDevIssuePatchSchema>;
 export type DevIssuePatch = typeof devIssuePatches.$inferSelect;
+
+// Strategy Evaluator - Phase 3: Add Intelligence
+export const strategies = pgTable("strategies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  description: text("description").notNull(),
+  category: text("category").notNull(),
+  config: jsonb("config").$type<Record<string, any>>().notNull(),
+  isActive: text("is_active").notNull().default("true"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertStrategySchema = createInsertSchema(strategies);
+export type InsertStrategy = z.infer<typeof insertStrategySchema>;
+export type StrategyRow = typeof strategies.$inferSelect;
+export type Strategy = Omit<StrategyRow, 'isActive'> & {
+  isActive: boolean;
+};
+
+export const strategyPerformance = pgTable("strategy_performance", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  strategyId: varchar("strategy_id").notNull(),
+  executedAt: timestamp("executed_at").notNull().defaultNow(),
+  context: text("context").notNull(),
+  runId: varchar("run_id"),
+  metrics: jsonb("metrics").$type<{
+    successRate?: number;
+    avgDuration?: number;
+    errorCount?: number;
+    userSatisfaction?: number;
+    throughput?: number;
+    [key: string]: any;
+  }>().notNull(),
+  outcome: text("outcome").notNull(),
+  meta: jsonb("meta").$type<Record<string, any>>(),
+});
+
+export const insertStrategyPerformanceSchema = createInsertSchema(strategyPerformance);
+export type InsertStrategyPerformance = z.infer<typeof insertStrategyPerformanceSchema>;
+export type StrategyPerformance = typeof strategyPerformance.$inferSelect;
+
+export const abTests = pgTable("ab_tests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  description: text("description").notNull(),
+  strategyAId: varchar("strategy_a_id").notNull(),
+  strategyBId: varchar("strategy_b_id").notNull(),
+  status: text("status").notNull().default("active"),
+  startedAt: timestamp("started_at").notNull().defaultNow(),
+  endedAt: timestamp("ended_at"),
+  config: jsonb("config").$type<{
+    trafficSplit?: number;
+    minSampleSize?: number;
+    maxDurationDays?: number;
+    [key: string]: any;
+  }>().default({}),
+  results: jsonb("results").$type<{
+    strategyAMetrics?: any;
+    strategyBMetrics?: any;
+    winner?: string;
+    significance?: number;
+    recommendation?: string;
+    [key: string]: any;
+  }>(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertAbTestSchema = createInsertSchema(abTests);
+export type InsertAbTest = z.infer<typeof insertAbTestSchema>;
+export type AbTest = typeof abTests.$inferSelect;
+
+export const abTestResults = pgTable("ab_test_results", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  testId: varchar("test_id").notNull(),
+  strategyId: varchar("strategy_id").notNull(),
+  variant: text("variant").notNull(),
+  executedAt: timestamp("executed_at").notNull().defaultNow(),
+  metrics: jsonb("metrics").$type<{
+    successRate?: number;
+    avgDuration?: number;
+    errorCount?: number;
+    userSatisfaction?: number;
+    [key: string]: any;
+  }>().notNull(),
+  outcome: text("outcome").notNull(),
+});
+
+export const insertAbTestResultSchema = createInsertSchema(abTestResults);
+export type InsertAbTestResult = z.infer<typeof insertAbTestResultSchema>;
+export type AbTestResult = typeof abTestResults.$inferSelect;
+
+// Failure Categorization - Phase 3: Add Intelligence
+export const failureCategories = pgTable("failure_categories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  description: text("description").notNull(),
+  keywords: jsonb("keywords").$type<string[]>().notNull(),
+  patterns: jsonb("patterns").$type<string[]>().notNull(),
+  recommendationTemplate: text("recommendation_template").notNull(),
+  severity: text("severity").notNull().default("medium"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertFailureCategorySchema = createInsertSchema(failureCategories);
+export type InsertFailureCategory = z.infer<typeof insertFailureCategorySchema>;
+export type FailureCategory = typeof failureCategories.$inferSelect;
+
+export const categorizedFailures = pgTable("categorized_failures", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  categoryId: varchar("category_id").notNull(),
+  runId: varchar("run_id"),
+  investigationId: varchar("investigation_id"),
+  errorMessage: text("error_message").notNull(),
+  errorStack: text("error_stack"),
+  context: jsonb("context").$type<Record<string, any>>(),
+  confidence: text("confidence").notNull(),
+  detectedAt: timestamp("detected_at").notNull().defaultNow(),
+  resolution: text("resolution"),
+  resolvedAt: timestamp("resolved_at"),
+  meta: jsonb("meta").$type<Record<string, any>>(),
+});
+
+export const insertCategorizedFailureSchema = createInsertSchema(categorizedFailures);
+export type InsertCategorizedFailure = z.infer<typeof insertCategorizedFailureSchema>;
+export type CategorizedFailure = typeof categorizedFailures.$inferSelect;
+
+export const failurePatterns = pgTable("failure_patterns", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  categoryId: varchar("category_id").notNull(),
+  occurrences: text("occurrences").notNull().default("1"),
+  firstSeenAt: timestamp("first_seen_at").notNull().defaultNow(),
+  lastSeenAt: timestamp("last_seen_at").notNull().defaultNow(),
+  frequency: text("frequency").notNull().default("low"),
+  relatedFailures: jsonb("related_failures").$type<string[]>().default([]),
+  recommendation: text("recommendation"),
+  status: text("status").notNull().default("active"),
+});
+
+export const insertFailurePatternSchema = createInsertSchema(failurePatterns);
+export type InsertFailurePattern = z.infer<typeof insertFailurePatternSchema>;
+export type FailurePatternRow = typeof failurePatterns.$inferSelect;
+export type FailurePattern = Omit<FailurePatternRow, 'occurrences'> & {
+  occurrences: number;
+};
+
+export const failureMemory = pgTable("failure_memory", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  categoryId: varchar("category_id").notNull(),
+  patternId: varchar("pattern_id"),
+  solution: text("solution").notNull(),
+  successRate: text("success_rate").notNull(),
+  timesApplied: text("times_applied").notNull().default("0"),
+  lastAppliedAt: timestamp("last_applied_at"),
+  metadata: jsonb("metadata").$type<{
+    avgResolutionTime?: number;
+    applicableContexts?: string[];
+    prerequisites?: string[];
+    [key: string]: any;
+  }>(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertFailureMemorySchema = createInsertSchema(failureMemory);
+export type InsertFailureMemory = z.infer<typeof insertFailureMemorySchema>;
+export type FailureMemoryRow = typeof failureMemory.$inferSelect;
+export type FailureMemory = Omit<FailureMemoryRow, 'successRate' | 'timesApplied'> & {
+  successRate: number;
+  timesApplied: number;
+};

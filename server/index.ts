@@ -15,9 +15,9 @@ console.log('🚀 Starting Wyshbone Status Dashboard...');
 console.log(`📁 Dashboard location: ${dashboardPath}`);
 
 // Execute the dashboard server using tsx to support TypeScript imports
-// Use spawnSync with args array to handle paths with spaces (Windows-friendly)
+// Quote the path to handle Windows paths with spaces (e.g., "C:\Users\Phil Waite\...")
 try {
-  const result = spawnSync('npx', ['tsx', dashboardPath], { 
+  const result = spawnSync('npx', ['tsx', `"${dashboardPath}"`], {
     stdio: 'inherit',
     shell: true,  // Required for npx on Windows (npx.cmd)
   });

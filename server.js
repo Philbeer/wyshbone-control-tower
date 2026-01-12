@@ -3,6 +3,7 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { poller } from './lib/poller.js';
 import { tasksManager } from './lib/tasks.js';
+import { evaluator } from './lib/evaluator.js';
 
 const app = express();
 const server = createServer(app);
@@ -1670,9 +1671,25 @@ async function start() {
     // Load dev issues routes (Tower Dev Chat v0)
     const devIssuesRoutesModule = await import('./server/routes-dev-issues.ts');
     app.use('/api/dev', devIssuesRoutesModule.default);
-    
+
+    // Load strategy evaluator routes (Phase 3: Add Intelligence)
+    const strategyRoutesModule = await import('./server/routes-strategy.ts');
+    app.use('/tower/strategy', strategyRoutesModule.default);
+
+    // Load failure categorization routes (Phase 3: Add Intelligence)
+    const failureRoutesModule = await import('./server/routes-failures.ts');
+    app.use('/tower/failures', failureRoutesModule.default);
+
     // Ensure behaviour test definitions are seeded
     await ensureBehaviourTestsSeeded();
+
+    // Ensure default failure categories are seeded
+    try {
+      await evaluator.failureCategorizer.ensureCategories();
+      console.log('✓ Failure categories seeded');
+    } catch (err) {
+      console.warn('⚠️  Failed to seed failure categories:', err.message);
+    }
     
     console.log('✓ Evaluator modules loaded');
   } catch (err) {
