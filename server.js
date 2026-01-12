@@ -1574,12 +1574,16 @@ async function start() {
     const storageModule = await import('./src/evaluator/storeInvestigation.ts');
     const investigateRunModule = await import('./src/evaluator/createInvestigationForRun.ts');
     const runStoreModule = await import('./src/evaluator/runStore.ts');
-    
+
+    // DEBUG: Log what's in runStoreModule
+    console.log('[DEBUG] runStoreModule keys:', Object.keys(runStoreModule));
+    console.log('[DEBUG] listConversations type:', typeof runStoreModule.listConversations);
+
     executeInvestigation = evaluatorModule.executeInvestigation;
     getAllInvestigations = storageModule.getAllInvestigations;
     getInvestigationById = storageModule.getInvestigationById;
     createInvestigationForRun = investigateRunModule.createInvestigationForRun;
-    
+
     listRecentRuns = runStoreModule.listRecentRuns;
     listLiveUserRuns = runStoreModule.listLiveUserRuns;  // EVAL-008
     listConversations = runStoreModule.listConversations;  // Conversation-level
