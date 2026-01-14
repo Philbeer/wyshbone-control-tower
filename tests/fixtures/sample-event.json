@@ -1,0 +1,12 @@
+{
+  "eventType": "qa_smoke_test",
+  "source": "tower_qa_gate",
+  "userId": "qa-test-user",
+  "sessionId": "qa-session-001",
+  "timestamp": "2024-01-01T00:00:00.000Z",
+  "payload": {
+    "action": "smoke_test",
+    "description": "QA gate verification event"
+  }
+}
+

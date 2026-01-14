@@ -1,12 +1,12 @@
 import { Link, useLocation } from "wouter";
-import { Activity, Bug } from "lucide-react";
+import { Activity, Bug, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function TowerNavTabs() {
   const [location] = useLocation();
-  
+
   return (
-    <div className="bg-background">
+    <div className="bg-background border-b">
       <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -18,11 +18,22 @@ export function TowerNavTabs() {
               <p className="text-xs text-muted-foreground">Monitor & Fix Quality Issues</p>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-2">
+            <Link href="/dashboard/strategy">
+              <Button
+                variant={location === "/dashboard/strategy" ? "default" : "outline"}
+                size="sm"
+                className="gap-2"
+                data-testid="link-strategy-dashboard"
+              >
+                <TrendingUp className="h-4 w-4" />
+                Strategy Performance
+              </Button>
+            </Link>
             <Link href="/dev/issues">
-              <Button 
-                variant={location === "/dev/issues" ? "default" : "outline"} 
+              <Button
+                variant={location === "/dev/issues" ? "default" : "outline"}
                 size="sm"
                 className="gap-2"
                 data-testid="link-dev-issues"

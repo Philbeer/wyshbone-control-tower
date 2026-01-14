@@ -32,6 +32,8 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    port: 3000,
+    strictPort: true, // Fail with clear error if port is busy
     fs: {
       strict: true,
       deny: ["**/.*"],
