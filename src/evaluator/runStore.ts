@@ -1,6 +1,8 @@
 import { db } from "../lib/db";
 import { runs } from "../../shared/schema";
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql, or } from "drizzle-orm";
+import { LEAD_FINDER_SOURCE, SUBCONSCIOUS_SOURCE, LeadFinderPayload } from "../types/events";
+import { computeLeadQualityScore, type LeadQualityLabel } from "./leadQuality";
 
 export type RunSummary = {
   id: string;
@@ -10,6 +12,12 @@ export type RunSummary = {
   goal_summary?: string | null;
   status: string;
   meta?: any;
+  /** TOW-5: Lead quality score (0-100), only for Lead Finder runs */
+  leadQualityScore?: number | null;
+  /** TOW-5: Lead quality label (low/medium/high), only for Lead Finder runs */
+  leadQualityLabel?: LeadQualityLabel | null;
+  /** TOW-8: Vertical/industry identifier (e.g., "brewery", "coffee") */
+  verticalId?: string | null;
 };
 
 export async function listRecentRuns(limit = 20): Promise<RunSummary[]> {
@@ -19,15 +27,29 @@ export async function listRecentRuns(limit = 20): Promise<RunSummary[]> {
     .orderBy(desc(runs.created_at))
     .limit(limit);
 
-  return rows.map((r) => ({
-    id: r.id,
-    created_at: r.created_at.toISOString(),
-    source: r.source,
-    user_identifier: r.user_identifier ?? null,
-    goal_summary: r.goal_summary ?? null,
-    status: r.status,
-    meta: r.meta ?? undefined,
-  }));
+  return rows.map((r) => {
+    const meta = r.meta as Record<string, unknown> | null;
+    // TOW-5: Extract quality fields for Lead Finder runs
+    const isLeadFinder = r.source === LEAD_FINDER_SOURCE;
+    return {
+      id: r.id,
+      created_at: r.created_at.toISOString(),
+      source: r.source,
+      user_identifier: r.user_identifier ?? null,
+      goal_summary: r.goal_summary ?? null,
+      status: r.status,
+      meta: meta ?? undefined,
+      // TOW-5: Include quality fields only for Lead Finder runs
+      leadQualityScore: isLeadFinder && typeof meta?.leadQualityScore === "number" 
+        ? meta.leadQualityScore 
+        : null,
+      leadQualityLabel: isLeadFinder 
+        ? (meta?.leadQualityLabel as LeadQualityLabel) ?? null 
+        : null,
+      // TOW-8: Include verticalId
+      verticalId: r.vertical_id ?? null,
+    };
+  });
 }
 
 export async function listLiveUserRuns(limit = 20): Promise<RunSummary[]> {
@@ -46,6 +68,11 @@ export async function listLiveUserRuns(limit = 20): Promise<RunSummary[]> {
     goal_summary: r.goal_summary ?? null,
     status: r.status,
     meta: r.meta ?? undefined,
+    // TOW-5: Live user runs don't have lead quality (always null)
+    leadQualityScore: null,
+    leadQualityLabel: null,
+    // TOW-8: Include verticalId
+    verticalId: r.vertical_id ?? null,
   }));
 }
 
@@ -56,6 +83,9 @@ export async function getRunById(id: string): Promise<RunSummary | null> {
 
   if (!row) return null;
 
+  const meta = row.meta as Record<string, unknown> | null;
+  const isLeadFinder = row.source === LEAD_FINDER_SOURCE;
+
   return {
     id: row.id,
     created_at: row.created_at.toISOString(),
@@ -63,7 +93,16 @@ export async function getRunById(id: string): Promise<RunSummary | null> {
     user_identifier: row.user_identifier ?? null,
     goal_summary: row.goal_summary ?? null,
     status: row.status,
-    meta: row.meta ?? undefined,
+    meta: meta ?? undefined,
+    // TOW-5: Include quality fields only for Lead Finder runs
+    leadQualityScore: isLeadFinder && typeof meta?.leadQualityScore === "number" 
+      ? meta.leadQualityScore 
+      : null,
+    leadQualityLabel: isLeadFinder 
+      ? (meta?.leadQualityLabel as LeadQualityLabel) ?? null 
+      : null,
+    // TOW-8: Include verticalId
+    verticalId: row.vertical_id ?? null,
   };
 }
 
@@ -74,6 +113,8 @@ export async function createRun(data: {
   goalSummary?: string;
   status?: string;
   meta?: any;
+  /** TOW-8: Vertical/industry identifier */
+  verticalId?: string | null;
 }): Promise<void> {
   await db.insert(runs).values({
     id: data.id,
@@ -81,6 +122,8 @@ export async function createRun(data: {
     user_identifier: data.userIdentifier ?? null,
     goal_summary: data.goalSummary ?? null,
     status: data.status ?? "completed",
+    // TOW-8: Store verticalId, default to "brewery" for current phase
+    vertical_id: data.verticalId ?? "brewery",
     meta: data.meta ?? null,
   });
 }
@@ -107,11 +150,13 @@ export type LiveUserRunPayload = {
   model?: string;
   mode?: string;
   meta?: Record<string, any>;
+  /** TOW-8: Vertical/industry identifier (e.g., "brewery", "coffee") */
+  verticalId?: string | null;
 };
 
 export async function createLiveUserRun(
   payload: LiveUserRunPayload
-): Promise<{ id: string; conversationRunId: string; status: string }> {
+): Promise<{ id: string; conversationRunId: string; status: string; verticalId: string }> {
   const conversationRunId = payload.runId || `conv-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   const eventId = `${conversationRunId}-evt-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
   
@@ -129,10 +174,14 @@ export async function createLiveUserRun(
     createdAt = new Date();
   }
   
+  // TOW-8: Derive verticalId from payload or default to "brewery"
+  const verticalId = payload.verticalId ?? "brewery";
+  
   console.log("📥 Tower run log received", {
     eventId,
     conversationRunId,
     source: payload.source,
+    verticalId,
     createdAt: createdAt.toISOString(),
     hasInput: !!inputText,
     hasOutput: !!outputText,
@@ -151,6 +200,8 @@ export async function createLiveUserRun(
     goal_summary: goalSummary,
     status: payload.status,
     created_at: createdAt,
+    // TOW-8: Store verticalId
+    vertical_id: verticalId,
     meta: {
       sessionId: payload.sessionId,
       requestText: inputText || undefined,
@@ -168,7 +219,7 @@ export async function createLiveUserRun(
     },
   });
 
-  return { id: eventId, conversationRunId, status: payload.status };
+  return { id: eventId, conversationRunId, status: payload.status, verticalId };
 }
 
 export interface ConversationSummary {
@@ -181,6 +232,12 @@ export interface ConversationSummary {
   output_summary: string | null;
   source: string;
   user_identifier: string | null;
+  /** TOW-5: Lead quality score (0-100), only for Lead Finder conversations */
+  leadQualityScore?: number | null;
+  /** TOW-5: Lead quality label (low/medium/high), only for Lead Finder conversations */
+  leadQualityLabel?: LeadQualityLabel | null;
+  /** TOW-8: Vertical/industry identifier (e.g., "brewery", "coffee") */
+  verticalId?: string | null;
 }
 
 export async function listConversations(limit = 50): Promise<ConversationSummary[]> {
@@ -195,6 +252,8 @@ export async function listConversations(limit = 50): Promise<ConversationSummary
       latest_output: sql<string>`(ARRAY_AGG(${runs.meta} ORDER BY ${runs.created_at} DESC))[1]`,
       source: sql<string>`(ARRAY_AGG(${runs.source} ORDER BY ${runs.created_at} ASC))[1]`,
       user_identifier: sql<string>`(ARRAY_AGG(${runs.user_identifier} ORDER BY ${runs.created_at} ASC) FILTER (WHERE ${runs.user_identifier} IS NOT NULL))[1]`,
+      // TOW-8: Get verticalId from first event in conversation
+      vertical_id: sql<string>`(ARRAY_AGG(${runs.vertical_id} ORDER BY ${runs.created_at} ASC) FILTER (WHERE ${runs.vertical_id} IS NOT NULL))[1]`,
     })
     .from(runs)
     .where(sql`${runs.conversation_run_id} IS NOT NULL`)
@@ -203,9 +262,18 @@ export async function listConversations(limit = 50): Promise<ConversationSummary
     .limit(limit);
 
   return conversationGroups.map((group) => {
-    const latestMeta = group.latest_output as any || {};
-    const outputText = latestMeta.responseText || latestMeta.outputText || latestMeta.output || "";
+    const latestMeta = (group.latest_output as unknown as Record<string, unknown>) || {};
+    const outputText = (latestMeta.responseText || latestMeta.outputText || latestMeta.output || "") as string;
     const outputSummary = outputText ? outputText.substring(0, 160) : null;
+
+    // TOW-5: Extract quality fields for Lead Finder sources
+    const isLeadFinder = group.source === LEAD_FINDER_SOURCE;
+    const leadQualityScore = isLeadFinder && typeof latestMeta.leadQualityScore === "number"
+      ? latestMeta.leadQualityScore
+      : null;
+    const leadQualityLabel = isLeadFinder
+      ? (latestMeta.leadQualityLabel as LeadQualityLabel) ?? null
+      : null;
 
     return {
       conversation_run_id: group.conversation_run_id || "",
@@ -217,6 +285,10 @@ export async function listConversations(limit = 50): Promise<ConversationSummary
       output_summary: outputSummary,
       source: group.source || "unknown",
       user_identifier: group.user_identifier || null,
+      leadQualityScore,
+      leadQualityLabel,
+      // TOW-8: Include verticalId
+      verticalId: group.vertical_id || null,
     };
   });
 }
@@ -228,13 +300,259 @@ export async function getConversationEvents(conversationRunId: string): Promise<
     .where(eq(runs.conversation_run_id, conversationRunId))
     .orderBy(sql`${runs.created_at} ASC`);
 
-  return events.map((r) => ({
-    id: r.id,
-    created_at: r.created_at.toISOString(),
-    source: r.source,
-    user_identifier: r.user_identifier ?? null,
-    goal_summary: r.goal_summary ?? null,
-    status: r.status,
-    meta: r.meta ?? undefined,
-  }));
+  return events.map((r) => {
+    const meta = r.meta as Record<string, unknown> | null;
+    const isLeadFinder = r.source === LEAD_FINDER_SOURCE;
+    return {
+      id: r.id,
+      created_at: r.created_at.toISOString(),
+      source: r.source,
+      user_identifier: r.user_identifier ?? null,
+      goal_summary: r.goal_summary ?? null,
+      status: r.status,
+      meta: meta ?? undefined,
+      // TOW-5: Include quality fields only for Lead Finder runs
+      leadQualityScore: isLeadFinder && typeof meta?.leadQualityScore === "number" 
+        ? meta.leadQualityScore 
+        : null,
+      leadQualityLabel: isLeadFinder 
+        ? (meta?.leadQualityLabel as LeadQualityLabel) ?? null 
+        : null,
+      // TOW-8: Include verticalId
+      verticalId: r.vertical_id ?? null,
+    };
+  });
+}
+
+/**
+ * TOW-4: Lead Finder run payload structure
+ * TOW-5: Extended with lead quality fields
+ * TOW-8: Extended with verticalId field
+ */
+export type LeadFinderRunPayload = {
+  /** Optional run ID for idempotency/deduplication */
+  runId?: string;
+  /** Correlation ID from the event system */
+  correlationId: string;
+  /** Session ID if available */
+  sessionId?: string | null;
+  /** The search query text */
+  query?: string;
+  /** Geographic location for the search */
+  location?: string;
+  /** Business vertical/industry (used in search context) */
+  vertical?: string;
+  /** Number of leads found */
+  resultsCount?: number;
+  /** Run status */
+  status?: "completed" | "error" | "timeout";
+  /** Timestamp when the search started */
+  startedAt?: number;
+  /** Duration of the search in milliseconds */
+  durationMs?: number;
+  /** Additional metadata from the event payload */
+  meta?: Record<string, unknown>;
+  /** TOW-5: Pre-computed lead quality score (optional, computed if not provided) */
+  leadQualityScore?: number;
+  /** TOW-5: Pre-computed lead quality label (optional, computed if not provided) */
+  leadQualityLabel?: LeadQualityLabel;
+  /** TOW-8: Vertical/industry identifier for run-level tagging (e.g., "brewery", "coffee") */
+  verticalId?: string | null;
+};
+
+/**
+ * TOW-4: Creates a Lead Finder run record in the database.
+ * TOW-5: Extended to compute and store lead quality score.
+ * TOW-8: Extended to store verticalId.
+ * 
+ * This is called when a Lead Finder event is received via the /events endpoint.
+ * The run will appear in the Tower UI alongside other runs.
+ * 
+ * @param payload - Lead Finder run details
+ * @returns The created run's ID, status, lead quality, and verticalId
+ */
+export async function createLeadFinderRun(
+  payload: LeadFinderRunPayload
+): Promise<{ id: string; status: string; leadQualityScore: number; leadQualityLabel: LeadQualityLabel; verticalId: string }> {
+  // Use correlationId as the base for run ID, or generate a new one
+  const runId = payload.runId || `lf-${payload.correlationId}`;
+  
+  // Build a summary from the search parameters
+  const goalParts: string[] = [];
+  if (payload.query) goalParts.push(payload.query);
+  if (payload.location) goalParts.push(`in ${payload.location}`);
+  if (payload.vertical) goalParts.push(`(${payload.vertical})`);
+  
+  const goalSummary = goalParts.length > 0 
+    ? goalParts.join(" ")
+    : "Lead Finder search";
+
+  // Validate and parse timestamp
+  let createdAt: Date;
+  if (
+    payload.startedAt &&
+    typeof payload.startedAt === "number" &&
+    Number.isFinite(payload.startedAt)
+  ) {
+    const parsedDate = new Date(payload.startedAt);
+    createdAt = isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+  } else {
+    createdAt = new Date();
+  }
+
+  const status = payload.status ?? "completed";
+
+  // TOW-5: Compute lead quality score (use provided values or compute from payload)
+  let leadQualityScore: number;
+  let leadQualityLabel: LeadQualityLabel;
+  
+  if (payload.leadQualityScore !== undefined && payload.leadQualityLabel !== undefined) {
+    // Use pre-computed values
+    leadQualityScore = payload.leadQualityScore;
+    leadQualityLabel = payload.leadQualityLabel;
+  } else {
+    // Compute from payload
+    const qualityResult = computeLeadQualityScore({
+      query: payload.query,
+      location: payload.location,
+      vertical: payload.vertical,
+      resultsCount: payload.resultsCount,
+    });
+    leadQualityScore = qualityResult.score;
+    leadQualityLabel = qualityResult.label;
+  }
+
+  // TOW-8: Derive verticalId from payload or default to "brewery"
+  const verticalId = payload.verticalId ?? "brewery";
+
+  console.log("[TOW-4/5/8] Creating Lead Finder run", {
+    runId,
+    correlationId: payload.correlationId,
+    goalSummary,
+    status,
+    resultsCount: payload.resultsCount,
+    leadQualityScore,
+    leadQualityLabel,
+    verticalId,
+  });
+
+  await db.insert(runs).values({
+    id: runId,
+    conversation_run_id: payload.sessionId || null,
+    source: LEAD_FINDER_SOURCE,
+    user_identifier: null, // Lead Finder searches don't have user context
+    goal_summary: goalSummary,
+    status,
+    created_at: createdAt,
+    // TOW-8: Store verticalId
+    vertical_id: verticalId,
+    meta: {
+      correlationId: payload.correlationId,
+      sessionId: payload.sessionId,
+      query: payload.query,
+      location: payload.location,
+      vertical: payload.vertical,
+      resultsCount: payload.resultsCount,
+      durationMs: payload.durationMs,
+      featureId: "lead_finder",
+      // TOW-5: Store lead quality in meta for persistence
+      leadQualityScore,
+      leadQualityLabel,
+      ...payload.meta,
+    },
+  });
+
+  return { id: runId, status, leadQualityScore, leadQualityLabel, verticalId };
+}
+
+/**
+ * TOW-4: List recent Lead Finder runs
+ * TOW-5: Includes lead quality score and label
+ * TOW-8: Includes verticalId
+ * 
+ * @param limit - Maximum number of runs to return (default 20)
+ * @returns Array of Lead Finder run summaries with quality fields
+ */
+export async function listLeadFinderRuns(limit = 20): Promise<RunSummary[]> {
+  const rows = await db
+    .select()
+    .from(runs)
+    .where(eq(runs.source, LEAD_FINDER_SOURCE))
+    .orderBy(desc(runs.created_at))
+    .limit(limit);
+
+  return rows.map((r) => {
+    const meta = r.meta as Record<string, unknown> | null;
+    return {
+      id: r.id,
+      created_at: r.created_at.toISOString(),
+      source: r.source,
+      user_identifier: r.user_identifier ?? null,
+      goal_summary: r.goal_summary ?? null,
+      status: r.status,
+      meta: meta ?? undefined,
+      // TOW-5: Extract quality fields from meta
+      leadQualityScore: typeof meta?.leadQualityScore === "number" ? meta.leadQualityScore : null,
+      leadQualityLabel: (meta?.leadQualityLabel as LeadQualityLabel) ?? null,
+      // TOW-8: Include verticalId
+      verticalId: r.vertical_id ?? null,
+    };
+  });
+}
+
+/**
+ * TOW-7: Subconscious run summary with nudge metadata
+ * TOW-8: Inherits verticalId from RunSummary
+ */
+export type SubconsciousRunSummary = RunSummary & {
+  /** Trigger that caused this run */
+  trigger?: string | null;
+  /** Total number of nudges processed */
+  totalNudges?: number | null;
+  /** Count of high importance nudges */
+  highImportanceCount?: number | null;
+  /** Count of medium importance nudges */
+  mediumImportanceCount?: number | null;
+  /** Count of low importance nudges */
+  lowImportanceCount?: number | null;
+};
+
+/**
+ * TOW-7: List recent Subconscious runs
+ * TOW-8: Includes verticalId
+ * 
+ * @param limit - Maximum number of runs to return (default 20)
+ * @returns Array of Subconscious run summaries with nudge metadata
+ */
+export async function listSubconsciousRuns(limit = 20): Promise<SubconsciousRunSummary[]> {
+  const rows = await db
+    .select()
+    .from(runs)
+    .where(eq(runs.source, SUBCONSCIOUS_SOURCE))
+    .orderBy(desc(runs.created_at))
+    .limit(limit);
+
+  return rows.map((r) => {
+    const meta = r.meta as Record<string, unknown> | null;
+    return {
+      id: r.id,
+      created_at: r.created_at.toISOString(),
+      source: r.source,
+      user_identifier: r.user_identifier ?? null,
+      goal_summary: r.goal_summary ?? null,
+      status: r.status,
+      meta: meta ?? undefined,
+      // TOW-7: Extract subconscious-specific fields from meta
+      trigger: (meta?.trigger as string) ?? null,
+      totalNudges: typeof meta?.totalNudges === "number" ? meta.totalNudges : null,
+      highImportanceCount: typeof meta?.highImportanceCount === "number" ? meta.highImportanceCount : null,
+      mediumImportanceCount: typeof meta?.mediumImportanceCount === "number" ? meta.mediumImportanceCount : null,
+      lowImportanceCount: typeof meta?.lowImportanceCount === "number" ? meta.lowImportanceCount : null,
+      // Subconscious runs don't have lead quality
+      leadQualityScore: null,
+      leadQualityLabel: null,
+      // TOW-8: Include verticalId
+      verticalId: r.vertical_id ?? null,
+    };
+  });
 }

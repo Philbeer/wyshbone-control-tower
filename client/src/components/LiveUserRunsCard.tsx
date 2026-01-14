@@ -10,7 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useEvaluator } from "@/contexts/EvaluatorContext";
 import { createInvestigationFromLiveRun } from "@/api/liveUserRuns";
 import { queryClient } from "@/lib/queryClient";
-import type { RunSummary } from "../../../src/evaluator/runStore";
+import type { RunSummary } from "@/lib/evaluatorApi";
 import { formatDistanceToNow } from "date-fns";
 
 export function LiveUserRunsCard() {
@@ -120,6 +120,9 @@ export function LiveUserRunsCard() {
               const outputText = run.meta?.responseText || 'No response';
               const durationMs = run.meta?.durationMs;
               const sessionId = run.meta?.sessionId;
+              // Support both snake_case (from server) and camelCase (from client type)
+              const createdAtStr = (run as any).created_at || run.createdAt;
+              const userIdent = (run as any).user_identifier || run.userIdentifier;
 
               return (
                 <div
@@ -132,7 +135,7 @@ export function LiveUserRunsCard() {
                     <div className="flex items-center gap-2 flex-wrap">
                       {getStatusBadge(run.status)}
                       <span className="text-xs text-muted-foreground" data-testid={`run-time-${run.id}`}>
-                        {formatDistanceToNow(new Date(run.createdAt), { addSuffix: true })}
+                        {formatDistanceToNow(new Date(createdAtStr), { addSuffix: true })}
                       </span>
                       {durationMs && (
                         <span className="text-xs text-muted-foreground" data-testid={`run-duration-${run.id}`}>
@@ -156,9 +159,9 @@ export function LiveUserRunsCard() {
                   </div>
                   
                   <div className="space-y-1">
-                    {run.userIdentifier && (
+                    {userIdent && (
                       <p className="text-xs text-muted-foreground" data-testid={`run-user-${run.id}`}>
-                        User: {run.userIdentifier}
+                        User: {userIdent}
                       </p>
                     )}
                     {sessionId && (
@@ -189,7 +192,13 @@ export function LiveUserRunsCard() {
             </DialogDescription>
           </DialogHeader>
 
-          {selectedRun && (
+          {selectedRun && (() => {
+            // Support both snake_case (from server) and camelCase (from client type)
+            const selectedCreatedAt = (selectedRun as any).created_at || selectedRun.createdAt;
+            const selectedUserIdent = (selectedRun as any).user_identifier || selectedRun.userIdentifier;
+            const selectedGoalSummary = (selectedRun as any).goal_summary || selectedRun.goalSummary;
+            
+            return (
             <div className="space-y-4">
               <div>
                 <h4 className="font-semibold mb-2">Metadata</h4>
@@ -205,7 +214,7 @@ export function LiveUserRunsCard() {
                   <div>
                     <span className="text-muted-foreground">Created:</span>
                     <p data-testid="detail-created">
-                      {new Date(selectedRun.createdAt).toLocaleString()}
+                      {new Date(selectedCreatedAt).toLocaleString()}
                     </p>
                   </div>
                   <div>
@@ -214,10 +223,10 @@ export function LiveUserRunsCard() {
                       {selectedRun.meta?.durationMs ? `${selectedRun.meta.durationMs}ms` : 'N/A'}
                     </p>
                   </div>
-                  {selectedRun.userIdentifier && (
+                  {selectedUserIdent && (
                     <div>
                       <span className="text-muted-foreground">User:</span>
-                      <p data-testid="detail-user">{selectedRun.userIdentifier}</p>
+                      <p data-testid="detail-user">{selectedUserIdent}</p>
                     </div>
                   )}
                   {selectedRun.meta?.sessionId && (
@@ -235,7 +244,7 @@ export function LiveUserRunsCard() {
                 <h4 className="font-semibold mb-2">User Input</h4>
                 <div className="bg-muted p-3 rounded-md">
                   <p className="text-sm whitespace-pre-wrap" data-testid="detail-input-text">
-                    {selectedRun.meta?.requestText || selectedRun.goalSummary || 'No input'}
+                    {selectedRun.meta?.requestText || selectedGoalSummary || 'No input'}
                   </p>
                 </div>
               </div>
@@ -267,7 +276,8 @@ export function LiveUserRunsCard() {
                 </div>
               )}
             </div>
-          )}
+            );
+          })()}
 
           <DialogFooter>
             <Button
