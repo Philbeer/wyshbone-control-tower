@@ -1,15 +1,15 @@
-modules = ["nodejs-20", "web", "postgresql-16"]
+modules = ["nodejs-20", "python-3.12", "bash", "web"]
 run = "npm run dev"
 hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
 
 [nix]
-channel = "stable-24_05"
+channel = "stable-25_05"
 packages = ["wget"]
 
 [deployment]
 deploymentTarget = "autoscale"
 build = ["npm", "run", "build"]
-run = ["npm", "run", "start"]
+run = ["node", "./dist/index.cjs"]
 
 [[ports]]
 localPort = 3000
@@ -22,34 +22,6 @@ externalPort = 80
 [[ports]]
 localPort = 8080
 externalPort = 8080
-
-[[ports]]
-localPort = 34333
-externalPort = 6800
-
-[[ports]]
-localPort = 34573
-externalPort = 4200
-
-[[ports]]
-localPort = 35549
-externalPort = 3002
-
-[[ports]]
-localPort = 39635
-externalPort = 5000
-
-[[ports]]
-localPort = 39947
-externalPort = 3003
-
-[[ports]]
-localPort = 42119
-externalPort = 3001
-
-[[ports]]
-localPort = 44389
-externalPort = 5173
 
 [env]
 PORT = "5000"

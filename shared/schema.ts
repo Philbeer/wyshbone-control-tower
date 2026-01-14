@@ -196,15 +196,15 @@ export type InsertDevIssuePatch = z.infer<typeof insertDevIssuePatchSchema>;
 export type DevIssuePatch = typeof devIssuePatches.$inferSelect;
 
 // Strategy Evaluator - Phase 3: Add Intelligence
-export const strategies = pgTable("strategies", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+export const strategies = sqliteTable("strategies", {
+  id: text("id").primaryKey().$defaultFn(genId),
   name: text("name").notNull().unique(),
   description: text("description").notNull(),
   category: text("category").notNull(),
-  config: jsonb("config").$type<Record<string, any>>().notNull(),
+  config: text("config", { mode: "json" }).$type<Record<string, any>>().notNull(),
   isActive: text("is_active").notNull().default("true"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
 export const insertStrategySchema = createInsertSchema(strategies);
@@ -214,13 +214,13 @@ export type Strategy = Omit<StrategyRow, 'isActive'> & {
   isActive: boolean;
 };
 
-export const strategyPerformance = pgTable("strategy_performance", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  strategyId: varchar("strategy_id").notNull(),
-  executedAt: timestamp("executed_at").notNull().defaultNow(),
+export const strategyPerformance = sqliteTable("strategy_performance", {
+  id: text("id").primaryKey().$defaultFn(genId),
+  strategyId: text("strategy_id").notNull(),
+  executedAt: integer("executed_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   context: text("context").notNull(),
-  runId: varchar("run_id"),
-  metrics: jsonb("metrics").$type<{
+  runId: text("run_id"),
+  metrics: text("metrics", { mode: "json" }).$type<{
     successRate?: number;
     avgDuration?: number;
     errorCount?: number;
@@ -229,29 +229,29 @@ export const strategyPerformance = pgTable("strategy_performance", {
     [key: string]: any;
   }>().notNull(),
   outcome: text("outcome").notNull(),
-  meta: jsonb("meta").$type<Record<string, any>>(),
+  meta: text("meta", { mode: "json" }).$type<Record<string, any>>(),
 });
 
 export const insertStrategyPerformanceSchema = createInsertSchema(strategyPerformance);
 export type InsertStrategyPerformance = z.infer<typeof insertStrategyPerformanceSchema>;
 export type StrategyPerformance = typeof strategyPerformance.$inferSelect;
 
-export const abTests = pgTable("ab_tests", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+export const abTests = sqliteTable("ab_tests", {
+  id: text("id").primaryKey().$defaultFn(genId),
   name: text("name").notNull().unique(),
   description: text("description").notNull(),
-  strategyAId: varchar("strategy_a_id").notNull(),
-  strategyBId: varchar("strategy_b_id").notNull(),
+  strategyAId: text("strategy_a_id").notNull(),
+  strategyBId: text("strategy_b_id").notNull(),
   status: text("status").notNull().default("active"),
-  startedAt: timestamp("started_at").notNull().defaultNow(),
-  endedAt: timestamp("ended_at"),
-  config: jsonb("config").$type<{
+  startedAt: integer("started_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  endedAt: integer("ended_at", { mode: "timestamp" }),
+  config: text("config", { mode: "json" }).$type<{
     trafficSplit?: number;
     minSampleSize?: number;
     maxDurationDays?: number;
     [key: string]: any;
-  }>().default({}),
-  results: jsonb("results").$type<{
+  }>(),
+  results: text("results", { mode: "json" }).$type<{
     strategyAMetrics?: any;
     strategyBMetrics?: any;
     winner?: string;
@@ -259,20 +259,20 @@ export const abTests = pgTable("ab_tests", {
     recommendation?: string;
     [key: string]: any;
   }>(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
 export const insertAbTestSchema = createInsertSchema(abTests);
 export type InsertAbTest = z.infer<typeof insertAbTestSchema>;
 export type AbTest = typeof abTests.$inferSelect;
 
-export const abTestResults = pgTable("ab_test_results", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  testId: varchar("test_id").notNull(),
-  strategyId: varchar("strategy_id").notNull(),
+export const abTestResults = sqliteTable("ab_test_results", {
+  id: text("id").primaryKey().$defaultFn(genId),
+  testId: text("test_id").notNull(),
+  strategyId: text("strategy_id").notNull(),
   variant: text("variant").notNull(),
-  executedAt: timestamp("executed_at").notNull().defaultNow(),
-  metrics: jsonb("metrics").$type<{
+  executedAt: integer("executed_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  metrics: text("metrics", { mode: "json" }).$type<{
     successRate?: number;
     avgDuration?: number;
     errorCount?: number;
@@ -287,51 +287,51 @@ export type InsertAbTestResult = z.infer<typeof insertAbTestResultSchema>;
 export type AbTestResult = typeof abTestResults.$inferSelect;
 
 // Failure Categorization - Phase 3: Add Intelligence
-export const failureCategories = pgTable("failure_categories", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+export const failureCategories = sqliteTable("failure_categories", {
+  id: text("id").primaryKey().$defaultFn(genId),
   name: text("name").notNull().unique(),
   description: text("description").notNull(),
-  keywords: jsonb("keywords").$type<string[]>().notNull(),
-  patterns: jsonb("patterns").$type<string[]>().notNull(),
+  keywords: text("keywords", { mode: "json" }).$type<string[]>().notNull(),
+  patterns: text("patterns", { mode: "json" }).$type<string[]>().notNull(),
   recommendationTemplate: text("recommendation_template").notNull(),
   severity: text("severity").notNull().default("medium"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
 export const insertFailureCategorySchema = createInsertSchema(failureCategories);
 export type InsertFailureCategory = z.infer<typeof insertFailureCategorySchema>;
 export type FailureCategory = typeof failureCategories.$inferSelect;
 
-export const categorizedFailures = pgTable("categorized_failures", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  categoryId: varchar("category_id").notNull(),
-  runId: varchar("run_id"),
-  investigationId: varchar("investigation_id"),
+export const categorizedFailures = sqliteTable("categorized_failures", {
+  id: text("id").primaryKey().$defaultFn(genId),
+  categoryId: text("category_id").notNull(),
+  runId: text("run_id"),
+  investigationId: text("investigation_id"),
   errorMessage: text("error_message").notNull(),
   errorStack: text("error_stack"),
-  context: jsonb("context").$type<Record<string, any>>(),
+  context: text("context", { mode: "json" }).$type<Record<string, any>>(),
   confidence: text("confidence").notNull(),
-  detectedAt: timestamp("detected_at").notNull().defaultNow(),
+  detectedAt: integer("detected_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   resolution: text("resolution"),
-  resolvedAt: timestamp("resolved_at"),
-  meta: jsonb("meta").$type<Record<string, any>>(),
+  resolvedAt: integer("resolved_at", { mode: "timestamp" }),
+  meta: text("meta", { mode: "json" }).$type<Record<string, any>>(),
 });
 
 export const insertCategorizedFailureSchema = createInsertSchema(categorizedFailures);
 export type InsertCategorizedFailure = z.infer<typeof insertCategorizedFailureSchema>;
 export type CategorizedFailure = typeof categorizedFailures.$inferSelect;
 
-export const failurePatterns = pgTable("failure_patterns", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+export const failurePatterns = sqliteTable("failure_patterns", {
+  id: text("id").primaryKey().$defaultFn(genId),
   name: text("name").notNull(),
   description: text("description").notNull(),
-  categoryId: varchar("category_id").notNull(),
+  categoryId: text("category_id").notNull(),
   occurrences: text("occurrences").notNull().default("1"),
-  firstSeenAt: timestamp("first_seen_at").notNull().defaultNow(),
-  lastSeenAt: timestamp("last_seen_at").notNull().defaultNow(),
+  firstSeenAt: integer("first_seen_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  lastSeenAt: integer("last_seen_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   frequency: text("frequency").notNull().default("low"),
-  relatedFailures: jsonb("related_failures").$type<string[]>().default([]),
+  relatedFailures: text("related_failures", { mode: "json" }).$type<string[]>(),
   recommendation: text("recommendation"),
   status: text("status").notNull().default("active"),
 });
@@ -343,21 +343,21 @@ export type FailurePattern = Omit<FailurePatternRow, 'occurrences'> & {
   occurrences: number;
 };
 
-export const failureMemory = pgTable("failure_memory", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  categoryId: varchar("category_id").notNull(),
-  patternId: varchar("pattern_id"),
+export const failureMemory = sqliteTable("failure_memory", {
+  id: text("id").primaryKey().$defaultFn(genId),
+  categoryId: text("category_id").notNull(),
+  patternId: text("pattern_id"),
   solution: text("solution").notNull(),
   successRate: text("success_rate").notNull(),
   timesApplied: text("times_applied").notNull().default("0"),
-  lastAppliedAt: timestamp("last_applied_at"),
-  metadata: jsonb("metadata").$type<{
+  lastAppliedAt: integer("last_applied_at", { mode: "timestamp" }),
+  metadata: text("metadata", { mode: "json" }).$type<{
     avgResolutionTime?: number;
     applicableContexts?: string[];
     prerequisites?: string[];
     [key: string]: any;
   }>(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
 export const insertFailureMemorySchema = createInsertSchema(failureMemory);

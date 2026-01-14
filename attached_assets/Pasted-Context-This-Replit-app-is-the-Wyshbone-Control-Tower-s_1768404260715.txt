@@ -1,0 +1,60 @@
+Context:
+This Replit app is the Wyshbone Control Tower service.
+It is being migrated back into Replit as a standalone app.
+
+Architecture context (important):
+- Wyshbone consists of separate services: UI, Supervisor, and Control Tower.
+- UI and Supervisor are already running in Replit.
+- This app (Control Tower) is NOT user-facing; it is an internal orchestration/evaluation service.
+- Control Tower will be called by Supervisor via API, not directly by the UI.
+
+Branch / source of truth:
+- The repository default branch (main) has just been updated by merging the feature branch
+  `tow-8-vertical-id-logging`.
+- main is now the correct, deployable version of Control Tower.
+- Do NOT check out or switch branches.
+
+Critical constraints:
+- Do NOT create a new Supabase project.
+- Do NOT change databases.
+- Supabase is the single source of data.
+- Backend-only Supabase access is used (service role / DATABASE_URL).
+- No frontend anon keys, no VITE keys.
+
+What we are trying to achieve:
+- Get Control Tower running cleanly in Replit.
+- Confirm it binds to the correct PORT and HOST.
+- Confirm it can connect to the existing Supabase database.
+- Do NOT run migrations unless explicitly told to.
+- Do NOT refactor logic or change architecture.
+
+Your tasks (in order):
+1) Install dependencies and start the server using the existing run/start command.
+2) Print which environment variables are present (NAMES ONLY, no secrets):
+   - SUPABASE_URL
+   - SUPABASE_SERVICE_ROLE_KEY
+   - DATABASE_URL
+   - PORT
+   - HOST
+   - NODE_ENV
+3) Confirm which database connection path the app is using
+   (DATABASE_URL vs Supabase client).
+4) Verify basic health:
+   - Server starts
+   - Listens on the assigned Replit PORT
+   - No crash loops
+5) Ensure CORS is NOT overly permissive.
+   - Only allow known internal services / localhost / Replit dev origin if needed.
+6) Output a short runbook:
+   - How this service is started
+   - What env vars it requires
+   - Which endpoint can be used as a health check
+
+Do NOT:
+- create tables
+- run migrations
+- introduce anon auth
+- widen CORS to '*'
+- restructure files
+
+If anything looks wrong, STOP and report instead of “fixing”.
