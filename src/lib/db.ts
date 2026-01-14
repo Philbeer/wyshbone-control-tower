@@ -1,10 +1,16 @@
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/node-postgres";
+import pg from "pg";
 import * as schema from "../../shared/schema";
 
-const dbPath = process.env.DATABASE_PATH || "./tower-dev.db";
+const databaseUrl = process.env.SUPABASE_DATABASE_URL;
 
-const sqlite = new Database(dbPath);
-sqlite.pragma("journal_mode = WAL");
+if (!databaseUrl) {
+  throw new Error("SUPABASE_DATABASE_URL environment variable is required");
+}
 
-export const db = drizzle(sqlite, { schema });
+const pool = new pg.Pool({
+  connectionString: databaseUrl,
+  ssl: { rejectUnauthorized: false },
+});
+
+export const db = drizzle(pool, { schema });
