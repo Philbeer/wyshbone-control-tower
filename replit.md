@@ -109,6 +109,16 @@ API Routes:
 *   POST /api/dev/issues/:id/suggest-patch - Generate AI patch suggestions using OpenAI
 *   GET /api/dev/issues/:id/patches - Get all patches for an issue
 
+**Judgement API (Session 3):**
+
+A deterministic evaluation endpoint that returns a verdict based on a run snapshot and success criteria:
+
+*   **Endpoint:** `POST /api/tower/evaluate`
+*   **Request:** `run_id`, `mission_type`, `success` (targets/limits), `snapshot` (current counters)
+*   **Response:** `verdict` (CONTINUE/STOP/CHANGE_STRATEGY), `reason_code`, `explanation`, optional `strategy`, `evaluated_at`
+*   **Evaluation priority order:** SUCCESS_ACHIEVED > COST_EXCEEDED > CPL_EXCEEDED > FAILURES_EXCEEDED > STALL_DETECTED > CONTINUE
+*   **Files:** `shared/schema.ts` (Zod schemas), `src/evaluator/judgement.ts` (logic), `server/routes-judgement.ts` (route), `tests/judgement.test.ts` (9 unit tests)
+
 ## External Dependencies
 
 *   **Node.js:** Runtime environment.
