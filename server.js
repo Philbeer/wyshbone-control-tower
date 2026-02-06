@@ -1658,6 +1658,11 @@ async function start() {
     app.use('/', eventsRoutesModule.default);
     console.log('✓ Event intake endpoint loaded (POST /events)');
     
+    // Session 3: Load judgement API route
+    const judgementRoutesModule = await import('./server/routes-judgement.ts');
+    app.use('/api/tower', judgementRoutesModule.default);
+    console.log('✓ Judgement API loaded (POST /api/tower/evaluate)');
+    
     // Ensure behaviour test definitions are seeded
     await ensureBehaviourTestsSeeded();
     

@@ -357,3 +357,59 @@ export type FailureMemory = Omit<FailureMemoryRow, 'successRate' | 'timesApplied
   successRate: number;
   timesApplied: number;
 };
+
+export const judgementVerdictEnum = z.enum(["CONTINUE", "STOP", "CHANGE_STRATEGY"]);
+export type JudgementVerdict = z.infer<typeof judgementVerdictEnum>;
+
+export const judgementReasonCodeEnum = z.enum([
+  "SUCCESS_ACHIEVED",
+  "COST_EXCEEDED",
+  "CPL_EXCEEDED",
+  "FAILURES_EXCEEDED",
+  "STALL_DETECTED",
+  "RUNNING",
+]);
+export type JudgementReasonCode = z.infer<typeof judgementReasonCodeEnum>;
+
+export const judgementSuccessSchema = z.object({
+  target_leads: z.number().int().min(0),
+  max_cost_gbp: z.number().min(0),
+  max_cost_per_lead_gbp: z.number().min(0),
+  min_quality_score: z.number().min(0).max(1),
+  max_steps: z.number().int().min(1),
+  max_failures: z.number().int().min(0).default(10),
+  stall_window_steps: z.number().int().min(1),
+  stall_min_delta_leads: z.number().int().min(0),
+});
+export type JudgementSuccess = z.infer<typeof judgementSuccessSchema>;
+
+export const judgementSnapshotSchema = z.object({
+  steps_completed: z.number().int().min(0),
+  leads_found: z.number().int().min(0),
+  leads_new_last_window: z.number().int().min(0),
+  failures_count: z.number().int().min(0),
+  total_cost_gbp: z.number().min(0),
+  avg_quality_score: z.number().min(0).max(1),
+  last_error_code: z.string().optional(),
+});
+export type JudgementSnapshot = z.infer<typeof judgementSnapshotSchema>;
+
+export const judgementRequestSchema = z.object({
+  run_id: z.string().min(1),
+  mission_type: z.string().min(1),
+  success: judgementSuccessSchema,
+  snapshot: judgementSnapshotSchema,
+});
+export type JudgementRequest = z.infer<typeof judgementRequestSchema>;
+
+export const judgementResponseSchema = z.object({
+  verdict: judgementVerdictEnum,
+  reason_code: judgementReasonCodeEnum,
+  explanation: z.string(),
+  strategy: z.object({
+    suggested_action: z.string(),
+    parameters: z.record(z.any()).optional(),
+  }).optional(),
+  evaluated_at: z.string(),
+});
+export type JudgementResponse = z.infer<typeof judgementResponseSchema>;
