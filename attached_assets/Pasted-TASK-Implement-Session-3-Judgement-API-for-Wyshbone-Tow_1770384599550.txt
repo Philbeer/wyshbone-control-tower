@@ -1,0 +1,63 @@
+TASK: Implement Session 3 “Judgement API” for Wyshbone Tower (minimum real agent loop).
+
+Goal: Tower provides an evaluation endpoint that returns a verdict (CONTINUE / STOP / CHANGE_STRATEGY) based on a run snapshot + success definition. This is NOT UI narrative; it must be deterministic and grounded in input metrics.
+
+Requirements:
+
+Add an HTTP endpoint: POST /api/tower/evaluate (or match Tower’s existing routing conventions).
+
+Request JSON must include:
+
+run_id (string)
+
+mission_type (string, e.g. "leadgen")
+
+success object (targets + limits: target_leads, max_cost_gbp, max_cost_per_lead_gbp, min_quality_score, max_steps, stall_window_steps, stall_min_delta_leads)
+
+snapshot object (current counters: steps_completed, leads_found, leads_new_last_window, failures_count, total_cost_gbp, avg_quality_score, last_error_code optional)
+
+Response JSON must include:
+
+verdict enum: CONTINUE | STOP | CHANGE_STRATEGY
+
+reason_code (short enum string, e.g. COST_EXCEEDED, CPL_EXCEEDED, STALL_DETECTED, SUCCESS_ACHIEVED, FAILURES_EXCEEDED)
+
+explanation (1–3 sentences max, numbers included)
+
+optional strategy object only when verdict is CHANGE_STRATEGY (can be stubbed / minimal)
+
+evaluated_at ISO timestamp
+
+Implement evaluation logic in priority order:
+
+If success achieved (leads_found >= target and avg_quality >= min_quality and cost within limits): STOP with SUCCESS_ACHIEVED
+
+If cost exceeded: STOP with COST_EXCEEDED
+
+If cost/lead exceeded (when leads_found>0): STOP with CPL_EXCEEDED
+
+If failures_count exceeded threshold (add to success schema, e.g. max_failures): STOP with FAILURES_EXCEEDED
+
+If stall detected (leads_new_last_window < stall_min_delta_leads): STOP with STALL_DETECTED
+
+Else CONTINUE
+
+Keep it production-safe:
+
+Validate inputs, return 400 with helpful message.
+
+No secrets in logs.
+
+Deterministic output for same input.
+
+Deliverables:
+
+Full code changes committed.
+
+Include/update any shared types file(s) if Tower uses them.
+
+Add a minimal unit test (or a lightweight test script) for at least 3 cases: SUCCESS_ACHIEVED, COST_EXCEEDED, STALL_DETECTED.
+
+IMPORTANT: Rewrite full files when editing; don’t give partial diffs.
+
+Output: implement the endpoint, logic, tests, and ensure it runs locally.
