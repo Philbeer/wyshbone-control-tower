@@ -1663,6 +1663,11 @@ async function start() {
     app.use('/api/tower', judgementRoutesModule.default);
     console.log('✓ Judgement API loaded (POST /api/tower/evaluate)');
     
+    // Artefact judgement endpoint (called by Supervisor after artefact creation)
+    const judgeArtefactRoutesModule = await import('./server/routes-judge-artefact.ts');
+    app.use('/api/tower', judgeArtefactRoutesModule.default);
+    console.log('✓ Artefact judgement API loaded (POST /api/tower/judge-artefact)');
+    
     // Ensure behaviour test definitions are seeded
     await ensureBehaviourTestsSeeded();
     

@@ -119,6 +119,21 @@ A deterministic evaluation endpoint that returns a verdict based on a run snapsh
 *   **Evaluation priority order:** SUCCESS_ACHIEVED > COST_EXCEEDED > CPL_EXCEEDED > FAILURES_EXCEEDED > STALL_DETECTED > CONTINUE
 *   **Files:** `shared/schema.ts` (Zod schemas), `src/evaluator/judgement.ts` (logic), `server/routes-judgement.ts` (route), `tests/judgement.test.ts` (9 unit tests)
 
+**Artefact Judgement API:**
+
+Tower judges artefacts, not tools. After Supervisor creates artefacts (e.g. `step_result`, `plan_result`) in Supabase, it calls Tower to judge whether to continue or stop a run.
+
+*   **Endpoint:** `POST /api/tower/judge-artefact`
+*   **Request:** `runId`, `artefactId`, `goal`, optional `successCriteria`, `artefactType`
+*   **How it works:** Tower reads the artefact row directly from the Supabase `artefacts` table (by `artefactId`), inspects `payload_json.step_status`, and returns a deterministic verdict.
+*   **Judgement rules (v1):**
+    *   If `payload_json.step_status == "fail"` → verdict=`fail`, action=`stop`
+    *   Otherwise → verdict=`pass`, action=`continue`
+*   **Safety:** If the artefact is not found or the Supabase query fails, Tower returns verdict=`fail`, action=`stop`.
+*   **Response:** `{ verdict, action, reasons[], metrics{} }`
+*   **File:** `server/routes-judge-artefact.ts`
+*   **Key principle:** This endpoint is generic — no lead-specific or plan-specific logic. Works for any artefact type.
+
 ## Database Rules
 
 Tower reads and writes **only** to the Supabase-hosted Postgres database, accessed via the `SUPABASE_DATABASE_URL` secret. The following rules are enforced at startup in `src/lib/db.ts`:
