@@ -358,6 +358,25 @@ export type FailureMemory = Omit<FailureMemoryRow, 'successRate' | 'timesApplied
   timesApplied: number;
 };
 
+export const judgementEvaluations = pgTable("judgement_evaluations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  run_id: text("run_id").notNull(),
+  mission_type: text("mission_type").notNull(),
+  verdict: text("verdict").notNull(),
+  reason_code: text("reason_code").notNull(),
+  explanation: text("explanation").notNull(),
+  success_criteria: jsonb("success_criteria").notNull(),
+  snapshot: jsonb("snapshot").notNull(),
+  strategy: jsonb("strategy"),
+  evaluated_at: timestamp("evaluated_at").notNull().defaultNow(),
+});
+
+export const insertJudgementEvaluationSchema = createInsertSchema(judgementEvaluations).omit({
+  id: true,
+});
+export type InsertJudgementEvaluation = z.infer<typeof insertJudgementEvaluationSchema>;
+export type JudgementEvaluation = typeof judgementEvaluations.$inferSelect;
+
 export const judgementVerdictEnum = z.enum(["CONTINUE", "STOP", "CHANGE_STRATEGY"]);
 export type JudgementVerdict = z.infer<typeof judgementVerdictEnum>;
 

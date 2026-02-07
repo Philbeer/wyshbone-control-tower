@@ -204,7 +204,7 @@ async function testRunsEndpoint(): Promise<void> {
       addResult('Runs API (GET /tower/runs)', true, undefined, `Runs: ${Array.isArray(data) ? data.length : 0}`);
     } else if (response.status === 500) {
       // 500 usually means DB not configured - this is expected in some environments
-      addResult('Runs API (GET /tower/runs)', true, undefined, 'DB not configured (expected without DATABASE_URL)', true);
+      addResult('Runs API (GET /tower/runs)', true, undefined, 'DB not configured (expected without SUPABASE_DATABASE_URL)', true);
     } else {
       addResult('Runs API (GET /tower/runs)', false, `HTTP ${response.status}`);
     }
@@ -221,7 +221,7 @@ async function testBehaviourTests(): Promise<void> {
       addResult('Behaviour tests (GET /tower/behaviour-tests)', true, undefined, `Tests: ${Array.isArray(data) ? data.length : 0}`);
     } else if (response.status === 500) {
       // 500 usually means DB not configured
-      addResult('Behaviour tests (GET /tower/behaviour-tests)', true, undefined, 'DB not configured (expected without DATABASE_URL)', true);
+      addResult('Behaviour tests (GET /tower/behaviour-tests)', true, undefined, 'DB not configured (expected without SUPABASE_DATABASE_URL)', true);
     } else {
       addResult('Behaviour tests (GET /tower/behaviour-tests)', false, `HTTP ${response.status}`);
     }
@@ -256,7 +256,7 @@ async function testEventIngestion(): Promise<void> {
       addResult('Event ingestion (POST /tower/runs/log)', true, undefined, `Run ID: ${result.id || 'created'}`);
     } else if (response.status === 500) {
       // 500 usually means DB not configured
-      addResult('Event ingestion (POST /tower/runs/log)', true, undefined, 'DB not configured (expected without DATABASE_URL)', true);
+      addResult('Event ingestion (POST /tower/runs/log)', true, undefined, 'DB not configured (expected without SUPABASE_DATABASE_URL)', true);
     } else {
       const errorText = await response.text();
       addResult('Event ingestion (POST /tower/runs/log)', false, `HTTP ${response.status}: ${errorText.slice(0, 100)}`);
@@ -351,7 +351,7 @@ async function main() {
     log(`\n${GREEN}${BOLD}✅ SMOKE TEST PASSED${RESET}`);
     if (warnings > 0) {
       log(`${YELLOW}Note: ${warnings} test(s) passed with warnings (DB not configured).${RESET}`);
-      log(`${YELLOW}For full functionality, set DATABASE_URL environment variable.${RESET}`);
+      log(`${YELLOW}For full functionality, set SUPABASE_DATABASE_URL environment variable.${RESET}`);
     }
     log(`${GREEN}Tower is ready.${RESET}\n`);
     process.exit(0);

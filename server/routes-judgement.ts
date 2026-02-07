@@ -1,10 +1,11 @@
 import express from "express";
-import { judgementRequestSchema } from "../shared/schema";
+import { judgementRequestSchema, judgementEvaluations } from "../shared/schema";
 import { evaluate } from "../src/evaluator/judgement";
+import { db } from "../src/lib/db";
 
 const router = express.Router();
 
-router.post("/evaluate", (req, res) => {
+router.post("/evaluate", async (req, res) => {
   try {
     const parsed = judgementRequestSchema.safeParse(req.body);
 
@@ -20,8 +21,24 @@ router.post("/evaluate", (req, res) => {
       return;
     }
 
-    const { success, snapshot } = parsed.data;
+    const { run_id, mission_type, success, snapshot } = parsed.data;
     const result = evaluate(success, snapshot);
+
+    try {
+      await db.insert(judgementEvaluations).values({
+        run_id,
+        mission_type,
+        verdict: result.verdict,
+        reason_code: result.reason_code,
+        explanation: result.explanation,
+        success_criteria: success,
+        snapshot,
+        strategy: result.strategy ?? null,
+        evaluated_at: new Date(result.evaluated_at),
+      });
+    } catch (dbErr) {
+      console.warn("Failed to persist judgement evaluation:", dbErr instanceof Error ? dbErr.message : dbErr);
+    }
 
     res.json(result);
   } catch (err) {
