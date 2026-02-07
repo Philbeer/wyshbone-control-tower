@@ -128,6 +128,9 @@ Tower judges artefacts, not tools. After Supervisor creates artefacts (e.g. `ste
 *   **How it works:** Tower reads the artefact row directly from the Supabase `artefacts` table (by `artefactId`), inspects `payload_json.step_status`, and returns a deterministic verdict.
 *   **Judgement rules (v1):**
     *   If `payload_json.step_status == "fail"` → verdict=`fail`, action=`stop`
+    *   Else if `step_type == "SEARCH_PLACES"` and `metrics.places_found == 0` → verdict=`fail`, action=`stop`
+    *   Else if `step_type == "ENRICH_LEADS"` and `metrics.leads_enriched == 0` → verdict=`fail`, action=`stop`
+    *   Else if `step_type == "SCORE_LEADS"` and `metrics.leads_scored == 0` → verdict=`fail`, action=`stop`
     *   Otherwise → verdict=`pass`, action=`continue`
 *   **Safety:** If the artefact is not found or the Supabase query fails, Tower returns verdict=`fail`, action=`stop`.
 *   **Response:** `{ verdict, action, reasons[], metrics{} }`

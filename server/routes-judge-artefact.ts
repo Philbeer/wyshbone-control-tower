@@ -75,6 +75,8 @@ router.post("/judge-artefact", async (req, res) => {
     }
 
     const stepStatus = payloadJson?.step_status;
+    const stepType = payloadJson?.step_type as string | undefined;
+    const metrics = payloadJson?.metrics as Record<string, unknown> | undefined;
 
     let verdict: "pass" | "fail";
     let action: "continue" | "stop" | "retry" | "change_plan";
@@ -84,6 +86,18 @@ router.post("/judge-artefact", async (req, res) => {
       verdict = "fail";
       action = "stop";
       reasons.push(`Artefact step_status is "fail"`);
+    } else if (stepType === "SEARCH_PLACES" && metrics?.places_found === 0) {
+      verdict = "fail";
+      action = "stop";
+      reasons.push(`SEARCH_PLACES returned 0 places_found`);
+    } else if (stepType === "ENRICH_LEADS" && metrics?.leads_enriched === 0) {
+      verdict = "fail";
+      action = "stop";
+      reasons.push(`ENRICH_LEADS returned 0 leads_enriched`);
+    } else if (stepType === "SCORE_LEADS" && metrics?.leads_scored === 0) {
+      verdict = "fail";
+      action = "stop";
+      reasons.push(`SCORE_LEADS returned 0 leads_scored`);
     } else {
       verdict = "pass";
       action = "continue";
