@@ -119,6 +119,16 @@ A deterministic evaluation endpoint that returns a verdict based on a run snapsh
 *   **Evaluation priority order:** SUCCESS_ACHIEVED > COST_EXCEEDED > CPL_EXCEEDED > FAILURES_EXCEEDED > STALL_DETECTED > CONTINUE
 *   **Files:** `shared/schema.ts` (Zod schemas), `src/evaluator/judgement.ts` (logic), `server/routes-judgement.ts` (route), `tests/judgement.test.ts` (9 unit tests)
 
+## Database Rules
+
+Tower reads and writes **only** to the Supabase-hosted Postgres database, accessed via the `SUPABASE_DATABASE_URL` secret. The following rules are enforced at startup in `src/lib/db.ts`:
+
+- **SUPABASE_DATABASE_URL is required.** If the variable is missing, Tower refuses to start.
+- **Replit Postgres is blocked.** If the connection string points to a Replit-managed host (helium, replit), Tower refuses to start.
+- **Non-Supabase hosts are blocked in deployed environments.** If the host is not `*.supabase.com` or `*.supabase.co`, Tower exits with a fatal error — unless the host is `localhost` (accepted for local development only).
+- **No local database may contain judgement, artefact, or run data.** The stale `drizzle.config.ts` SQLite reference has been replaced with `SUPABASE_DATABASE_URL` to prevent accidental local writes.
+- **All persistence flows** (judgement evaluations, investigations, runs, behaviour tests, dev issues) go through the single `db` export from `src/lib/db.ts`.
+
 ## External Dependencies
 
 *   **Node.js:** Runtime environment.

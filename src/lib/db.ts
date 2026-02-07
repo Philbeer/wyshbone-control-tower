@@ -51,9 +51,16 @@ if (isReplitPg) {
 }
 
 if (!isSupabase) {
-  console.warn("WARNING: SUPABASE_DATABASE_URL does not appear to point to a Supabase host.");
-  console.warn("Expected host pattern: *.supabase.com or *.supabase.co");
-  console.warn("Proceeding anyway, but verify your connection string is correct.");
+  const isLocal = connectionInfo.host === "localhost" || connectionInfo.host === "127.0.0.1";
+  if (isLocal) {
+    console.warn("WARNING: SUPABASE_DATABASE_URL points to localhost. Acceptable for local dev only.");
+  } else {
+    console.error("FATAL: SUPABASE_DATABASE_URL does not point to a Supabase host.");
+    console.error(`  Detected host: ${connectionInfo.host}`);
+    console.error("  Expected host pattern: *.supabase.com or *.supabase.co");
+    console.error("  In deployed environments, Tower must connect to Supabase only.");
+    process.exit(1);
+  }
 }
 
 const pool = new pg.Pool({
