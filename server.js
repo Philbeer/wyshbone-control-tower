@@ -1668,6 +1668,11 @@ async function start() {
     app.use('/api/tower', judgeArtefactRoutesModule.default);
     console.log('✓ Artefact judgement API loaded (POST /api/tower/judge-artefact)');
     
+    // Tower Verdict v1 - leads_list artefact evaluation
+    const towerVerdictRoutesModule = await import('./server/routes-tower-verdict.ts');
+    app.use('/api/tower', towerVerdictRoutesModule.default);
+    console.log('✓ Tower Verdict v1 API loaded (POST /api/tower/tower-verdict)');
+    
     // Ensure behaviour test definitions are seeded
     await ensureBehaviourTestsSeeded();
     

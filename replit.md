@@ -25,6 +25,8 @@ The system incorporates a sophisticated evaluation suite (EVAL-001 to EVAL-016) 
 *   **Conversation Quality Investigator (EVAL-009):** Analyzes flagged and automatically detects Wyshbone-specific conversation quality issues using GPT-4o-mini, classifying failures, providing summaries, and suggesting fixes/tests. Includes dashboard integration for viewing and managing issues.
 *   **Patch Failure Post-Mortem (EVAL-016):** Automatically analyzes rejected auto-generated patches (from EVAL-006) to classify failure reasons, recommend next steps, and provide suggested constraints for future patch attempts.
 
+*   **Tower Verdict v1 (Agent Loop Judgement):** Deterministic evaluation of SEARCH_PLACES leads_list artefacts against success criteria. Endpoint: `POST /api/tower/tower-verdict`. Returns structured verdict (ACCEPT/RETRY/CHANGE_PLAN/STOP) with delivered/requested counts, gaps, confidence (0-100), and plain-English rationale. Default target_count is 20. Core logic in `src/evaluator/towerVerdict.ts`, route in `server/routes-tower-verdict.ts`.
+
 UI/UX decisions have been completely simplified for ease of use. The dashboard now uses plain language and focuses on three core sections:
 
 **Simplified Dashboard Design:**
