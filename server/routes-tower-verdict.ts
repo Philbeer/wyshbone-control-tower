@@ -12,6 +12,7 @@ router.get("/health", (_req, res) => {
 
 const towerVerdictRequestSchema = z.object({
   artefactType: z.literal("leads_list"),
+  run_id: z.string().optional(),
   leads: z.unknown().optional(),
   success_criteria: z
     .object({
@@ -34,12 +35,12 @@ router.post("/tower-verdict", async (req, res) => {
       return;
     }
 
-    const { leads, success_criteria } = parsed.data;
+    const { leads, success_criteria, run_id } = parsed.data;
 
     const result = judgeLeadsList({ leads, success_criteria });
 
     console.log(
-      `[TOWER] POST /tower-verdict — delivered_count=${result.delivered} target_count=${result.requested} verdict=${result.verdict}`
+      `[TOWER_IN] run_id=${run_id ?? "none"} verdict=${result.verdict} requested=${result.requested} delivered=${result.delivered}`
     );
 
     res.json(result);
