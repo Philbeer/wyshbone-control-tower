@@ -1673,6 +1673,11 @@ async function start() {
     app.use('/api/tower', towerVerdictRoutesModule.default);
     console.log('✓ Tower Verdict v1 API loaded (POST /api/tower/tower-verdict)');
     
+    // Run Trace Report - debug endpoint for Tower diagnostics
+    const runTraceRoutesModule = await import('./server/routes-run-trace.ts');
+    app.use('/debug', runTraceRoutesModule.default);
+    console.log('✓ Run Trace Report loaded (GET /debug/run-trace)');
+    
     // Ensure behaviour test definitions are seeded
     await ensureBehaviourTestsSeeded();
     
