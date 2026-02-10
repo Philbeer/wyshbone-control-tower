@@ -4,6 +4,12 @@ import { judgeLeadsList } from "../src/evaluator/towerVerdict";
 
 const router = express.Router();
 
+const TOWER_VERSION = "1.0.0";
+
+router.get("/health", (_req, res) => {
+  res.json({ ok: true, version: TOWER_VERSION, time: new Date().toISOString() });
+});
+
 const towerVerdictRequestSchema = z.object({
   artefactType: z.literal("leads_list"),
   leads: z.unknown().optional(),
@@ -31,6 +37,10 @@ router.post("/tower-verdict", async (req, res) => {
     const { leads, success_criteria } = parsed.data;
 
     const result = judgeLeadsList({ leads, success_criteria });
+
+    console.log(
+      `[TOWER] POST /tower-verdict — delivered_count=${result.delivered} target_count=${result.requested} verdict=${result.verdict}`
+    );
 
     res.json(result);
   } catch (err) {
