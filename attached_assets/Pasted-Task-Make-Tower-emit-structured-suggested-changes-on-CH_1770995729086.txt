@@ -1,0 +1,140 @@
+Task: Make Tower emit structured suggested_changes on CHANGE_PLAN
+
+We already have Tower correctly issuing CHANGE_PLAN when results do not meet the user goal.
+
+Now extend Tower so that when verdict = CHANGE_PLAN, it also returns a structured list of suggested plan changes that Supervisor can apply to create Plan v2.
+
+Core rule
+
+Tower does not replan.
+Tower only judges and suggests.
+Supervisor decides whether to apply suggestions.
+
+Inputs Tower must use
+
+Tower must ground its judgement and suggestions on:
+
+original_user_goal (verbatim)
+
+plan or plan_summary (steps, constraints, assumptions)
+
+constraints (count, prefix, location, etc.)
+
+delivered vs requested
+
+tool limitations (from assumptions, e.g. Google Places prefix filtering)
+
+Do NOT invent new goals.
+
+When verdict = CHANGE_PLAN
+
+Tower must include a new field in the response:
+
+"suggested_changes": []
+
+
+Each item must be a structured object, not prose.
+
+Suggested change schema (v1)
+{
+  "type": "RELAX_CONSTRAINT" | "EXPAND_AREA" | "BROaden_QUERY" | "CHANGE_TOOL" | "ASK_USER",
+  "field": "prefix" | "location" | "business_type" | "radius" | "tool",
+  "from": "<current value or null>",
+  "to": "<suggested value or null>",
+  "reason": "<short explanation tied to evidence>"
+}
+
+Mandatory behaviour (leadgen v1)
+
+If delivered == 0 AND constraints include prefix:
+
+Add suggested_change:
+
+{
+  "type": "RELAX_CONSTRAINT",
+  "field": "prefix",
+  "from": "P",
+  "to": null,
+  "reason": "Prefix constraint produced zero matches"
+}
+
+
+If delivered < requested AND location constraint is narrow:
+
+Add suggested_change:
+
+{
+  "type": "EXPAND_AREA",
+  "field": "location",
+  "from": "Arundel",
+  "to": "Arundel + surrounding area",
+  "reason": "Insufficient results within original location"
+}
+
+
+If tool limitation caused failure:
+
+Add reason referencing the plan assumption.
+
+Do not suggest more than 3 changes.
+Order them by likelihood of success.
+
+Example Tower response (expected)
+{
+  "verdict": "CHANGE_PLAN",
+  "requested": 5,
+  "delivered": 0,
+  "gaps": ["insufficient_count", "constraint_too_strict"],
+  "confidence": 72,
+  "rationale": "Delivered 0 of 5 requested pubs due to strict prefix constraint",
+  "suggested_changes": [
+    {
+      "type": "RELAX_CONSTRAINT",
+      "field": "prefix",
+      "from": "P",
+      "to": null,
+      "reason": "No pubs matched prefix 'P' in Arundel"
+    },
+    {
+      "type": "EXPAND_AREA",
+      "field": "location",
+      "from": "Arundel",
+      "to": "Arundel + 10km",
+      "reason": "Location returned too few results"
+    }
+  ]
+}
+
+Hard constraints
+
+Never emit suggested_changes when verdict = ACCEPT
+
+Never mutate plan or call tools
+
+Never invent user intent
+
+Never suggest unlimited retries
+
+Keep suggestions grounded in artefact evidence
+
+Acceptance test
+
+Given:
+
+original goal: “Find 5 pubs in Arundel that begin with P”
+
+delivered: 0
+
+prefix constraint present
+
+Tower must:
+
+return CHANGE_PLAN
+
+include RELAX_CONSTRAINT(prefix)
+
+include EXPAND_AREA(location) if applicable
+
+include clear evidence-based rationale
+
+Implement now. Rewrite files if necessary.

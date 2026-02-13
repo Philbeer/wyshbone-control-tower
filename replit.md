@@ -1,159 +1,48 @@
 # Wyshbone Status Dashboard
 
 ## Overview
-
-This project is a lightweight Node/Express application for monitoring the status and key metrics of multiple Wyshbone applications. It provides a live, server-side rendered dashboard, a JSON API, and a file proxy for authenticated access. Its core purpose is to offer real-time insights into application health, performance, and code quality, tracking changes over time to provide comprehensive observability and automated evaluation for Wyshbone applications.
+This project is a Node/Express application designed to monitor the status and key metrics of multiple Wyshbone applications. It provides a real-time, server-side rendered dashboard, a JSON API, and a file proxy for authenticated access. The primary goal is to offer live insights into application health, performance, and code quality, tracking changes over time for comprehensive observability and automated evaluation of Wyshbone applications.
 
 ## User Preferences
-
 I prefer iterative development with clear, concise explanations. I want to be informed about major architectural decisions before they are implemented. Provide comprehensive context for any suggested changes or new features.
 
 ## System Architecture
+The application is built using Node.js and Express, featuring server-side rendering with template literals and an in-memory Map for historical data. It automatically polls Wyshbone app endpoints every 2 minutes, tracks the last 50 snapshots per source, computes metric deltas, and provides an auto-refreshing HTML dashboard. Error handling is robust, and a file proxy enables authenticated access to application resources.
 
-The application is built on Node.js using Express, rendering server-side HTML with template literals and utilizing an in-memory Map for historical data tracking. It features automated polling of Wyshbone app endpoints every 2 minutes, history tracking (last 50 snapshots per source), delta computation for metrics, an auto-refreshing HTML dashboard (every 60 seconds), and robust error handling. A file proxy provides authenticated access to application resources.
+The system incorporates a sophisticated evaluation suite for automated testing, diagnosis, and patch management:
 
-The system incorporates a sophisticated evaluation suite (EVAL-001 to EVAL-016) for automated testing, diagnosis, and patch management:
+*   **Automated Investigations:** Manages investigations, triggers, and diagnostic results. Utilizes OpenAI GPT-4o-mini for automated diagnosis and patch suggestions.
+*   **Automated Behaviour Tests:** Runs scenario-specific tests against Wyshbone UI endpoints, records results, and displays statuses.
+*   **Automated Detection and Investigation Triggering:** Automatically initiates investigations for failures, timeouts, errors, and regressions.
+*   **Patch Quality + Regression Protection:** Evaluates proposed patches in a sandbox, preventing regressions and quality degradation.
+*   **Auto-Patch Generation:** LLM-powered automatic patch generation for investigations using GPT-4o-mini, with automated evaluation.
+*   **Behaviour Test Integration:** Integrates behaviour tests with the investigation system, enabling automatic and manual investigation creation.
+*   **Live User Run Logging & Investigation:** Logs real Wyshbone UI user conversations for observability and enables investigation creation.
+*   **Conversation Quality Investigation:** Analyzes and automatically detects Wyshbone-specific conversation quality issues using GPT-4o-mini, classifying failures and suggesting fixes/tests.
+*   **Patch Failure Post-Mortem:** Analyzes rejected auto-generated patches to classify failure reasons and recommend next steps.
+*   **Tower Verdict (Agent Loop Judgement):** Deterministically evaluates leads list artifacts against user goals and constraints, returning structured verdicts (ACCEPT/CHANGE_PLAN/STOP) with detailed rationales and suggested changes.
+*   **Judgement API:** A deterministic evaluation endpoint that returns a verdict (CONTINUE/STOP/CHANGE_STRATEGY) based on a run snapshot and success criteria.
+*   **Artefact Judgement API:** Tower judges artifacts stored in Supabase by inspecting their `payload_json` and applying specific rules based on `artefactType` (e.g., `leads_list` artefacts are judged by count and constraint adherence) to determine whether to continue or stop a run.
+*   **Tower Dev Chat:** A dedicated interface for developers to report issues, with automatic context gathering from the codebase and AI-powered patch suggestions using OpenAI GPT-4o-mini. Issues are tracked through various states (new, context_gathered, investigating, resolved, closed) in a PostgreSQL database.
 
-*   **Investigation System (EVAL-001):** Manages investigations, triggers, and diagnostic results in a PostgreSQL database. Uses OpenAI GPT-4o-mini for automated diagnosis and patch suggestions.
-*   **Automated Behaviour Tests (EVAL-002):** A harness for running scenario-specific tests against Wyshbone UI endpoints, recording results, and displaying statuses.
-*   **Automated Detection and Investigation Triggering (EVAL-003):** Automatically triggers investigations for failures, timeouts, errors, and regressions detected by behaviour tests.
-*   **Patch Quality + Regression Protection (EVAL-004):** A CI/CD-like gatekeeper that evaluates proposed patches in a sandbox, applying strict rejection rules to prevent regressions and quality degradation.
-*   **Junior Developer Agent Integration (EVAL-005):** Manages the full patch lifecycle from investigation to application, including generating developer briefs and managing patch suggestions.
-*   **Auto-Patch Generator (EVAL-006):** LLM-powered automatic patch generation for investigations using GPT-4o-mini, with automated evaluation via EVAL-004.
-*   **Behaviour Test Investigation Bridge (EVAL-007):** Integrates behaviour tests with the investigation system, enabling automatic and manual investigation creation for test issues with deduplication.
-*   **Live User Run Logging & Investigation Bridge (EVAL-008):** Logs real Wyshbone UI user conversations for observability, displaying recent runs, and enabling investigation creation with deduplication.
-*   **Conversation Quality Investigator (EVAL-009):** Analyzes flagged and automatically detects Wyshbone-specific conversation quality issues using GPT-4o-mini, classifying failures, providing summaries, and suggesting fixes/tests. Includes dashboard integration for viewing and managing issues.
-*   **Patch Failure Post-Mortem (EVAL-016):** Automatically analyzes rejected auto-generated patches (from EVAL-006) to classify failure reasons, recommend next steps, and provide suggested constraints for future patch attempts.
+**UI/UX Decisions:**
+The dashboard features a simplified design with plain language, focusing on three core sections:
+*   **Recent Runs:** Displays user conversations grouped by `runId`, showing event count, input summary, time range, status, and options to view timelines or flag conversations.
+*   **Auto-Flagged Runs:** Shows automatically detected quality issues with original input and reason.
+*   **Manual Flags:** Displays conversations manually flagged by users.
+*   **Advanced Tools:** Collapsible section for Tower Status, Automated Tests, Patch Failures, and Complete Run History.
 
-*   **Tower Verdict v1 (Agent Loop Judgement):** Deterministic evaluation of leads_list artefacts against the user's actual goal and constraints. Endpoint: `POST /api/tower/tower-verdict`. Accepts `success_criteria.target_count`, `constraints.count`, `requested_count`, `delivered_count`, `delivered`, `leads` (array), `original_user_goal`, and `constraints.prefix`. Strict rules: if delivered < requested → verdict `CHANGE_PLAN` with gap `insufficient_count`; if prefix constraint yields 0 → adds gap `constraint_too_strict`; only `ACCEPT` when delivered >= requested. Returns structured verdict (ACCEPT/CHANGE_PLAN/STOP) with delivered/requested counts, gaps array, confidence (0-100), and plain-English rationale. Default target_count is 20. Core logic in `src/evaluator/towerVerdict.ts`, route in `server/routes-tower-verdict.ts`.
+**Conversation Timeline View:** Provides a detailed chronological view of all messages within a conversation, including input/output text, status badges, duration, tool usage, and model information.
 
-UI/UX decisions have been completely simplified for ease of use. The dashboard now uses plain language and focuses on three core sections:
+**Simplified Investigation Workflow:** A dedicated investigation page displays run input/output, AI-generated diagnosis, and suggested patch. It includes "Approve Patch" and "Reject Patch" buttons. AI evaluation for diagnosis and patches is triggered automatically and is idempotent.
 
-**Simplified Dashboard Design:**
+**Language Simplification:** Technical jargon has been removed for clarity and ease of understanding.
 
-*   **Recent Runs:** Shows all user conversations from Wyshbone UI with conversation-level grouping. Multiple messages with the same `runId` are grouped as a single conversation card. Each card displays:
-    *   Event count badge (e.g., "3 messages")
-    *   First message input summary
-    *   Time range (first message to latest message)
-    *   Status indicator
-    *   "View Timeline" button to see all messages chronologically
-    *   "Flag conversation" button to mark entire conversation for review
-*   **Auto-Flagged Runs:** Automatically detected quality issues (bad reasoning, hallucinations, unhelpful tone, etc.). Each entry shows the original input and reason it was flagged.
-*   **Manual Flags:** Conversations that users manually flagged for review. Shows original input and optional user-provided reason.
-*   **Advanced Tools (Collapsed):** Contains Tower Status metrics, Automated Tests, Patch Failures, and Complete Run History. Includes a "Clear All Flags" button to reset investigation data.
-
-**Conversation Timeline View:**
-
-When clicking "View Timeline" from any conversation, users see a detailed chronological view of all messages in that conversation, including:
-*   Message number and timestamp for each event
-*   Input and output text for each message
-*   Status badges (success, error, etc.)
-*   Duration and tool usage metadata
-*   Model information when available
-
-**Simplified Investigation Workflow:**
-
-When clicking "Investigate & Fix" from any section, users are taken to a dedicated investigation page that shows:
-1. Run input and output
-2. Auto diagnosis explaining the issue (automatically generated by OpenAI GPT-4o-mini)
-3. Suggested patch (code changes to fix the problem, automatically generated by OpenAI)
-4. "Approve Patch" and "Reject Patch" buttons
-
-The investigation page automatically triggers AI evaluation when loaded if diagnosis or patch suggestion are missing. During evaluation:
-- Shows a loading spinner with "Generating diagnosis using OpenAI..." message
-- Calls OpenAI GPT-4o-mini to analyze the conversation and generate diagnosis
-- Displays diagnosis and patch suggestion once OpenAI responds (typically 5-30 seconds)
-- Evaluation is idempotent - won't re-evaluate if already complete
-
-This replaces the previous complex sidebar-based workflow with a straightforward, task-focused page.
-
-**Language Simplification:**
-
-All technical jargon has been removed:
-- "EVAL-XXX" references removed
-- "Conversation quality" → "Quality issues"  
-- "Investigation system" → "Investigate & Fix"
-- "Patch lifecycle" → "Patch suggestions"
-- "Sandbox evaluation" → (removed, happens transparently)
-
-**Tower Dev Chat v0 (Developer Issues):**
-
-A dedicated interface for developers to report issues with automatic context gathering and AI-powered patch suggestions:
-
-*   **Developer Issues Page (/dev/issues):** Accessible via "Developer Issues" button in the navigation header
-*   **Issue Submission Form:** Title, description, and optional screenshot URL
-*   **Automatic Context Gathering:** When an issue is created, the system:
-    *   Extracts keywords from the issue text (file patterns, error messages, technical terms)
-    *   Searches the codebase for relevant files matching keywords
-    *   Fetches recent log excerpts if errors are mentioned
-    *   Stores all gathered context in the database
-*   **Context Display:** The right panel shows the issue details along with:
-    *   Relevant source files (collapsible with syntax highlighting)
-    *   Log excerpts (if applicable)
-*   **AI Patch Suggestions:** Developers can click "Generate Patch Suggestions" to:
-    *   Analyze the issue description and gathered context using OpenAI GPT-4o-mini
-    *   Generate code patch suggestions with file paths, summaries, and full file contents
-    *   Display patches in collapsible cards with copy-to-clipboard functionality
-    *   Note: Patches are stored in database only - no modifications to source files
-*   **Issue Status Tracking:** Issues progress through states: new → context_gathered → investigating → resolved → closed
-
-Database tables:
-*   `dev_issues`: Stores issue metadata (id, title, description, screenshotUrl, status, createdAt)
-*   `dev_issue_context`: Stores gathered context (filePath, fileContents, logExcerpt) linked to issues
-*   `dev_issue_patches`: Stores AI-generated patch suggestions (filePath, newContents, summary) linked to issues
-
-API Routes:
-*   GET /api/dev/issues - List all issues
-*   POST /api/dev/issues/create - Create new issue
-*   POST /api/dev/issues/context - Trigger context gathering
-*   GET /api/dev/issues/:id - Get issue with context
-*   PATCH /api/dev/issues/:id/status - Update issue status
-*   POST /api/dev/issues/:id/suggest-patch - Generate AI patch suggestions using OpenAI
-*   GET /api/dev/issues/:id/patches - Get all patches for an issue
-
-**Judgement API (Session 3):**
-
-A deterministic evaluation endpoint that returns a verdict based on a run snapshot and success criteria:
-
-*   **Endpoint:** `POST /api/tower/evaluate`
-*   **Request:** `run_id`, `mission_type`, `success` (targets/limits), `snapshot` (current counters)
-*   **Response:** `verdict` (CONTINUE/STOP/CHANGE_STRATEGY), `reason_code`, `explanation`, optional `strategy`, `evaluated_at`
-*   **Evaluation priority order:** SUCCESS_ACHIEVED > COST_EXCEEDED > CPL_EXCEEDED > FAILURES_EXCEEDED > STALL_DETECTED > CONTINUE
-*   **Files:** `shared/schema.ts` (Zod schemas), `src/evaluator/judgement.ts` (logic), `server/routes-judgement.ts` (route), `tests/judgement.test.ts` (9 unit tests)
-
-**Artefact Judgement API:**
-
-Tower judges artefacts, not tools. After Supervisor creates artefacts (e.g. `step_result`, `plan_result`) in Supabase, it calls Tower to judge whether to continue or stop a run.
-
-*   **Endpoint:** `POST /api/tower/judge-artefact`
-*   **Request:** `runId`, `artefactId`, `goal`, optional `successCriteria`, `artefactType`
-*   **How it works:** Tower reads the artefact row directly from the Supabase `artefacts` table (by `artefactId`), inspects `payload_json`, and returns a deterministic verdict.
-*   **Judgement rules (v2):**
-    *   **If `artefactType == "leads_list"`:** Routes through `judgeLeadsList()` from `src/evaluator/towerVerdict.ts`. Extracts `delivered_count`, `target_count`, `prefix_filter`, and `success_criteria` from the artefact payload AND `successCriteria` from the request body. Maps Tower verdict (ACCEPT→pass/continue, CHANGE_PLAN→fail/change_plan, STOP→fail/stop) into the judge-artefact response format. This ensures the same strict count-based rules apply: delivered < requested → fail + change_plan with gap `insufficient_count`; prefix constraint with 0 results → adds gap `constraint_too_strict`.
-    *   If `payload_json.step_status == "fail"` → verdict=`fail`, action=`stop`
-    *   Else if `step_type == "SEARCH_PLACES"` and `metrics.places_found == 0` → verdict=`fail`, action=`stop`
-    *   Else if `step_type == "ENRICH_LEADS"` and `metrics.leads_enriched == 0` → verdict=`fail`, action=`stop`
-    *   Else if `step_type == "SCORE_LEADS"` and `metrics.leads_scored == 0` → verdict=`fail`, action=`stop`
-    *   Otherwise → verdict=`pass`, action=`continue`
-*   **Safety:** If the artefact is not found or the Supabase query fails, Tower returns verdict=`fail`, action=`stop`.
-*   **Response:** `{ verdict, action, reasons[], metrics{} }`
-*   **File:** `server/routes-judge-artefact.ts`
-*   **Key principle:** For `leads_list` artefacts, Tower enforces the user's goal (count + constraints). For all other artefact types, generic step_status logic applies.
-
-## Database Rules
-
-Tower reads and writes **only** to the Supabase-hosted Postgres database, accessed via the `SUPABASE_DATABASE_URL` secret. The following rules are enforced at startup in `src/lib/db.ts`:
-
-- **SUPABASE_DATABASE_URL is required.** If the variable is missing, Tower refuses to start.
-- **Replit Postgres is blocked.** If the connection string points to a Replit-managed host (helium, replit), Tower refuses to start.
-- **Non-Supabase hosts are blocked in deployed environments.** If the host is not `*.supabase.com` or `*.supabase.co`, Tower exits with a fatal error — unless the host is `localhost` (accepted for local development only).
-- **No local database may contain judgement, artefact, or run data.** The stale `drizzle.config.ts` SQLite reference has been replaced with `SUPABASE_DATABASE_URL` to prevent accidental local writes.
-- **All persistence flows** (judgement evaluations, investigations, runs, behaviour tests, dev issues) go through the single `db` export from `src/lib/db.ts`.
+**Database Rules:** Tower strictly uses a Supabase-hosted Postgres database (`SUPABASE_DATABASE_URL`). It prevents connections to Replit Postgres, non-Supabase hosts in deployed environments (except localhost for development), and local databases for core judgment, artefact, or run data. All persistence flows are routed through a single `db` export.
 
 ## External Dependencies
-
 *   **Node.js:** Runtime environment.
 *   **Express:** Web application framework.
-*   **PostgreSQL:** Database for persistent data storage (via Neon).
+*   **PostgreSQL:** Database for persistent data storage (accessed via Supabase).
 *   **OpenAI GPT-4o-mini:** Used for automated diagnosis, patch generation, and conversation quality analysis.
 *   **Vite:** Used for serving the React SPA and development tooling.

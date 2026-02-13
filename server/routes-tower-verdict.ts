@@ -27,6 +27,9 @@ const towerVerdictRequestSchema = z.object({
     .object({
       count: z.number().int().positive().optional(),
       prefix: z.string().optional(),
+      location: z.string().optional(),
+      radius: z.union([z.number(), z.string()]).optional(),
+      business_type: z.string().optional(),
     })
     .passthrough()
     .optional(),
@@ -34,6 +37,8 @@ const towerVerdictRequestSchema = z.object({
   delivered_count: z.number().int().optional(),
   delivered: z.number().int().optional(),
   original_user_goal: z.string().optional(),
+  plan: z.unknown().optional(),
+  plan_summary: z.unknown().optional(),
 });
 
 function buildProofVerdict(proofMode: string | undefined, runId: string, artefactId: string) {
@@ -62,6 +67,7 @@ function buildProofVerdict(proofMode: string | undefined, runId: string, artefac
     requested: 0,
     delivered: 0,
     gaps: [],
+    suggested_changes: [],
   };
 }
 
@@ -86,6 +92,8 @@ router.post("/tower-verdict", async (req, res) => {
       delivered_count,
       delivered,
       original_user_goal,
+      plan,
+      plan_summary,
       run_id,
       goal,
       proof_mode,
@@ -110,10 +118,12 @@ router.post("/tower-verdict", async (req, res) => {
       delivered_count,
       delivered,
       original_user_goal,
+      plan,
+      plan_summary,
     });
 
     console.log(
-      `[TOWER_IN] run_id=${run_id ?? "none"} verdict=${result.verdict} requested=${result.requested} delivered=${result.delivered}`
+      `[TOWER_IN] run_id=${run_id ?? "none"} verdict=${result.verdict} requested=${result.requested} delivered=${result.delivered} suggestions=${result.suggested_changes.length}`
     );
 
     res.json(result);
@@ -129,6 +139,7 @@ router.post("/tower-verdict", async (req, res) => {
       gaps: ["internal_error"],
       confidence: 0,
       rationale: "Internal server error during verdict evaluation.",
+      suggested_changes: [],
     });
   }
 });

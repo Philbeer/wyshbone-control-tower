@@ -19,12 +19,21 @@ interface JudgeArtefactResponse {
   action: "continue" | "stop" | "retry" | "change_plan";
   reasons: string[];
   metrics: Record<string, unknown>;
+  suggested_changes?: Array<{
+    type: string;
+    field: string;
+    from: string | null;
+    to: string | null;
+    reason: string;
+  }>;
 }
 
 function judgeLeadsListArtefact(
   payloadJson: any,
   successCriteria: any,
-  goal: string
+  goal: string,
+  plan?: unknown,
+  planSummary?: unknown
 ): JudgeArtefactResponse {
   const targetCount =
     successCriteria?.target_count ??
@@ -62,16 +71,42 @@ function judgeLeadsListArtefact(
     `[Tower][judge-artefact] leads_list resolution: targetCount=${targetCount} requestedCount=${requestedCount} deliveredCount=${deliveredCount} prefix=${prefix}`
   );
 
+  const location =
+    successCriteria?.location ??
+    payloadJson?.constraints?.location ??
+    payloadJson?.location ??
+    undefined;
+
+  const radius =
+    successCriteria?.radius ??
+    payloadJson?.constraints?.radius ??
+    payloadJson?.radius ??
+    undefined;
+
+  const businessType =
+    successCriteria?.business_type ??
+    payloadJson?.constraints?.business_type ??
+    payloadJson?.business_type ??
+    undefined;
+
+  const resolvedPlan = plan ?? payloadJson?.plan ?? undefined;
+  const resolvedPlanSummary = planSummary ?? payloadJson?.plan_summary ?? undefined;
+
   const towerResult = judgeLeadsList({
     leads,
     success_criteria: targetCount != null ? { target_count: targetCount } : undefined,
     constraints: {
       ...(constraintsCount != null ? { count: constraintsCount } : {}),
       ...(prefix != null ? { prefix } : {}),
+      ...(location != null ? { location } : {}),
+      ...(radius != null ? { radius } : {}),
+      ...(businessType != null ? { business_type: businessType } : {}),
     },
     requested_count: requestedCount != null ? requestedCount : undefined,
     delivered_count: deliveredCount != null ? deliveredCount : undefined,
     original_user_goal: goal,
+    plan: resolvedPlan,
+    plan_summary: resolvedPlanSummary,
   });
 
   let verdict: "pass" | "fail";
@@ -105,6 +140,7 @@ function judgeLeadsListArtefact(
       confidence: towerResult.confidence,
       towerVerdict: towerResult.verdict,
     },
+    suggested_changes: towerResult.suggested_changes,
   };
 }
 
@@ -163,7 +199,13 @@ router.post("/judge-artefact", async (req, res) => {
     }
 
     if (artefactType === "leads_list") {
-      const leadsResult = judgeLeadsListArtefact(payloadJson, successCriteria, goal);
+      const leadsResult = judgeLeadsListArtefact(
+        payloadJson,
+        successCriteria,
+        goal,
+        payloadJson?.plan,
+        payloadJson?.plan_summary
+      );
       leadsResult.metrics = {
         ...leadsResult.metrics,
         artefactId,
