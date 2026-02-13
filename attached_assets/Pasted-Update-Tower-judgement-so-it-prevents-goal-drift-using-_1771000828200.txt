@@ -1,0 +1,67 @@
+Update Tower judgement so it prevents goal drift using hard vs soft constraints from the plan/artefact payload.
+
+Inputs available in artefact payload:
+
+original_user_goal
+
+normalized_goal
+
+hard_constraints: string[]
+
+soft_constraints: string[]
+
+requested_count and delivered_count (or derivable)
+
+constraint fields like location, prefix_filter, business_type, etc.
+
+Rules:
+
+Tower must judge success against:
+
+requested_count (hard)
+
+business_type match (hard)
+
+and any constraints listed in hard_constraints
+
+Tower may recommend relaxing only soft constraints.
+
+Tower must never suggest a change that relaxes or drops a hard constraint.
+
+Suggested changes must remain structured objects:
+{ type, field, from, to, reason }
+
+For CHANGE_PLAN on insufficient results:
+
+Prefer expanding or modifying a soft constraint first (example order):
+a) EXPAND_AREA(location)
+b) BROADEN_QUERY(business_type) ONLY if business_type is soft (normally hard so this is usually disallowed)
+c) RELAX_CONSTRAINT(prefix_filter) ONLY if prefix_filter is soft
+
+If the only way to succeed would require relaxing a hard constraint:
+
+Return verdict: ASK_USER
+
+Include rationale explaining the tradeoff and present 2 options:
+Option A: relax location
+Option B: relax prefix_filter
+
+suggested_changes should be empty in ASK_USER.
+
+Keep existing STOP / ACCEPT behaviours unchanged.
+
+Acceptance test:
+
+For “Find 5 pubs in Arundel that begin with P” with hard=[count,business_type], soft=[location,prefix]:
+
+If Arundel has 0 matches for prefix P:
+
+Tower should not ACCEPT a plan that drops prefix and returns 20 pubs, unless prefix was soft AND the plan clearly reports “prefix relaxed”.
+
+Preferred: CHANGE_PLAN suggests EXPAND_AREA(location) while keeping prefix, so the agent searches nearby but still for names starting with P.
+
+If after max replans there are still 0 matches and relaxing hard constraints is required:
+
+Tower returns ASK_USER (not CHANGE_PLAN).
+
+Do not add any natural language suggestion parsing. No strings. Contract must remain strict.
