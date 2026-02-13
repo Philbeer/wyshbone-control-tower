@@ -23,6 +23,17 @@ const towerVerdictRequestSchema = z.object({
     })
     .passthrough()
     .optional(),
+  constraints: z
+    .object({
+      count: z.number().int().positive().optional(),
+      prefix: z.string().optional(),
+    })
+    .passthrough()
+    .optional(),
+  requested_count: z.number().int().optional(),
+  delivered_count: z.number().int().optional(),
+  delivered: z.number().int().optional(),
+  original_user_goal: z.string().optional(),
 });
 
 function buildProofVerdict(proofMode: string | undefined, runId: string, artefactId: string) {
@@ -67,7 +78,19 @@ router.post("/tower-verdict", async (req, res) => {
       return;
     }
 
-    const { leads, success_criteria, run_id, goal, proof_mode, artefactId } = parsed.data;
+    const {
+      leads,
+      success_criteria,
+      constraints,
+      requested_count,
+      delivered_count,
+      delivered,
+      original_user_goal,
+      run_id,
+      goal,
+      proof_mode,
+      artefactId,
+    } = parsed.data;
 
     if (goal === "Proof Tower Loop") {
       const result = buildProofVerdict(
@@ -79,7 +102,15 @@ router.post("/tower-verdict", async (req, res) => {
       return;
     }
 
-    const result = judgeLeadsList({ leads, success_criteria });
+    const result = judgeLeadsList({
+      leads,
+      success_criteria,
+      constraints,
+      requested_count,
+      delivered_count,
+      delivered,
+      original_user_goal,
+    });
 
     console.log(
       `[TOWER_IN] run_id=${run_id ?? "none"} verdict=${result.verdict} requested=${result.requested} delivered=${result.delivered}`

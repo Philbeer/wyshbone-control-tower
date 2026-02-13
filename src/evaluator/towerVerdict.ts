@@ -15,55 +15,82 @@ export interface TowerVerdictInput {
     target_count?: number;
     [key: string]: unknown;
   };
+  constraints?: {
+    count?: number;
+    prefix?: string;
+    [key: string]: unknown;
+  };
+  requested_count?: number;
+  delivered_count?: number;
+  delivered?: number;
+  original_user_goal?: string;
+}
+
+function resolveRequestedCount(input: TowerVerdictInput): number {
+  if (input.success_criteria?.target_count != null) return input.success_criteria.target_count;
+  if (input.constraints?.count != null) return input.constraints.count;
+  if (input.requested_count != null) return input.requested_count;
+  return 20;
+}
+
+function resolveDeliveredCount(input: TowerVerdictInput): number {
+  if (input.delivered_count != null) return input.delivered_count;
+  if (typeof input.delivered === "number") return input.delivered;
+  if (Array.isArray(input.leads)) return input.leads.length;
+  return 0;
 }
 
 export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
-  const requestedCount = input.success_criteria?.target_count ?? 20;
-
-  if (!input.leads || !Array.isArray(input.leads)) {
-    const verdict: TowerVerdict = {
-      verdict: "STOP",
-      delivered: 0,
-      requested: requestedCount,
-      gaps: ["invalid_artefact"],
-      confidence: 100,
-      rationale: `Leads array is missing or malformed. Cannot evaluate artefact.`,
-    };
-    console.log(
-      `[TOWER] verdict=${verdict.verdict} delivered=${verdict.delivered} requested=${verdict.requested}`
-    );
-    return verdict;
-  }
-
-  const delivered = input.leads.length;
-  const ratio = requestedCount > 0 ? delivered / requestedCount : 0;
+  const requestedCount = resolveRequestedCount(input);
+  const deliveredCount = resolveDeliveredCount(input);
+  const prefix = input.constraints?.prefix ?? null;
+  const goal = input.original_user_goal ?? null;
 
   let verdict: TowerVerdictAction;
   let gaps: string[] = [];
   let confidence: number;
   let rationale: string;
 
-  if (delivered >= requestedCount) {
+  if (requestedCount > 0 && deliveredCount === 0) {
+    verdict = "CHANGE_PLAN";
+    gaps = ["insufficient_count"];
+    confidence = 95;
+    rationale = `Delivered 0 of ${requestedCount} requested.`;
+
+    if (prefix && deliveredCount === 0) {
+      gaps.push("constraint_too_strict");
+      rationale += ` Prefix constraint "${prefix}" produced 0 matches, broaden search or expand location/radius.`;
+    }
+
+    if (goal) {
+      rationale += ` Goal: "${goal}"`;
+    }
+  } else if (deliveredCount < requestedCount) {
+    verdict = "CHANGE_PLAN";
+    gaps = ["insufficient_count"];
+    confidence = Math.round(50 + (deliveredCount / requestedCount) * 30);
+    rationale = `Delivered ${deliveredCount} of ${requestedCount} requested.`;
+
+    if (prefix) {
+      gaps.push("constraint_too_strict");
+      rationale += ` Prefix constraint "${prefix}" may be limiting results.`;
+    }
+
+    if (goal) {
+      rationale += ` Goal: "${goal}"`;
+    }
+  } else {
     verdict = "ACCEPT";
+    const ratio = requestedCount > 0 ? deliveredCount / requestedCount : 1;
     confidence = Math.min(95, Math.round(80 + (ratio - 1) * 15));
     if (confidence < 80) confidence = 80;
     gaps = [];
-    rationale = `Delivered ${delivered} leads, meeting or exceeding the requested ${requestedCount}. Artefact accepted.`;
-  } else if (ratio >= 0.5) {
-    verdict = "CHANGE_PLAN";
-    confidence = Math.round(50 + ratio * 30);
-    gaps = ["insufficient_count"];
-    rationale = `Delivered ${delivered} of ${requestedCount} requested leads (${Math.round(ratio * 100)}%). Consider adjusting search parameters or broadening criteria.`;
-  } else {
-    verdict = "RETRY";
-    confidence = Math.round(30 + ratio * 40);
-    gaps = ["very_low_count"];
-    rationale = `Delivered only ${delivered} of ${requestedCount} requested leads (${Math.round(ratio * 100)}%). Recommend retrying with current or adjusted parameters.`;
+    rationale = `Delivered ${deliveredCount} leads, meeting or exceeding the requested ${requestedCount}. Artefact accepted.`;
   }
 
   const result: TowerVerdict = {
     verdict,
-    delivered,
+    delivered: deliveredCount,
     requested: requestedCount,
     gaps,
     confidence,
