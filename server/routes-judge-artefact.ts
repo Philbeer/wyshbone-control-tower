@@ -33,7 +33,9 @@ function judgeLeadsListArtefact(
   successCriteria: any,
   goal: string,
   plan?: unknown,
-  planSummary?: unknown
+  planSummary?: unknown,
+  hardConstraints?: string[],
+  softConstraints?: string[]
 ): JudgeArtefactResponse {
   const targetCount =
     successCriteria?.target_count ??
@@ -92,6 +94,16 @@ function judgeLeadsListArtefact(
   const resolvedPlan = plan ?? payloadJson?.plan ?? undefined;
   const resolvedPlanSummary = planSummary ?? payloadJson?.plan_summary ?? undefined;
 
+  const resolvedHardConstraints = hardConstraints ??
+    payloadJson?.hard_constraints ??
+    successCriteria?.hard_constraints ??
+    undefined;
+
+  const resolvedSoftConstraints = softConstraints ??
+    payloadJson?.soft_constraints ??
+    successCriteria?.soft_constraints ??
+    undefined;
+
   const towerResult = judgeLeadsList({
     leads,
     success_criteria: targetCount != null ? { target_count: targetCount } : undefined,
@@ -102,6 +114,8 @@ function judgeLeadsListArtefact(
       ...(radius != null ? { radius } : {}),
       ...(businessType != null ? { business_type: businessType } : {}),
     },
+    hard_constraints: Array.isArray(resolvedHardConstraints) ? resolvedHardConstraints : undefined,
+    soft_constraints: Array.isArray(resolvedSoftConstraints) ? resolvedSoftConstraints : undefined,
     requested_count: requestedCount != null ? requestedCount : undefined,
     delivered_count: deliveredCount != null ? deliveredCount : undefined,
     original_user_goal: goal,
@@ -115,6 +129,9 @@ function judgeLeadsListArtefact(
   if (towerResult.verdict === "ACCEPT") {
     verdict = "pass";
     action = "continue";
+  } else if (towerResult.verdict === "ASK_USER") {
+    verdict = "fail";
+    action = "stop";
   } else if (towerResult.verdict === "CHANGE_PLAN") {
     verdict = "fail";
     action = "change_plan";
@@ -126,7 +143,7 @@ function judgeLeadsListArtefact(
     action = "retry";
   }
 
-  return {
+  const response: JudgeArtefactResponse = {
     verdict,
     action,
     reasons: [
@@ -142,6 +159,12 @@ function judgeLeadsListArtefact(
     },
     suggested_changes: towerResult.suggested_changes,
   };
+
+  if (towerResult.verdict === "ASK_USER" && towerResult.ask_user_options) {
+    (response.metrics as any).ask_user_options = towerResult.ask_user_options;
+  }
+
+  return response;
 }
 
 router.post("/judge-artefact", async (req, res) => {

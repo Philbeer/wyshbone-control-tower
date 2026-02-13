@@ -1,4 +1,4 @@
-export type TowerVerdictAction = "ACCEPT" | "RETRY" | "CHANGE_PLAN" | "STOP";
+export type TowerVerdictAction = "ACCEPT" | "RETRY" | "CHANGE_PLAN" | "STOP" | "ASK_USER";
 
 export type SuggestedChangeType =
   | "RELAX_CONSTRAINT"
@@ -15,6 +15,13 @@ export interface SuggestedChange {
   reason: string;
 }
 
+export interface AskUserOption {
+  label: string;
+  description: string;
+  field: string;
+  action: string;
+}
+
 export interface TowerVerdict {
   verdict: TowerVerdictAction;
   delivered: number;
@@ -23,6 +30,7 @@ export interface TowerVerdict {
   confidence: number;
   rationale: string;
   suggested_changes: SuggestedChange[];
+  ask_user_options?: AskUserOption[];
 }
 
 export interface TowerVerdictInput {
@@ -34,15 +42,19 @@ export interface TowerVerdictInput {
   constraints?: {
     count?: number;
     prefix?: string;
+    prefix_filter?: string;
     location?: string;
     radius?: number | string;
     business_type?: string;
     [key: string]: unknown;
   };
+  hard_constraints?: string[];
+  soft_constraints?: string[];
   requested_count?: number;
   delivered_count?: number;
   delivered?: number;
   original_user_goal?: string;
+  normalized_goal?: string;
   plan?: unknown;
   plan_summary?: unknown;
 }
@@ -59,6 +71,10 @@ function resolveDeliveredCount(input: TowerVerdictInput): number {
   if (typeof input.delivered === "number") return input.delivered;
   if (Array.isArray(input.leads)) return input.leads.length;
   return 0;
+}
+
+function resolvePrefix(input: TowerVerdictInput): string | null {
+  return input.constraints?.prefix ?? input.constraints?.prefix_filter ?? null;
 }
 
 function extractLocation(input: TowerVerdictInput): string | null {
@@ -105,14 +121,102 @@ function extractToolLimitation(input: TowerVerdictInput): string | null {
   return null;
 }
 
-function buildSuggestedChanges(
+function isHard(field: string, input: TowerVerdictInput): boolean {
+  const hardList = input.hard_constraints ?? [];
+  const norm = field.toLowerCase();
+  return hardList.some((h) => h.toLowerCase() === norm);
+}
+
+function isSoft(field: string, input: TowerVerdictInput): boolean {
+  const softList = input.soft_constraints ?? [];
+  const norm = field.toLowerCase();
+  return softList.some((s) => s.toLowerCase() === norm);
+}
+
+function hasConstraintClassification(input: TowerVerdictInput): boolean {
+  return (
+    (Array.isArray(input.hard_constraints) && input.hard_constraints.length > 0) ||
+    (Array.isArray(input.soft_constraints) && input.soft_constraints.length > 0)
+  );
+}
+
+interface BuildResult {
+  changes: SuggestedChange[];
+  requiresHardRelax: boolean;
+  hardFieldsNeeded: string[];
+}
+
+function buildConstraintAwareChanges(
+  input: TowerVerdictInput,
+  gaps: string[],
+  requestedCount: number,
+  deliveredCount: number
+): BuildResult {
+  const changes: SuggestedChange[] = [];
+  const prefix = resolvePrefix(input);
+  const location = input.constraints?.location ?? null;
+  const hardFieldsNeeded: string[] = [];
+
+  if (location && isSoft("location", input)) {
+    changes.push({
+      type: "EXPAND_AREA",
+      field: "location",
+      from: location,
+      to: `${location} + surrounding area`,
+      reason: `Insufficient results within ${location} (${deliveredCount} of ${requestedCount}). Location is a soft constraint and can be expanded.`,
+    });
+  }
+
+  if (isSoft("business_type", input)) {
+    const bt = input.constraints?.business_type ?? null;
+    if (bt && deliveredCount < requestedCount) {
+      changes.push({
+        type: "BROADEN_QUERY",
+        field: "business_type",
+        from: bt,
+        to: null,
+        reason: `Business type "${bt}" is a soft constraint and can be broadened to find more results.`,
+      });
+    }
+  }
+
+  if (prefix != null && (isSoft("prefix_filter", input) || isSoft("prefix", input))) {
+    changes.push({
+      type: "RELAX_CONSTRAINT",
+      field: "prefix_filter",
+      from: prefix,
+      to: null,
+      reason: `Prefix constraint "${prefix}" produced ${deliveredCount} of ${requestedCount} requested matches. Prefix is a soft constraint.`,
+    });
+  }
+
+  if (changes.length === 0 && deliveredCount < requestedCount) {
+    if (location && !isSoft("location", input)) {
+      hardFieldsNeeded.push("location");
+    }
+    if (prefix != null && !isSoft("prefix_filter", input) && !isSoft("prefix", input)) {
+      hardFieldsNeeded.push("prefix_filter");
+    }
+    if (input.constraints?.business_type && !isSoft("business_type", input)) {
+      hardFieldsNeeded.push("business_type");
+    }
+  }
+
+  return {
+    changes: changes.slice(0, 3),
+    requiresHardRelax: changes.length === 0 && hardFieldsNeeded.length > 0,
+    hardFieldsNeeded,
+  };
+}
+
+function buildLegacyChanges(
   input: TowerVerdictInput,
   gaps: string[],
   requestedCount: number,
   deliveredCount: number
 ): SuggestedChange[] {
   const changes: SuggestedChange[] = [];
-  const prefix = input.constraints?.prefix ?? null;
+  const prefix = resolvePrefix(input);
   const location = extractLocation(input);
   const toolLimitation = extractToolLimitation(input);
 
@@ -157,38 +261,86 @@ function buildSuggestedChanges(
   return changes.slice(0, 3);
 }
 
+function buildAskUserOptions(hardFieldsNeeded: string[], input: TowerVerdictInput): AskUserOption[] {
+  const options: AskUserOption[] = [];
+
+  if (hardFieldsNeeded.includes("location")) {
+    const location = input.constraints?.location ?? null;
+    options.push({
+      label: "Option A: Relax location",
+      description: `Expand search beyond ${location ?? "current area"} to surrounding areas`,
+      field: "location",
+      action: "EXPAND_AREA",
+    });
+  }
+
+  if (hardFieldsNeeded.includes("prefix_filter")) {
+    const prefix = resolvePrefix(input);
+    options.push({
+      label: "Option B: Relax prefix filter",
+      description: `Remove the requirement for names starting with "${prefix ?? ""}"`,
+      field: "prefix_filter",
+      action: "RELAX_CONSTRAINT",
+    });
+  }
+
+  if (hardFieldsNeeded.includes("business_type")) {
+    const bt = input.constraints?.business_type ?? null;
+    options.push({
+      label: `Option ${String.fromCharCode(65 + options.length)}: Relax business type`,
+      description: `Broaden from "${bt ?? "current type"}" to related business types`,
+      field: "business_type",
+      action: "BROADEN_QUERY",
+    });
+  }
+
+  return options;
+}
+
+function checkCountHardViolation(
+  input: TowerVerdictInput,
+  requestedCount: number,
+  deliveredCount: number
+): boolean {
+  if (!isHard("count", input) && !isHard("requested_count", input)) return false;
+  return deliveredCount < requestedCount;
+}
+
+function checkBusinessTypeHardViolation(input: TowerVerdictInput): boolean {
+  return isHard("business_type", input);
+}
+
 export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
   const requestedCount = resolveRequestedCount(input);
   const deliveredCount = resolveDeliveredCount(input);
-  const prefix = input.constraints?.prefix ?? null;
-  const goal = input.original_user_goal ?? null;
+  const prefix = resolvePrefix(input);
+  const goal = input.original_user_goal ?? input.normalized_goal ?? null;
+  const classified = hasConstraintClassification(input);
 
   let verdict: TowerVerdictAction;
   let gaps: string[] = [];
   let confidence: number;
   let rationale: string;
+  let suggestedChanges: SuggestedChange[] = [];
+  let askUserOptions: AskUserOption[] | undefined;
 
-  if (requestedCount > 0 && deliveredCount === 0) {
-    verdict = "CHANGE_PLAN";
+  if (deliveredCount >= requestedCount && requestedCount > 0) {
+    verdict = "ACCEPT";
+    const ratio = deliveredCount / requestedCount;
+    confidence = Math.min(95, Math.round(80 + (ratio - 1) * 15));
+    if (confidence < 80) confidence = 80;
+    gaps = [];
+    rationale = `Delivered ${deliveredCount} leads, meeting or exceeding the requested ${requestedCount}. Artefact accepted.`;
+  } else if (requestedCount > 0 && deliveredCount < requestedCount) {
     gaps = ["insufficient_count"];
-    confidence = 95;
-    rationale = `Delivered 0 of ${requestedCount} requested.`;
+    rationale = deliveredCount === 0
+      ? `Delivered 0 of ${requestedCount} requested.`
+      : `Delivered ${deliveredCount} of ${requestedCount} requested.`;
 
     if (prefix && deliveredCount === 0) {
       gaps.push("constraint_too_strict");
-      rationale += ` Prefix constraint "${prefix}" produced 0 matches, broaden search or expand location/radius.`;
-    }
-
-    if (goal) {
-      rationale += ` Goal: "${goal}"`;
-    }
-  } else if (deliveredCount < requestedCount) {
-    verdict = "CHANGE_PLAN";
-    gaps = ["insufficient_count"];
-    confidence = Math.round(50 + (deliveredCount / requestedCount) * 30);
-    rationale = `Delivered ${deliveredCount} of ${requestedCount} requested.`;
-
-    if (prefix) {
+      rationale += ` Prefix constraint "${prefix}" produced 0 matches.`;
+    } else if (prefix) {
       gaps.push("constraint_too_strict");
       rationale += ` Prefix constraint "${prefix}" may be limiting results.`;
     }
@@ -196,19 +348,32 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
     if (goal) {
       rationale += ` Goal: "${goal}"`;
     }
+
+    if (classified) {
+      const buildResult = buildConstraintAwareChanges(input, gaps, requestedCount, deliveredCount);
+
+      if (buildResult.requiresHardRelax) {
+        verdict = "ASK_USER";
+        confidence = 90;
+        rationale += ` All remaining constraints are hard — cannot auto-relax. User decision required.`;
+        suggestedChanges = [];
+        askUserOptions = buildAskUserOptions(buildResult.hardFieldsNeeded, input);
+      } else {
+        verdict = "CHANGE_PLAN";
+        confidence = deliveredCount === 0 ? 95 : Math.round(50 + (deliveredCount / requestedCount) * 30);
+        suggestedChanges = buildResult.changes;
+      }
+    } else {
+      verdict = "CHANGE_PLAN";
+      confidence = deliveredCount === 0 ? 95 : Math.round(50 + (deliveredCount / requestedCount) * 30);
+      suggestedChanges = buildLegacyChanges(input, gaps, requestedCount, deliveredCount);
+    }
   } else {
     verdict = "ACCEPT";
-    const ratio = requestedCount > 0 ? deliveredCount / requestedCount : 1;
-    confidence = Math.min(95, Math.round(80 + (ratio - 1) * 15));
-    if (confidence < 80) confidence = 80;
+    confidence = 80;
     gaps = [];
-    rationale = `Delivered ${deliveredCount} leads, meeting or exceeding the requested ${requestedCount}. Artefact accepted.`;
+    rationale = `Delivered ${deliveredCount} leads. Artefact accepted.`;
   }
-
-  const suggestedChanges: SuggestedChange[] =
-    verdict === "CHANGE_PLAN"
-      ? buildSuggestedChanges(input, gaps, requestedCount, deliveredCount)
-      : [];
 
   const result: TowerVerdict = {
     verdict,
@@ -218,6 +383,7 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
     confidence,
     rationale,
     suggested_changes: suggestedChanges,
+    ...(askUserOptions && askUserOptions.length > 0 ? { ask_user_options: askUserOptions } : {}),
   };
 
   console.log(
