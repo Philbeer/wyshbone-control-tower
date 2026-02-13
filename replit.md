@@ -127,8 +127,9 @@ Tower judges artefacts, not tools. After Supervisor creates artefacts (e.g. `ste
 
 *   **Endpoint:** `POST /api/tower/judge-artefact`
 *   **Request:** `runId`, `artefactId`, `goal`, optional `successCriteria`, `artefactType`
-*   **How it works:** Tower reads the artefact row directly from the Supabase `artefacts` table (by `artefactId`), inspects `payload_json.step_status`, and returns a deterministic verdict.
-*   **Judgement rules (v1):**
+*   **How it works:** Tower reads the artefact row directly from the Supabase `artefacts` table (by `artefactId`), inspects `payload_json`, and returns a deterministic verdict.
+*   **Judgement rules (v2):**
+    *   **If `artefactType == "leads_list"`:** Routes through `judgeLeadsList()` from `src/evaluator/towerVerdict.ts`. Extracts `delivered_count`, `target_count`, `prefix_filter`, and `success_criteria` from the artefact payload AND `successCriteria` from the request body. Maps Tower verdict (ACCEPT→pass/continue, CHANGE_PLAN→fail/change_plan, STOP→fail/stop) into the judge-artefact response format. This ensures the same strict count-based rules apply: delivered < requested → fail + change_plan with gap `insufficient_count`; prefix constraint with 0 results → adds gap `constraint_too_strict`.
     *   If `payload_json.step_status == "fail"` → verdict=`fail`, action=`stop`
     *   Else if `step_type == "SEARCH_PLACES"` and `metrics.places_found == 0` → verdict=`fail`, action=`stop`
     *   Else if `step_type == "ENRICH_LEADS"` and `metrics.leads_enriched == 0` → verdict=`fail`, action=`stop`
@@ -137,7 +138,7 @@ Tower judges artefacts, not tools. After Supervisor creates artefacts (e.g. `ste
 *   **Safety:** If the artefact is not found or the Supabase query fails, Tower returns verdict=`fail`, action=`stop`.
 *   **Response:** `{ verdict, action, reasons[], metrics{} }`
 *   **File:** `server/routes-judge-artefact.ts`
-*   **Key principle:** This endpoint is generic — no lead-specific or plan-specific logic. Works for any artefact type.
+*   **Key principle:** For `leads_list` artefacts, Tower enforces the user's goal (count + constraints). For all other artefact types, generic step_status logic applies.
 
 ## Database Rules
 
