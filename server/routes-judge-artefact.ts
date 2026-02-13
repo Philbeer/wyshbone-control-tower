@@ -19,7 +19,7 @@ interface JudgeArtefactResponse {
   action: "continue" | "stop" | "retry" | "change_plan";
   reasons: string[];
   metrics: Record<string, unknown>;
-  suggested_changes?: Array<{
+  suggested_changes: Array<{
     type: string;
     field: string;
     from: string | null;
@@ -172,6 +172,7 @@ router.post("/judge-artefact", async (req, res) => {
         action: "stop",
         reasons: ["Supabase query failed while fetching artefact"],
         metrics: { artefactId, runId, artefactType, error: "supabase_query_failed" },
+        suggested_changes: [],
       };
       res.json(failResponse);
       return;
@@ -183,6 +184,7 @@ router.post("/judge-artefact", async (req, res) => {
         action: "stop",
         reasons: [`Artefact not found: ${artefactId}`],
         metrics: { artefactId, runId, artefactType, error: "artefact_not_found" },
+        suggested_changes: [],
       };
       res.json(failResponse);
       return;
@@ -269,6 +271,7 @@ router.post("/judge-artefact", async (req, res) => {
         stepStatus: stepStatus ?? null,
         judgedAt: new Date().toISOString(),
       },
+      suggested_changes: [],
     };
 
     res.json(response);
@@ -279,6 +282,7 @@ router.post("/judge-artefact", async (req, res) => {
       action: "stop",
       reasons: ["Unexpected error during artefact judgement"],
       metrics: { error: "unexpected_error" },
+      suggested_changes: [],
     };
     res.status(500).json(failResponse);
   }
