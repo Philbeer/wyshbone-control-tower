@@ -20,10 +20,17 @@ The system incorporates a sophisticated evaluation suite for automated testing, 
 *   **Live User Run Logging & Investigation:** Logs real Wyshbone UI user conversations for observability and enables investigation creation.
 *   **Conversation Quality Investigation:** Analyzes and automatically detects Wyshbone-specific conversation quality issues using GPT-4o-mini, classifying failures and suggesting fixes/tests.
 *   **Patch Failure Post-Mortem:** Analyzes rejected auto-generated patches to classify failure reasons and recommend next steps.
-*   **Tower Verdict (Agent Loop Judgement):** Deterministically evaluates leads list artifacts against user goals and constraints, returning structured verdicts (ACCEPT/CHANGE_PLAN/STOP) with `action` (continue/retry/change_plan/stop) and `reason_code` fields. Enforces a strict judgement contract: requires `requested_count_user` (returns STOP with `missing_requested_count_user` if absent), judges only against that count. Supports structured constraints with `hardness` (hard/soft) and `was_relaxed` flags per field. Hard constraints are never auto-relaxed — if violated (was_relaxed=true on hard), returns STOP with `hard_constraint_violated`. Soft constraints are relaxed in priority order: EXPAND_AREA → INCREASE_COVERAGE → RELAX_CONSTRAINT. "Lying acceptance" prevention: ACCEPT rationale explicitly notes any relaxed constraints. Safety check: detects no-progress loops via `attempt_history` and returns STOP with `no_progress_over_attempts`. Backwards compatible with legacy payloads using `hard_constraints`/`soft_constraints` arrays.
-*   **Judgement API:** A deterministic evaluation endpoint that returns a verdict (CONTINUE/STOP/CHANGE_STRATEGY) based on a run snapshot and success criteria.
+*   **Tower Verdict (Agent Loop Judgement):** Evidence-based constraint evaluation of leads_list artifacts. Returns structured verdicts (ACCEPT/CHANGE_PLAN/STOP). Requires `requested_count_user` (returns STOP if absent). Typed constraints: NAME_CONTAINS, NAME_STARTS_WITH, LOCATION, COUNT_MIN — each with `hardness` (hard/soft). Hard constraint violations prevent ACCEPT. COUNT_MIN evaluates against name-matched lead count, not total leads. Soft constraints suggest RELAX_CONSTRAINT when insufficient matches. Safety check: detects no-progress loops via `attempt_history`. Backwards compatible with legacy `hard_constraints`/`soft_constraints` arrays.
 *   **Artefact Judgement API:** Tower judges artifacts stored in Supabase by inspecting their `payload_json` and applying specific rules based on `artefactType` (e.g., `leads_list` artefacts are judged by count and constraint adherence) to determine whether to continue or stop a run.
 *   **Tower Dev Chat:** A dedicated interface for developers to report issues, with automatic context gathering from the codebase and AI-powered patch suggestions using OpenAI GPT-4o-mini. Issues are tracked through various states (new, context_gathered, investigating, resolved, closed) in a PostgreSQL database.
+
+**Constraint-Driven Evidence-Based Evaluation (v2):**
+Tower evaluates each constraint against the actual delivered leads array:
+*   `NAME_CONTAINS`: Counts leads whose name contains the word (case-insensitive, word-boundary matching).
+*   `NAME_STARTS_WITH`: Counts leads whose name starts with the specified letter(s).
+*   `LOCATION`: Trusts Supervisor-provided location context (no geocoding in Tower).
+*   `COUNT_MIN`: Compares matched lead count against `requested_count_user`.
+Each constraint has `hardness` (hard/soft). Hard violations prevent ACCEPT. `suggested_changes` only proposes `RELAX_CONSTRAINT` for soft constraints. Output includes `constraint_results` with per-constraint match counts.
 
 **UI/UX Decisions:**
 The dashboard features a simplified design with plain language, focusing on three core sections:

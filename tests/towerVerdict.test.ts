@@ -1,4 +1,4 @@
-import { judgeLeadsList, TowerVerdictInput } from "../src/evaluator/towerVerdict";
+import { judgeLeadsList, TowerVerdictInput, Lead, Constraint } from "../src/evaluator/towerVerdict";
 
 let passed = 0;
 let failed = 0;
@@ -17,10 +17,10 @@ function expect<T>(actual: T) {
     },
     toContain(expected: string) {
       if (Array.isArray(actual)) {
-        if (!(actual as unknown[]).some(item => typeof item === "string" && item.includes(expected))) {
-          if (!(actual as unknown[]).includes(expected)) {
-            throw new Error(`Expected array ${JSON.stringify(actual)} to contain "${expected}"`);
-          }
+        if (!(actual as unknown[]).some(item =>
+          typeof item === "string" && item.includes(expected)
+        )) {
+          throw new Error(`Expected array ${JSON.stringify(actual)} to contain "${expected}"`);
         }
       } else if (typeof actual !== "string" || !actual.includes(expected)) {
         throw new Error(`Expected "${actual}" to contain "${expected}"`);
@@ -45,7 +45,7 @@ function expect<T>(actual: T) {
 }
 
 function runTests() {
-  console.log("Running Tower Verdict Tests (New Contract)\n");
+  console.log("Running Tower Verdict Tests (Evidence-Based Constraints)\n");
 
   for (const { name, fn } of tests) {
     try {
@@ -66,346 +66,385 @@ function runTests() {
   }
 }
 
+const sampleLeads: Lead[] = [
+  { name: "The Plough Inn", address: "High Street, Arundel" },
+  { name: "Pear Tree Pub", address: "Mill Road, Arundel" },
+  { name: "The Swan", address: "River Road, Arundel" },
+  { name: "The Red Lion", address: "Castle Square, Arundel" },
+  { name: "The Black Rabbit", address: "Mill Road, Offham" },
+];
+
+const dentistLeads: Lead[] = [
+  { name: "Arundel Dental Practice", address: "High Street, Arundel" },
+  { name: "Castle Dental Care", address: "Tarrant Street, Arundel" },
+  { name: "Arun Dental Surgery", address: "Mill Road, Littlehampton" },
+  { name: "South Downs Dental", address: "London Road, Worthing" },
+  { name: "River Road Dentists", address: "River Road, Storrington" },
+  { name: "Chanctonbury Dental", address: "High Street, Steyning" },
+  { name: "The Angmering Dental Practice", address: "Station Road, Angmering" },
+  { name: "Pulborough Dental Surgery", address: "Lower Street, Pulborough" },
+  { name: "Petworth Dental Care", address: "East Street, Petworth" },
+  { name: "Billingshurst Dental", address: "High Street, Billingshurst" },
+  { name: "Henfield Dental Practice", address: "High Street, Henfield" },
+  { name: "Findon Dental Surgery", address: "Findon Road, Findon" },
+  { name: "Bramber Dental Clinic", address: "Castle Road, Bramber" },
+];
+
 test("STOP when requested_count_user is missing", () => {
   const result = judgeLeadsList({
-    delivered_count: 5,
-    original_user_goal: "Find pubs in Arundel",
+    leads: sampleLeads,
+    original_goal: "Find pubs in Arundel",
   });
   expect(result.verdict).toBe("STOP");
-  expect(result.reason_code).toBe("missing_requested_count_user");
-  expect(result.action).toBe("stop");
+  expect(result.gaps).toContain("missing_requested_count_user");
 });
 
-test("Output shape always includes action and reason_code", () => {
+test("ACCEPT: basic count met with no constraints", () => {
   const result = judgeLeadsList({
-    requested_count_user: 5,
-    delivered_count: 5,
-    original_user_goal: "Find 5 pubs in Arundel",
+    requested_count_user: 3,
+    leads: sampleLeads,
+    original_goal: "Find 3 pubs in Arundel",
+    constraints: [],
   });
-  expect(result.action).toBeDefined();
-  expect(result.reason_code).toBeDefined();
-  if (!["continue", "retry", "change_plan", "stop"].includes(result.action)) {
-    throw new Error(`Invalid action: ${result.action}`);
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.delivered).toBe(5);
+  expect(result.requested).toBe(3);
+});
+
+test("NAME_CONTAINS: counts leads containing word", () => {
+  const constraints: Constraint[] = [
+    { type: "NAME_CONTAINS", field: "name", value: "Pub", hardness: "soft" },
+    { type: "COUNT_MIN", field: "count", value: 3, hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: sampleLeads,
+    constraints,
+    original_goal: "Find 3 pubs in Arundel",
+  });
+  if (result.constraint_results) {
+    const nameResult = result.constraint_results.find(r => r.constraint.type === "NAME_CONTAINS");
+    if (!nameResult) throw new Error("Expected NAME_CONTAINS result");
+    expect(nameResult.matched_count).toBe(1);
   }
 });
 
-test("ACCEPT when delivered >= requested (basic)", () => {
+test("NAME_STARTS_WITH: counts leads starting with letter", () => {
+  const constraints: Constraint[] = [
+    { type: "NAME_STARTS_WITH", field: "name", value: "T", hardness: "hard" },
+    { type: "COUNT_MIN", field: "count", value: 3, hardness: "hard" },
+  ];
   const result = judgeLeadsList({
-    requested_count_user: 5,
-    delivered_count: 5,
-    original_user_goal: "Find 5 pubs in Arundel",
+    requested_count_user: 3,
+    leads: sampleLeads,
+    constraints,
+    original_goal: "Find places starting with T",
   });
-  expect(result.verdict).toBe("ACCEPT");
-  expect(result.action).toBe("continue");
-  expect(result.delivered).toBe(5);
-  expect(result.requested).toBe(5);
-  expect(result.suggested_changes).toHaveLength(0);
-  expect(result.reason_code).toBe("accepted");
+  expect(result.delivered).toBe(4);
 });
 
-test("Acceptance Test A: dentists in Arundel, requested=4, delivered=13 within 25km", () => {
-  const input: TowerVerdictInput = {
+test("COUNT_MIN evaluates against matched leads, not total leads", () => {
+  const leads: Lead[] = [
+    { name: "Alpha Dental" },
+    { name: "Beta Dental" },
+    { name: "Charlie Plumbing" },
+    { name: "Delta Plumbing" },
+    { name: "Echo Plumbing" },
+    { name: "Foxtrot Plumbing" },
+  ];
+  const constraints: Constraint[] = [
+    { type: "NAME_CONTAINS", field: "name", value: "dental", hardness: "hard" },
+    { type: "COUNT_MIN", field: "count", value: 4, hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
     requested_count_user: 4,
-    accumulated_count: 13,
-    original_user_goal: "Find 4 dentists in Arundel",
-    constraints: {
-      business_type: { value: "dentist", hardness: "hard", was_relaxed: false },
-      location: { value: "Arundel", hardness: "soft", was_relaxed: false },
-    },
-    radius_km: 25,
-  };
-  const result = judgeLeadsList(input);
+    leads,
+    constraints,
+    original_goal: "Find 4 dental clinics",
+  });
+  if (result.verdict === "ACCEPT") {
+    throw new Error(`Expected verdict not to be ACCEPT, but got ACCEPT`);
+  }
+  expect(result.delivered).toBe(2);
+  const countResult = result.constraint_results?.find(
+    r => r.constraint.type === "COUNT_MIN"
+  );
+  expect(countResult).toBeDefined();
+  expect(countResult!.passed).toBe(false);
+  expect(countResult!.matched_count).toBe(2);
+});
+
+test("Acceptance Test A: dentists in Arundel, requested=4, delivered=13 within 25km → ACCEPT", () => {
+  const constraints: Constraint[] = [
+    { type: "LOCATION", field: "location", value: "Arundel", hardness: "soft" },
+    { type: "COUNT_MIN", field: "count", value: 4, hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads: dentistLeads,
+    constraints,
+    original_goal: "Find 4 dentists in Arundel",
+  });
   expect(result.verdict).toBe("ACCEPT");
-  expect(result.action).toBe("continue");
   expect(result.delivered).toBe(13);
   expect(result.requested).toBe(4);
-  if (!result.rationale.toLowerCase().includes("relaxed") && !result.rationale.toLowerCase().includes("expanded")) {
-    if (input.radius_km && input.radius_km > 5) {
-      expect(result.rationale).toContain("location expanded");
-    }
-  }
 });
 
-test("Acceptance Test B: pubs in Arundel prefix P hard, delivered=0 → CHANGE_PLAN suggesting EXPAND_AREA only", () => {
-  const input: TowerVerdictInput = {
+test("Acceptance Test B: pubs in Arundel prefix P hard, delivered=0 → CHANGE_PLAN", () => {
+  const emptyLeads: Lead[] = [];
+  const constraints: Constraint[] = [
+    { type: "NAME_STARTS_WITH", field: "name", value: "P", hardness: "hard" },
+    { type: "LOCATION", field: "location", value: "Arundel", hardness: "soft" },
+    { type: "COUNT_MIN", field: "count", value: 5, hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
     requested_count_user: 5,
-    delivered_count: 0,
-    original_user_goal: "Find 5 pubs in Arundel starting with P",
-    constraints: {
-      business_type: { value: "pub", hardness: "hard", was_relaxed: false },
-      location: { value: "Arundel", hardness: "soft", was_relaxed: false },
-      prefix_filter: { value: "P", hardness: "hard", was_relaxed: false },
-    },
-  };
-  const result = judgeLeadsList(input);
-  expect(result.verdict).toBe("CHANGE_PLAN");
-  expect(result.action).toBe("change_plan");
+    leads: emptyLeads,
+    constraints,
+    original_goal: "Find 5 pubs in Arundel starting with P",
+  });
 
-  const expandArea = result.suggested_changes.find(c => c.type === "EXPAND_AREA");
-  if (!expandArea) {
-    throw new Error("Expected EXPAND_AREA in suggestions");
+  if (result.verdict === "ACCEPT") {
+    throw new Error("Must not ACCEPT with 0 leads delivered");
   }
 
   const relaxPrefix = result.suggested_changes.find(
-    c => c.field === "prefix_filter" && c.type === "RELAX_CONSTRAINT"
+    c => c.field === "name" && c.from === "P"
   );
   if (relaxPrefix) {
-    throw new Error("Must NOT suggest relaxing hard prefix_filter constraint");
+    throw new Error("Must NOT suggest relaxing hard NAME_STARTS_WITH constraint");
   }
 });
 
-test("Acceptance Test B extension: max radius reached with 0 results → STOP", () => {
-  const input: TowerVerdictInput = {
-    requested_count_user: 5,
-    delivered_count: 0,
-    original_user_goal: "Find 5 pubs in Arundel starting with P",
-    constraints: {
-      business_type: { value: "pub", hardness: "hard", was_relaxed: false },
-      location: { value: "Arundel", hardness: "hard", was_relaxed: false },
-      prefix_filter: { value: "P", hardness: "hard", was_relaxed: false },
-    },
-    radius_km: 50,
-  };
-  const result = judgeLeadsList(input);
-  expect(result.verdict).toBe("STOP");
-  expect(result.action).toBe("stop");
-});
-
-test("Hard constraint violation: prefix_filter was_relaxed=true → STOP", () => {
-  const input: TowerVerdictInput = {
-    requested_count_user: 5,
-    delivered_count: 20,
-    original_user_goal: "Find 5 pubs in Arundel starting with P",
-    constraints: {
-      business_type: { value: "pub", hardness: "hard", was_relaxed: false },
-      location: { value: "Arundel", hardness: "soft", was_relaxed: false },
-      prefix_filter: { value: "P", hardness: "hard", was_relaxed: true },
-    },
-  };
-  const result = judgeLeadsList(input);
-  expect(result.verdict).toBe("STOP");
-  expect(result.reason_code).toBe("hard_constraint_violated");
-  const hasViolationGap = result.gaps.some(g => g.includes("hard_constraint_violated"));
-  if (!hasViolationGap) {
-    throw new Error("Expected gaps to include hard_constraint_violated");
-  }
-});
-
-test("Lying acceptance prevention: ACCEPT with relaxed constraints notes them in rationale", () => {
-  const input: TowerVerdictInput = {
-    requested_count_user: 4,
-    accumulated_count: 13,
-    original_user_goal: "Find 4 dentists in Arundel",
-    constraints: {
-      business_type: { value: "dentist", hardness: "hard", was_relaxed: false },
-      location: { value: "Arundel", hardness: "soft", was_relaxed: true },
-    },
-    radius_km: 25,
-  };
-  const result = judgeLeadsList(input);
-  expect(result.verdict).toBe("ACCEPT");
-  expect(result.rationale).toContain("relaxed");
-  expect(result.reason_code).toBe("accepted_with_relaxed_constraints");
-});
-
-test("No-progress safety check: STOP when plan_version increases but nothing changes", () => {
-  const input: TowerVerdictInput = {
-    requested_count_user: 5,
-    delivered_count: 2,
-    original_user_goal: "Find 5 pubs in Arundel",
-    attempt_history: [
-      { plan_version: 1, radius_km: 10, delivered_count: 2 },
-      { plan_version: 2, radius_km: 10, delivered_count: 2 },
-    ],
-    constraints: {
-      business_type: { value: "pub", hardness: "hard", was_relaxed: false },
-      location: { value: "Arundel", hardness: "soft", was_relaxed: false },
-    },
-  };
-  const result = judgeLeadsList(input);
-  expect(result.verdict).toBe("STOP");
-  expect(result.reason_code).toBe("no_progress_over_attempts");
-  expect(result.action).toBe("stop");
-});
-
-test("CHANGE_PLAN prioritizes EXPAND_AREA then INCREASE_COVERAGE then RELAX_CONSTRAINT", () => {
-  const input: TowerVerdictInput = {
-    requested_count_user: 10,
-    delivered_count: 3,
-    original_user_goal: "Find 10 pubs in Arundel starting with P",
-    constraints: {
-      business_type: { value: "pub", hardness: "hard", was_relaxed: false },
-      location: { value: "Arundel", hardness: "soft", was_relaxed: false },
-      prefix_filter: { value: "P", hardness: "soft", was_relaxed: false },
-    },
-  };
-  const result = judgeLeadsList(input);
-  expect(result.verdict).toBe("CHANGE_PLAN");
-
-  const types = result.suggested_changes.map(c => c.type);
-  const expandIdx = types.indexOf("EXPAND_AREA");
-  const coverageIdx = types.indexOf("INCREASE_COVERAGE");
-  const relaxIdx = types.indexOf("RELAX_CONSTRAINT");
-
-  if (expandIdx === -1) throw new Error("Expected EXPAND_AREA");
-  if (coverageIdx === -1) throw new Error("Expected INCREASE_COVERAGE");
-  if (relaxIdx === -1) throw new Error("Expected RELAX_CONSTRAINT");
-  if (expandIdx > coverageIdx) throw new Error("EXPAND_AREA should come before INCREASE_COVERAGE");
-  if (coverageIdx > relaxIdx) throw new Error("INCREASE_COVERAGE should come before RELAX_CONSTRAINT");
-});
-
-test("Never suggest relaxing a hard constraint", () => {
-  const input: TowerVerdictInput = {
-    requested_count_user: 5,
-    delivered_count: 0,
-    constraints: {
-      business_type: { value: "pub", hardness: "hard", was_relaxed: false },
-      location: { value: "Arundel", hardness: "soft", was_relaxed: false },
-      prefix_filter: { value: "P", hardness: "hard", was_relaxed: false },
-    },
-    original_user_goal: "Find 5 pubs in Arundel that begin with P",
-  };
-  const result = judgeLeadsList(input);
-  for (const change of result.suggested_changes) {
-    if (change.field === "prefix_filter" && change.type === "RELAX_CONSTRAINT") {
-      throw new Error("Must not suggest relaxing hard constraint prefix_filter");
-    }
-    if (change.field === "business_type" && (change.type === "RELAX_CONSTRAINT" || change.type === "BROADEN_QUERY")) {
-      throw new Error("Must not suggest broadening hard constraint business_type");
-    }
-  }
-});
-
-test("Legacy input: CHANGE_PLAN when no structured constraints provided", () => {
+test("Acceptance Test B extension: max replans → STOP with hard constraint impossible", () => {
+  const emptyLeads: Lead[] = [];
+  const constraints: Constraint[] = [
+    { type: "NAME_STARTS_WITH", field: "name", value: "P", hardness: "hard" },
+    { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+    { type: "COUNT_MIN", field: "count", value: 5, hardness: "hard" },
+  ];
   const result = judgeLeadsList({
     requested_count_user: 5,
-    delivered_count: 0,
-    constraints: {
-      prefix_filter: { value: "P", hardness: "soft", was_relaxed: false },
-      location: { value: "Arundel", hardness: "soft", was_relaxed: false },
-      business_type: { value: "pub", hardness: "hard", was_relaxed: false },
-    },
-    original_user_goal: "Find 5 pubs in Arundel that begin with P",
+    leads: emptyLeads,
+    constraints,
+    original_goal: "Find 5 pubs in Arundel starting with P",
   });
-  expect(result.verdict).toBe("CHANGE_PLAN");
-  expect(result.gaps).toContain("insufficient_count");
+  expect(result.verdict).toBe("STOP");
+  expect(result.rationale).toContain("impossible");
 });
 
-test("Legacy hard/soft arrays still work (backwards compatible)", () => {
-  const input: TowerVerdictInput = {
-    requested_count_user: 5,
-    delivered_count: 0,
-    constraints: { prefix: "P", location: "Arundel", business_type: "pub" } as any,
-    hard_constraints: ["count", "business_type"],
-    soft_constraints: ["location", "prefix_filter"],
-    original_user_goal: "Find 5 pubs in Arundel that begin with P",
-  };
-  const result = judgeLeadsList(input);
-  expect(result.verdict).toBe("CHANGE_PLAN");
+test("Hard constraint violated: NAME_STARTS_WITH hard with no matches", () => {
+  const constraints: Constraint[] = [
+    { type: "NAME_STARTS_WITH", field: "name", value: "Z", hardness: "hard" },
+    { type: "COUNT_MIN", field: "count", value: 3, hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: sampleLeads,
+    constraints,
+    original_goal: "Find 3 places starting with Z",
+  });
+  if (result.verdict === "ACCEPT") {
+    throw new Error("Cannot ACCEPT when hard NAME_STARTS_WITH constraint violated");
+  }
+  expect(result.gaps).toContain("hard_constraint_violated(name)");
+});
 
-  const expandArea = result.suggested_changes.find(c => c.type === "EXPAND_AREA" && c.field === "location");
-  if (!expandArea) {
-    throw new Error("Expected EXPAND_AREA for soft location");
+test("Hard constraint prevents ACCEPT even when count is met", () => {
+  const constraints: Constraint[] = [
+    { type: "NAME_STARTS_WITH", field: "name", value: "Z", hardness: "hard" },
+    { type: "COUNT_MIN", field: "count", value: 1, hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 1,
+    leads: sampleLeads,
+    constraints,
+    original_goal: "Find a place starting with Z",
+  });
+  if (result.verdict === "ACCEPT") {
+    throw new Error("Cannot ACCEPT when hard constraint NAME_STARTS_WITH(Z) violated");
   }
 });
 
-test("Suggested changes are structured objects, not strings", () => {
-  const input: TowerVerdictInput = {
+test("Soft constraint: suggests RELAX_CONSTRAINT for soft NAME_CONTAINS", () => {
+  const constraints: Constraint[] = [
+    { type: "NAME_CONTAINS", field: "name", value: "Grill", hardness: "soft" },
+    { type: "COUNT_MIN", field: "count", value: 3, hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: sampleLeads,
+    constraints,
+    original_goal: "Find 3 grill restaurants",
+  });
+  if (result.verdict === "ACCEPT") {
+    throw new Error("Should not accept: 0 name matches for Grill and count 5 < 3 matched");
+  }
+  const relaxChange = result.suggested_changes.find(c => c.field === "name");
+  if (result.suggested_changes.length > 0 && !relaxChange) {
+    throw new Error("Expected RELAX_CONSTRAINT for soft name constraint if changes suggested");
+  }
+});
+
+test("suggested_changes only contains typed objects, never strings", () => {
+  const constraints: Constraint[] = [
+    { type: "LOCATION", field: "location", value: "Arundel", hardness: "soft" },
+    { type: "NAME_CONTAINS", field: "name", value: "Pizza", hardness: "soft" },
+    { type: "COUNT_MIN", field: "count", value: 5, hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
     requested_count_user: 5,
-    delivered_count: 0,
-    constraints: {
-      prefix_filter: { value: "P", hardness: "soft", was_relaxed: false },
-      location: { value: "Arundel", hardness: "soft", was_relaxed: false },
-      business_type: { value: "pub", hardness: "hard", was_relaxed: false },
-    },
-    original_user_goal: "Find 5 pubs in Arundel that begin with P",
-  };
-  const result = judgeLeadsList(input);
+    leads: sampleLeads,
+    constraints,
+    original_goal: "Find 5 pizza places in Arundel",
+  });
   for (const change of result.suggested_changes) {
     if (typeof change !== "object") {
       throw new Error("Suggested change must be an object");
     }
-    if (!change.type || !change.field || !change.reason) {
+    expect(change.type).toBe("RELAX_CONSTRAINT");
+    if (!change.field || !change.reason) {
       throw new Error("Suggested change must have type, field, and reason");
     }
-    if (typeof change.type !== "string" || typeof change.field !== "string" || typeof change.reason !== "string") {
-      throw new Error("type, field, reason must be strings");
+  }
+});
+
+test("suggested_changes only proposes relaxations for SOFT constraints", () => {
+  const constraints: Constraint[] = [
+    { type: "NAME_STARTS_WITH", field: "name", value: "Z", hardness: "hard" },
+    { type: "LOCATION", field: "location", value: "Arundel", hardness: "soft" },
+    { type: "COUNT_MIN", field: "count", value: 5, hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 5,
+    leads: sampleLeads,
+    constraints,
+    original_goal: "Find 5 places starting with Z in Arundel",
+  });
+  for (const change of result.suggested_changes) {
+    const matchingConstraint = constraints.find(c => c.field === change.field);
+    if (matchingConstraint && matchingConstraint.hardness === "hard") {
+      throw new Error(`Must not suggest relaxation for hard constraint: ${change.field}`);
     }
   }
 });
 
-test("STOP when all constraints hard and insufficient results (ASK_USER with options)", () => {
-  const input: TowerVerdictInput = {
+test("Output is strict JSON shape", () => {
+  const result = judgeLeadsList({
     requested_count_user: 5,
-    delivered_count: 0,
-    constraints: {
-      business_type: { value: "pub", hardness: "hard", was_relaxed: false },
-      location: { value: "Arundel", hardness: "hard", was_relaxed: false },
-      prefix_filter: { value: "P", hardness: "hard", was_relaxed: false },
-    },
-    original_user_goal: "Find 5 pubs in Arundel that begin with P",
-  };
-  const result = judgeLeadsList(input);
+    leads: sampleLeads,
+    constraints: [],
+    original_goal: "Find 5 pubs",
+  });
+  if (!["ACCEPT", "RETRY", "CHANGE_PLAN", "STOP"].includes(result.verdict)) {
+    throw new Error(`Invalid verdict: ${result.verdict}`);
+  }
+  if (typeof result.delivered !== "number") throw new Error("delivered must be number");
+  if (typeof result.requested !== "number") throw new Error("requested must be number");
+  if (!Array.isArray(result.gaps)) throw new Error("gaps must be array");
+  if (typeof result.confidence !== "number") throw new Error("confidence must be number");
+  if (result.confidence < 0 || result.confidence > 100) throw new Error("confidence must be 0-100");
+  if (typeof result.rationale !== "string") throw new Error("rationale must be string");
+  if (!Array.isArray(result.suggested_changes)) throw new Error("suggested_changes must be array");
+});
+
+test("No-progress safety check still works", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 5,
+    leads: [{ name: "A", address: "X" }, { name: "B", address: "Y" }],
+    constraints: [],
+    original_goal: "Find 5 things",
+    attempt_history: [
+      { plan_version: 1, radius_km: 10, delivered_count: 2 },
+      { plan_version: 2, radius_km: 10, delivered_count: 2 },
+    ],
+  });
   expect(result.verdict).toBe("STOP");
-  expect(result.action).toBe("stop");
+  expect(result.gaps).toContain("no_further_progress_possible");
+});
+
+test("Falls back to requested_count when requested_count_user absent", () => {
+  const result = judgeLeadsList({
+    requested_count: 3,
+    leads: sampleLeads,
+    constraints: [],
+    original_goal: "Find 3 pubs",
+  });
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.requested).toBe(3);
+});
+
+test("NAME_CONTAINS uses word boundary matching", () => {
+  const leads: Lead[] = [
+    { name: "The Pub", address: "X" },
+    { name: "Republic Bar", address: "Y" },
+    { name: "Pub and Grill", address: "Z" },
+  ];
+  const constraints: Constraint[] = [
+    { type: "NAME_CONTAINS", field: "name", value: "Pub", hardness: "hard" },
+    { type: "COUNT_MIN", field: "count", value: 2, hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads,
+    constraints,
+    original_goal: "Find pubs",
+  });
+  if (result.constraint_results) {
+    const nameResult = result.constraint_results.find(r => r.constraint.type === "NAME_CONTAINS");
+    if (!nameResult) throw new Error("Expected NAME_CONTAINS result");
+    expect(nameResult.matched_count).toBe(2);
+  }
+});
+
+test("LOCATION constraint always passes (Supervisor provides location context)", () => {
+  const constraints: Constraint[] = [
+    { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: sampleLeads,
+    constraints,
+    original_goal: "Find 3 places in Arundel",
+  });
+  expect(result.verdict).toBe("ACCEPT");
+  if (result.constraint_results) {
+    const locResult = result.constraint_results.find(r => r.constraint.type === "LOCATION");
+    if (!locResult) throw new Error("Expected LOCATION result");
+    expect(locResult.passed).toBe(true as any);
+  }
+});
+
+test("suggested_changes empty when verdict is ACCEPT", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: sampleLeads,
+    constraints: [
+      { type: "COUNT_MIN", field: "count", value: 3, hardness: "hard" },
+    ],
+    original_goal: "Find 3 things",
+  });
+  expect(result.verdict).toBe("ACCEPT");
   expect(result.suggested_changes).toHaveLength(0);
-  if (!result.ask_user_options || result.ask_user_options.length === 0) {
-    throw new Error("Expected ask_user_options to be populated");
+});
+
+test("constraint_results included in output when constraints provided", () => {
+  const constraints: Constraint[] = [
+    { type: "NAME_STARTS_WITH", field: "name", value: "T", hardness: "soft" },
+    { type: "COUNT_MIN", field: "count", value: 2, hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: sampleLeads,
+    constraints,
+    original_goal: "Find 2 places starting with T",
+  });
+  if (!result.constraint_results) {
+    throw new Error("Expected constraint_results in output");
   }
-});
-
-test("Gaps include constraint_too_strict(prefix_filter) when prefix produces 0", () => {
-  const input: TowerVerdictInput = {
-    requested_count_user: 5,
-    delivered_count: 0,
-    constraints: {
-      business_type: { value: "pub", hardness: "hard", was_relaxed: false },
-      location: { value: "Arundel", hardness: "soft", was_relaxed: false },
-      prefix_filter: { value: "P", hardness: "soft", was_relaxed: false },
-    },
-    original_user_goal: "Find 5 pubs in Arundel starting with P",
-  };
-  const result = judgeLeadsList(input);
-  const hasStrictGap = result.gaps.some(g => g.includes("constraint_too_strict") && g.includes("prefix_filter"));
-  if (!hasStrictGap) {
-    throw new Error(`Expected constraint_too_strict(prefix_filter) in gaps, got: ${JSON.stringify(result.gaps)}`);
+  if (result.constraint_results.length !== 2) {
+    throw new Error(`Expected 2 constraint results, got ${result.constraint_results.length}`);
   }
-});
-
-test("Uses accumulated_count over delivered_count when both provided", () => {
-  const input: TowerVerdictInput = {
-    requested_count_user: 5,
-    accumulated_count: 10,
-    delivered_count: 3,
-    original_user_goal: "Find 5 leads",
-  };
-  const result = judgeLeadsList(input);
-  expect(result.delivered).toBe(10);
-  expect(result.verdict).toBe("ACCEPT");
-});
-
-test("Normalized goal used when original_user_goal is absent", () => {
-  const input: TowerVerdictInput = {
-    requested_count_user: 5,
-    delivered_count: 2,
-    normalized_goal: "Find 5 pubs in Arundel starting with P",
-    constraints: {
-      location: { value: "Arundel", hardness: "soft", was_relaxed: false },
-    },
-  };
-  const result = judgeLeadsList(input);
-  expect(result.rationale).toContain("Find 5 pubs");
-});
-
-test("Falls back to requested_count when requested_count_user is missing but requested_count present", () => {
-  const input: TowerVerdictInput = {
-    requested_count: 5,
-    delivered_count: 5,
-    original_user_goal: "Find 5 pubs",
-  };
-  const result = judgeLeadsList(input);
-  expect(result.verdict).toBe("ACCEPT");
-  expect(result.requested).toBe(5);
 });
 
 runTests();

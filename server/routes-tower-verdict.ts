@@ -4,16 +4,22 @@ import { judgeLeadsList } from "../src/evaluator/towerVerdict";
 
 const router = express.Router();
 
-const TOWER_VERSION = "1.0.0";
+const TOWER_VERSION = "2.0.0";
 
 router.get("/health", (_req, res) => {
   res.json({ ok: true, version: TOWER_VERSION, time: new Date().toISOString() });
 });
 
-const constraintSpecSchema = z.object({
-  value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
+const constraintSchema = z.object({
+  type: z.enum(["NAME_CONTAINS", "NAME_STARTS_WITH", "LOCATION", "COUNT_MIN"]),
+  field: z.string(),
+  value: z.union([z.string(), z.number()]),
   hardness: z.enum(["hard", "soft"]),
-  was_relaxed: z.boolean().optional(),
+});
+
+const leadSchema = z.object({
+  name: z.string(),
+  address: z.string().optional(),
 }).passthrough();
 
 const attemptHistoryEntrySchema = z.object({
@@ -28,38 +34,35 @@ const towerVerdictRequestSchema = z.object({
   artefactId: z.string().optional(),
   goal: z.string().optional(),
   proof_mode: z.string().optional(),
-  leads: z.unknown().optional(),
+
+  original_goal: z.string().optional(),
+  original_user_goal: z.string().optional(),
+  normalized_goal: z.string().optional(),
+
+  leads: z.array(leadSchema).optional(),
+  constraints: z.array(constraintSchema).optional(),
+
+  requested_count_user: z.number().int().optional(),
+  requested_count: z.number().int().optional(),
+  accumulated_count: z.number().int().optional(),
+  delivered_count: z.number().int().optional(),
+  delivered: z.number().int().optional(),
+
   success_criteria: z
     .object({
       target_count: z.number().int().positive().optional(),
     })
     .passthrough()
     .optional(),
-  constraints: z.union([
-    z.record(constraintSpecSchema),
-    z.object({
-      count: z.number().int().positive().optional(),
-      prefix: z.string().optional(),
-      prefix_filter: z.string().optional(),
-      location: z.string().optional(),
-      radius: z.union([z.number(), z.string()]).optional(),
-      business_type: z.string().optional(),
-    }).passthrough(),
-  ]).optional(),
-  hard_constraints: z.array(z.string()).optional(),
-  soft_constraints: z.array(z.string()).optional(),
-  requested_count_user: z.number().int().optional(),
-  requested_count: z.number().int().optional(),
-  accumulated_count: z.number().int().optional(),
-  delivered_count: z.number().int().optional(),
-  delivered: z.number().int().optional(),
-  original_user_goal: z.string().optional(),
-  normalized_goal: z.string().optional(),
+
   plan: z.unknown().optional(),
   plan_summary: z.unknown().optional(),
   plan_version: z.number().optional(),
   radius_km: z.number().optional(),
   attempt_history: z.array(attemptHistoryEntrySchema).optional(),
+
+  hard_constraints: z.array(z.string()).optional(),
+  soft_constraints: z.array(z.string()).optional(),
 });
 
 function buildProofVerdict(proofMode: string | undefined, runId: string, artefactId: string) {
@@ -107,22 +110,23 @@ router.post("/tower-verdict", async (req, res) => {
 
     const {
       leads,
-      success_criteria,
       constraints,
-      hard_constraints,
-      soft_constraints,
       requested_count_user,
       requested_count,
       accumulated_count,
       delivered_count,
       delivered,
+      original_goal,
       original_user_goal,
       normalized_goal,
+      success_criteria,
       plan,
       plan_summary,
       plan_version,
       radius_km,
       attempt_history,
+      hard_constraints,
+      soft_constraints,
       run_id,
       goal,
       proof_mode,
@@ -141,22 +145,23 @@ router.post("/tower-verdict", async (req, res) => {
 
     const result = judgeLeadsList({
       leads,
-      success_criteria,
-      constraints: constraints as any,
-      hard_constraints,
-      soft_constraints,
+      constraints,
       requested_count_user,
       requested_count,
       accumulated_count,
       delivered_count,
       delivered,
+      original_goal,
       original_user_goal,
       normalized_goal,
+      success_criteria,
       plan,
       plan_summary,
       plan_version,
       radius_km,
       attempt_history,
+      hard_constraints,
+      soft_constraints,
     });
 
     console.log(

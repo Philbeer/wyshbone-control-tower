@@ -3,6 +3,7 @@ import { db } from "../src/lib/db";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { judgeLeadsList } from "../src/evaluator/towerVerdict";
+import type { Lead, Constraint } from "../src/evaluator/towerVerdict";
 
 const router = express.Router();
 
@@ -34,79 +35,35 @@ function judgeLeadsListArtefact(
   goal: string,
   plan?: unknown,
   planSummary?: unknown,
-  hardConstraints?: string[],
-  softConstraints?: string[],
 ): JudgeArtefactResponse {
-  const targetCount =
-    successCriteria?.target_count ??
-    payloadJson?.success_criteria?.target_count ??
-    payloadJson?.target_count ??
-    successCriteria?.requested_count ??
-    payloadJson?.requested_count ??
-    undefined;
+  const leads: Lead[] = Array.isArray(payloadJson?.leads)
+    ? payloadJson.leads.filter((l: any) => l && typeof l.name === "string")
+    : [];
 
-  const prefix =
-    successCriteria?.prefix ??
-    payloadJson?.prefix_filter ??
-    payloadJson?.success_criteria?.prefix ??
-    payloadJson?.constraints?.prefix ??
-    undefined;
-
-  const constraintsCount =
-    successCriteria?.count ??
-    payloadJson?.constraints?.count ??
-    undefined;
-
-  const deliveredCount =
-    successCriteria?.delivered_count ??
-    successCriteria?.delivered ??
-    payloadJson?.delivered_count ??
-    payloadJson?.delivered ??
-    (Array.isArray(payloadJson?.leads) ? payloadJson.leads.length : undefined);
-
-  const leads = Array.isArray(payloadJson?.leads) ? payloadJson.leads : undefined;
-
-  const requestedCount =
-    successCriteria?.requested_count ?? payloadJson?.requested_count ?? undefined;
-
-  console.log(
-    `[Tower][judge-artefact] leads_list resolution: targetCount=${targetCount} requestedCount=${requestedCount} deliveredCount=${deliveredCount} prefix=${prefix}`
-  );
-
-  const location =
-    successCriteria?.location ??
-    payloadJson?.constraints?.location ??
-    payloadJson?.location ??
-    undefined;
-
-  const radius =
-    successCriteria?.radius ??
-    payloadJson?.constraints?.radius ??
-    payloadJson?.radius ??
-    undefined;
-
-  const businessType =
-    successCriteria?.business_type ??
-    payloadJson?.constraints?.business_type ??
-    payloadJson?.business_type ??
-    undefined;
-
-  const resolvedPlan = plan ?? payloadJson?.plan ?? undefined;
-  const resolvedPlanSummary = planSummary ?? payloadJson?.plan_summary ?? undefined;
-
-  const resolvedHardConstraints = hardConstraints ??
-    payloadJson?.hard_constraints ??
-    successCriteria?.hard_constraints ??
-    undefined;
-
-  const resolvedSoftConstraints = softConstraints ??
-    payloadJson?.soft_constraints ??
-    successCriteria?.soft_constraints ??
-    undefined;
+  const constraints: Constraint[] = Array.isArray(payloadJson?.constraints)
+    ? payloadJson.constraints.filter((c: any) =>
+        c && c.type && c.field && c.value !== undefined && c.hardness
+      )
+    : [];
 
   const requestedCountUser =
     successCriteria?.requested_count_user ??
     payloadJson?.requested_count_user ??
+    undefined;
+
+  const requestedCount =
+    successCriteria?.requested_count ??
+    payloadJson?.requested_count ??
+    undefined;
+
+  const targetCount =
+    successCriteria?.target_count ??
+    payloadJson?.success_criteria?.target_count ??
+    undefined;
+
+  const deliveredCount =
+    successCriteria?.delivered_count ??
+    payloadJson?.delivered_count ??
     undefined;
 
   const accumulatedCount =
@@ -116,29 +73,26 @@ function judgeLeadsListArtefact(
 
   const planVersion = payloadJson?.plan_version ?? undefined;
   const radiusKm = payloadJson?.radius_km ?? undefined;
-  const attemptHistory = Array.isArray(payloadJson?.attempt_history) ? payloadJson.attempt_history : undefined;
+  const attemptHistory = Array.isArray(payloadJson?.attempt_history)
+    ? payloadJson.attempt_history
+    : undefined;
 
-  const structuredConstraints = payloadJson?.constraints;
-  const isStructured = structuredConstraints && typeof structuredConstraints === "object" &&
-    Object.values(structuredConstraints).some((v: any) => v && typeof v === "object" && "hardness" in v);
+  const resolvedPlan = plan ?? payloadJson?.plan ?? undefined;
+  const resolvedPlanSummary = planSummary ?? payloadJson?.plan_summary ?? undefined;
+
+  console.log(
+    `[Tower][judge-artefact] leads_list resolution: leads=${leads.length} constraints=${constraints.length} requestedCountUser=${requestedCountUser} requestedCount=${requestedCount}`
+  );
 
   const towerResult = judgeLeadsList({
     leads,
+    constraints,
+    requested_count_user: requestedCountUser,
+    requested_count: requestedCount,
+    accumulated_count: accumulatedCount,
+    delivered_count: deliveredCount,
+    original_goal: goal,
     success_criteria: targetCount != null ? { target_count: targetCount } : undefined,
-    constraints: isStructured ? structuredConstraints : {
-      ...(constraintsCount != null ? { count: constraintsCount } : {}),
-      ...(prefix != null ? { prefix } : {}),
-      ...(location != null ? { location } : {}),
-      ...(radius != null ? { radius } : {}),
-      ...(businessType != null ? { business_type: businessType } : {}),
-    },
-    hard_constraints: Array.isArray(resolvedHardConstraints) ? resolvedHardConstraints : undefined,
-    soft_constraints: Array.isArray(resolvedSoftConstraints) ? resolvedSoftConstraints : undefined,
-    requested_count_user: requestedCountUser != null ? requestedCountUser : undefined,
-    requested_count: requestedCount != null ? requestedCount : undefined,
-    accumulated_count: accumulatedCount != null ? accumulatedCount : undefined,
-    delivered_count: deliveredCount != null ? deliveredCount : undefined,
-    original_user_goal: goal,
     plan: resolvedPlan,
     plan_summary: resolvedPlanSummary,
     plan_version: planVersion,
@@ -152,9 +106,6 @@ function judgeLeadsListArtefact(
   if (towerResult.verdict === "ACCEPT") {
     verdict = "pass";
     action = "continue";
-  } else if (towerResult.verdict === "ASK_USER") {
-    verdict = "fail";
-    action = "stop";
   } else if (towerResult.verdict === "CHANGE_PLAN") {
     verdict = "fail";
     action = "change_plan";
@@ -179,13 +130,10 @@ function judgeLeadsListArtefact(
       gaps: towerResult.gaps,
       confidence: towerResult.confidence,
       towerVerdict: towerResult.verdict,
+      constraint_results: towerResult.constraint_results ?? [],
     },
     suggested_changes: towerResult.suggested_changes,
   };
-
-  if (towerResult.verdict === "ASK_USER" && towerResult.ask_user_options) {
-    (response.metrics as any).ask_user_options = towerResult.ask_user_options;
-  }
 
   return response;
 }
