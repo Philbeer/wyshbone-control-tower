@@ -1,0 +1,110 @@
+You are working in wyshbone-tower.
+
+Goal: Make Tower judgements general and aligned with user intent, without per use case tuning. Tower must judge against the user’s real goal and hard constraints, and must never implicitly accept relaxed constraints without saying so.
+
+Implement these changes:
+
+Enforce the judgement contract for leads_list
+Tower must receive (and use):
+
+original_user_goal (verbatim)
+
+requested_count_user (the true target)
+
+constraints: { business_type, location, prefix_filter, etc } each with:
+
+value
+
+hardness: hard|soft
+
+was_relaxed: boolean
+
+accumulated_count (or delivered_count)
+
+plan_version and radius_km if provided
+
+If requested_count_user is missing, return STOP with reason_code “missing_requested_count_user”.
+
+Judge using requested_count_user only
+
+Do not use any “search_budget_count” or internal default as requested.
+
+delivered_count is the accumulated set size.
+
+Hard constraint enforcement
+If any hard constraint is violated by the delivered set or by the plan changes, Tower must NOT ACCEPT.
+Examples:
+
+prefix_filter is hard: if it was dropped or ignored, Tower returns FAIL with action STOP, gap “hard_constraint_violated(prefix_filter)”.
+
+location is hard: if expanded beyond location, FAIL STOP, gap “hard_constraint_violated(location)”.
+
+business_type hard: do not suggest changing business type unless user explicitly allowed.
+
+Soft constraint logic and suggested changes
+If delivered_count < requested_count_user:
+
+Return FAIL with action CHANGE_PLAN.
+
+Provide suggested_changes as structured objects only, no strings.
+
+Changes should prioritize:
+a) EXPAND_AREA (increase radius rung)
+b) INCREASE_COVERAGE (increase tool maxResults, only as a tool coverage hint, not the requested count)
+c) RELAX_CONSTRAINT only if the constraint is soft
+
+Never suggest relaxing a hard constraint. If relaxing is the only way, then STOP with explanation asking for user confirmation.
+
+Prevent “lying acceptance”
+If constraints were relaxed (was_relaxed=true) and the system technically meets requested_count_user, Tower should still ACCEPT, but the rationale must explicitly say:
+
+“Accepted with relaxed constraints: prefix dropped” or “location expanded to 25km”.
+This is so the UI can render it honestly.
+
+Improve gaps and reason codes (general)
+Return gaps that are useful for replanning:
+
+insufficient_count
+
+constraint_too_strict(prefix_filter)
+
+constraint_too_strict(location)
+
+hard_constraint_violated(field)
+
+no_further_progress_possible (if radius already at max and still insufficient)
+
+Output shape must always include:
+TowerVerdict {
+verdict: ACCEPT | RETRY | CHANGE_PLAN | STOP
+action: continue | retry | change_plan | stop
+requested: requested_count_user
+delivered: delivered_count
+gaps: string[]
+confidence: 0-100
+rationale: string
+suggested_changes: SuggestedChange[]
+reason_code: string
+}
+
+Add a safety check for repeated identical change requests
+If Tower sees plan_version increasing but radius_km unchanged and delivered_count unchanged across attempts (Supervisor can pass “attempt_history” summary if available), then return STOP with reason_code “no_progress_over_attempts” to avoid burning replans.
+
+Acceptance tests:
+A) dentists in Arundel, requested_count_user=4, delivered_count=13 within 25km
+
+ACCEPT, with rationale noting location expanded, provided hard constraints not violated.
+
+B) pubs in Arundel prefix P hard, delivered_count=0
+
+CHANGE_PLAN suggesting EXPAND_AREA only, not dropping prefix.
+
+If max radius reached and still 0, STOP with hard constraint explanation.
+
+Deliverables:
+
+Update tower judgement function(s) for leads_list.
+
+Keep suggested_changes strictly typed objects.
+
+Add a small unit test or a minimal test harness case for the above.
