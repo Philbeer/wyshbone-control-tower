@@ -4,7 +4,7 @@ import { judgeLeadsList } from "../src/evaluator/towerVerdict";
 
 const router = express.Router();
 
-const TOWER_VERSION = "2.0.0";
+const TOWER_VERSION = "3.0.0";
 
 router.get("/health", (_req, res) => {
   res.json({ ok: true, version: TOWER_VERSION, time: new Date().toISOString() });
@@ -17,16 +17,59 @@ const constraintSchema = z.object({
   hardness: z.enum(["hard", "soft"]),
 });
 
-const leadSchema = z.object({
-  name: z.string(),
-  address: z.string().optional(),
-}).passthrough();
+const leadSchema = z
+  .object({
+    name: z.string(),
+    address: z.string().optional(),
+  })
+  .passthrough();
 
 const attemptHistoryEntrySchema = z.object({
   plan_version: z.number(),
   radius_km: z.number(),
   delivered_count: z.number(),
 });
+
+const deliveredSchema = z
+  .object({
+    delivered_matching_accumulated: z.number().optional(),
+    delivered_matching_this_plan: z.number().optional(),
+    delivered_total_accumulated: z.number().optional(),
+    delivered_total_this_plan: z.number().optional(),
+  })
+  .passthrough();
+
+const metaSchema = z
+  .object({
+    plan_version: z.number().optional(),
+    replans_used: z.number().optional(),
+    max_replans: z.number().optional(),
+    radius_km: z.number().optional(),
+    relaxed_constraints: z.array(z.string()).optional(),
+  })
+  .passthrough();
+
+const successCriteriaSchema = z
+  .object({
+    requested_count_user: z.number().int().optional(),
+    target_count: z.number().int().positive().optional(),
+    hard_constraints: z
+      .array(
+        z
+          .object({ type: z.string(), field: z.string(), value: z.any().optional() })
+          .passthrough()
+      )
+      .optional(),
+    soft_constraints: z
+      .array(
+        z
+          .object({ type: z.string(), field: z.string(), value: z.any().optional() })
+          .passthrough()
+      )
+      .optional(),
+    allow_relax_soft_constraints: z.boolean().optional(),
+  })
+  .passthrough();
 
 const towerVerdictRequestSchema = z.object({
   artefactType: z.literal("leads_list"),
@@ -46,14 +89,11 @@ const towerVerdictRequestSchema = z.object({
   requested_count: z.number().int().optional(),
   accumulated_count: z.number().int().optional(),
   delivered_count: z.number().int().optional(),
-  delivered: z.number().int().optional(),
 
-  success_criteria: z
-    .object({
-      target_count: z.number().int().positive().optional(),
-    })
-    .passthrough()
-    .optional(),
+  delivered: z.union([deliveredSchema, z.number().int()]).optional(),
+
+  success_criteria: successCriteriaSchema.optional(),
+  meta: metaSchema.optional(),
 
   plan: z.unknown().optional(),
   plan_summary: z.unknown().optional(),
@@ -63,9 +103,16 @@ const towerVerdictRequestSchema = z.object({
 
   hard_constraints: z.array(z.string()).optional(),
   soft_constraints: z.array(z.string()).optional(),
+
+  artefact_title: z.string().optional(),
+  artefact_summary: z.string().optional(),
 });
 
-function buildProofVerdict(proofMode: string | undefined, runId: string, artefactId: string) {
+function buildProofVerdict(
+  proofMode: string | undefined,
+  runId: string,
+  artefactId: string
+) {
   let verdict: string;
   let rationale: string;
 
@@ -86,6 +133,7 @@ function buildProofVerdict(proofMode: string | undefined, runId: string, artefac
 
   return {
     verdict,
+    action: verdict === "ACCEPT" ? "continue" : verdict === "CHANGE_PLAN" ? "change_plan" : "stop",
     rationale,
     confidence: 100,
     requested: 0,
@@ -108,64 +156,44 @@ router.post("/tower-verdict", async (req, res) => {
       return;
     }
 
-    const {
-      leads,
-      constraints,
-      requested_count_user,
-      requested_count,
-      accumulated_count,
-      delivered_count,
-      delivered,
-      original_goal,
-      original_user_goal,
-      normalized_goal,
-      success_criteria,
-      plan,
-      plan_summary,
-      plan_version,
-      radius_km,
-      attempt_history,
-      hard_constraints,
-      soft_constraints,
-      run_id,
-      goal,
-      proof_mode,
-      artefactId,
-    } = parsed.data;
+    const data = parsed.data;
 
-    if (goal === "Proof Tower Loop") {
+    if (data.goal === "Proof Tower Loop") {
       const result = buildProofVerdict(
-        proof_mode,
-        run_id ?? "none",
-        artefactId ?? "none"
+        data.proof_mode,
+        data.run_id ?? "none",
+        data.artefactId ?? "none"
       );
       res.json(result);
       return;
     }
 
     const result = judgeLeadsList({
-      leads,
-      constraints,
-      requested_count_user,
-      requested_count,
-      accumulated_count,
-      delivered_count,
-      delivered,
-      original_goal,
-      original_user_goal,
-      normalized_goal,
-      success_criteria,
-      plan,
-      plan_summary,
-      plan_version,
-      radius_km,
-      attempt_history,
-      hard_constraints,
-      soft_constraints,
+      leads: data.leads,
+      constraints: data.constraints,
+      requested_count_user: data.requested_count_user,
+      requested_count: data.requested_count,
+      accumulated_count: data.accumulated_count,
+      delivered_count: data.delivered_count,
+      delivered: data.delivered,
+      original_goal: data.original_goal,
+      original_user_goal: data.original_user_goal,
+      normalized_goal: data.normalized_goal,
+      success_criteria: data.success_criteria,
+      meta: data.meta,
+      plan: data.plan,
+      plan_summary: data.plan_summary,
+      plan_version: data.plan_version,
+      radius_km: data.radius_km,
+      attempt_history: data.attempt_history,
+      hard_constraints: data.hard_constraints,
+      soft_constraints: data.soft_constraints,
+      artefact_title: data.artefact_title,
+      artefact_summary: data.artefact_summary,
     });
 
     console.log(
-      `[TOWER_IN] run_id=${run_id ?? "none"} verdict=${result.verdict} requested=${result.requested} delivered=${result.delivered} suggestions=${result.suggested_changes.length}`
+      `[TOWER_IN] run_id=${data.run_id ?? "none"} verdict=${result.verdict} action=${result.action} requested=${result.requested} delivered=${result.delivered} suggestions=${result.suggested_changes.length}`
     );
 
     res.json(result);
@@ -176,6 +204,7 @@ router.post("/tower-verdict", async (req, res) => {
     );
     res.status(500).json({
       verdict: "STOP",
+      action: "stop",
       delivered: 0,
       requested: 0,
       gaps: ["internal_error"],

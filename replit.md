@@ -20,17 +20,20 @@ The system incorporates a sophisticated evaluation suite for automated testing, 
 *   **Live User Run Logging & Investigation:** Logs real Wyshbone UI user conversations for observability and enables investigation creation.
 *   **Conversation Quality Investigation:** Analyzes and automatically detects Wyshbone-specific conversation quality issues using GPT-4o-mini, classifying failures and suggesting fixes/tests.
 *   **Patch Failure Post-Mortem:** Analyzes rejected auto-generated patches to classify failure reasons and recommend next steps.
-*   **Tower Verdict (Agent Loop Judgement):** Evidence-based constraint evaluation of leads_list artifacts. Returns structured verdicts (ACCEPT/CHANGE_PLAN/STOP). Requires `requested_count_user` (returns STOP if absent). Typed constraints: NAME_CONTAINS, NAME_STARTS_WITH, LOCATION, COUNT_MIN — each with `hardness` (hard/soft). Hard constraint violations prevent ACCEPT. COUNT_MIN evaluates against name-matched lead count, not total leads. Soft constraints suggest RELAX_CONSTRAINT when insufficient matches. Safety check: detects no-progress loops via `attempt_history`. Backwards compatible with legacy `hard_constraints`/`soft_constraints` arrays.
+*   **Tower Verdict (Agent Loop Judgement):** Evidence-based constraint evaluation of leads_list artifacts. Returns structured verdicts (ACCEPT/CHANGE_PLAN/STOP) with `action` (continue/change_plan/stop). Requires `requested_count_user` (returns STOP if absent). Typed constraints: NAME_CONTAINS, NAME_STARTS_WITH, LOCATION, COUNT_MIN — each with `hardness` (hard/soft). Hard constraint violations prevent ACCEPT. COUNT_MIN evaluates against name-matched lead count, not total leads. Soft constraints suggest RELAX_CONSTRAINT when insufficient matches. Safety check: detects no-progress loops via `attempt_history`. Backwards compatible with legacy `hard_constraints`/`soft_constraints` arrays.
 *   **Artefact Judgement API:** Tower judges artifacts stored in Supabase by inspecting their `payload_json` and applying specific rules based on `artefactType` (e.g., `leads_list` artefacts are judged by count and constraint adherence) to determine whether to continue or stop a run.
 *   **Tower Dev Chat:** A dedicated interface for developers to report issues, with automatic context gathering from the codebase and AI-powered patch suggestions using OpenAI GPT-4o-mini. Issues are tracked through various states (new, context_gathered, investigating, resolved, closed) in a PostgreSQL database.
 
-**Constraint-Driven Evidence-Based Evaluation (v2):**
-Tower evaluates each constraint against the actual delivered leads array:
-*   `NAME_CONTAINS`: Counts leads whose name contains the word (case-insensitive, word-boundary matching).
-*   `NAME_STARTS_WITH`: Counts leads whose name starts with the specified letter(s).
-*   `LOCATION`: Trusts Supervisor-provided location context (no geocoding in Tower).
-*   `COUNT_MIN`: Compares matched lead count against `requested_count_user`.
-Each constraint has `hardness` (hard/soft). Hard violations prevent ACCEPT. `suggested_changes` only proposes `RELAX_CONSTRAINT` for soft constraints. Output includes `constraint_results` with per-constraint match counts.
+**Constraint-Driven Evidence-Based Evaluation (v3):**
+Tower uses user intent (`requested_count_user`) and accumulated matching results (`delivered_matching_accumulated`) for judgement.
+*   **Requested resolution priority:** `requested_count_user` > `success_criteria.requested_count_user` > `success_criteria.target_count` > `requested_count`.
+*   **Delivered resolution priority:** `delivered.delivered_matching_accumulated` > `leads.length` (when constraints applied) > `delivered.delivered_matching_this_plan`. Never uses `delivered_total_*` for success.
+*   **Constraint types:** NAME_CONTAINS (word-boundary), NAME_STARTS_WITH (prefix), LOCATION (trusted from Supervisor), COUNT_MIN (against matched leads).
+*   **Replan-aware verdict logic:** Uses `meta.replans_used` / `meta.max_replans` and `allow_relax_soft_constraints` to decide CHANGE_PLAN vs STOP.
+*   **Suggested change types:** RELAX_CONSTRAINT, EXPAND_AREA, INCREASE_SEARCH_BUDGET, CHANGE_QUERY, STOP_CONDITION — all strictly typed objects.
+*   **Label honesty:** Detects `label_misleading` gap when `meta.relaxed_constraints` keywords appear in artefact title/summary.
+*   **Hard constraint enforcement:** Hard constraints are never auto-relaxed; suggests EXPAND_AREA instead.
+Each constraint has `hardness` (hard/soft). Hard violations prevent ACCEPT. Output includes `constraint_results` with per-constraint match counts.
 
 **UI/UX Decisions:**
 The dashboard features a simplified design with plain language, focusing on three core sections:

@@ -1,0 +1,135 @@
+Update Tower leads_list judgement to use user intent (requested_count_user) and accumulated matching results
+
+Context
+Supervisor now accumulates/dedupes leads across replans and will send Tower both:
+
+the user’s requested target (requested_count_user)
+
+accumulated delivered counts for matching leads (delivered_matching_accumulated)
+
+the hard/soft constraint set for the run/plan
+Tower must judge based on this, not the internal “search budget” count (eg 20).
+
+What must change
+
+Expand the TowerVerdict input contract for leads_list judgement
+Support these fields when present (do not require them, but prefer them):
+
+success_criteria: {
+requested_count_user?: number,
+target_count?: number, // legacy
+hard_constraints?: Array<{ type: string, field: string, value?: any }>,
+soft_constraints?: Array<{ type: string, field: string, value?: any }>,
+allow_relax_soft_constraints?: boolean
+}
+
+delivered: {
+delivered_matching_accumulated?: number, // preferred
+delivered_matching_this_plan?: number,
+delivered_total_accumulated?: number,
+delivered_total_this_plan?: number
+}
+
+meta?: {
+plan_version?: number,
+replans_used?: number,
+max_replans?: number,
+radius_km?: number,
+relaxed_constraints?: string[] // eg ["prefix_filter dropped", "radius expanded to 10km"]
+}
+
+Tower must compute requested and delivered like this (priority order)
+requested :=
+
+success_criteria.requested_count_user if present
+
+else success_criteria.target_count if present
+
+else infer from goal only as last resort (avoid this)
+
+delivered :=
+
+delivered.delivered_matching_accumulated if present
+
+else leads.length if and only if constraints are already applied to the leads_list (Supervisor should usually send filtered leads)
+
+else delivered.delivered_matching_this_plan
+Never use delivered_total_* for success, only for context.
+
+Hard constraints must be enforced
+If hard_constraints exist, Tower must assume that ONLY leads satisfying them count toward delivered.
+If the leads_list title/summary claims a constraint was applied but meta.relaxed_constraints indicates it was relaxed, Tower should flag label_misleading as a gap.
+
+Verdict logic (simple, not curve-fit)
+Use a generic decision rule based on ratio and replan context:
+
+Let ratio = delivered / requested (if requested > 0)
+
+If delivered >= requested:
+verdict = PASS (ACCEPT)
+action = CONTINUE
+Else:
+Determine if additional replanning is likely to help:
+
+If meta.replans_used < meta.max_replans AND allow_relax_soft_constraints is true:
+action = CHANGE_PLAN
+
+If meta.replans_used >= meta.max_replans:
+action = STOP
+
+If allow_relax_soft_constraints is false (because user made constraints hard):
+action = STOP once reasonable expansion attempts exhausted (still use max_replans as the limit)
+Verdict should be FAIL when delivered < requested and STOP/CHANGE_PLAN are issued.
+
+Suggested changes must remain STRICT structured objects (no strings)
+When action=CHANGE_PLAN, always emit suggested_changes as typed objects:
+
+SuggestedChange {
+type: "RELAX_CONSTRAINT" | "EXPAND_AREA" | "INCREASE_SEARCH_BUDGET" | "CHANGE_QUERY" | "STOP_CONDITION",
+field: "prefix_filter" | "name_contains" | "location" | "radius_km" | "business_type" | "requested_count_user",
+from: any,
+to: any,
+reason: string
+}
+
+Guidance for suggestions (generic)
+
+If insufficient_count and location is soft: suggest EXPAND_AREA / radius_km increase
+
+If insufficient_count and a soft constraint exists that is likely restrictive (prefix_filter soft, name_contains soft): suggest RELAX_CONSTRAINT for that field
+
+If the user explicitly said a constraint is hard (eg “make letter P a hard constraint”), do NOT suggest relaxing it; suggest expanding area or STOP.
+
+Output fields must always be present
+TowerVerdict must always return:
+verdict, action, requested, delivered, gaps[], confidence (0-100), rationale, suggested_changes[]
+
+Add explicit “label honesty” gap
+If relaxed_constraints is non-empty, and the leads_list title/summary still contains the relaxed constraint (eg still says “begin with P”), add:
+gaps += ["label_misleading"]
+and rationale should state what was misleading.
+
+Acceptance tests
+A) Dentist case
+User: “find 4 dentists in arundel using google places search”
+
+requested_count_user=4
+
+delivered_matching_accumulated=1 on v1 -> Tower should FAIL + CHANGE_PLAN (expand radius)
+
+delivered_matching_accumulated=4+ later -> PASS
+
+B) Swan case
+User: “Find 4 pubs in Arundel with the word swan in the name”
+
+If accumulated=2 after max replans -> FAIL + STOP (with honest rationale)
+
+C) Prefix hard constraint
+User: “Find 5 pubs in Arundel starting with P, make P hard, expand location if needed”
+
+Do not suggest relaxing prefix
+
+If cannot reach 5 after max replans -> FAIL + STOP
+
+Deliverable
+Commit updates to leads_list judgement path only (judgeLeadsList / tower-verdict / judge-artefact as appropriate), keeping all suggested_changes strictly typed objects.

@@ -3,7 +3,7 @@ import { db } from "../src/lib/db";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { judgeLeadsList } from "../src/evaluator/towerVerdict";
-import type { Lead, Constraint } from "../src/evaluator/towerVerdict";
+import type { Lead, Constraint, DeliveredInfo, MetaInfo } from "../src/evaluator/towerVerdict";
 
 const router = express.Router();
 
@@ -33,16 +33,16 @@ function judgeLeadsListArtefact(
   payloadJson: any,
   successCriteria: any,
   goal: string,
-  plan?: unknown,
-  planSummary?: unknown,
+  artefactTitle?: string,
+  artefactSummary?: string
 ): JudgeArtefactResponse {
   const leads: Lead[] = Array.isArray(payloadJson?.leads)
     ? payloadJson.leads.filter((l: any) => l && typeof l.name === "string")
     : [];
 
   const constraints: Constraint[] = Array.isArray(payloadJson?.constraints)
-    ? payloadJson.constraints.filter((c: any) =>
-        c && c.type && c.field && c.value !== undefined && c.hardness
+    ? payloadJson.constraints.filter(
+        (c: any) => c && c.type && c.field && c.value !== undefined && c.hardness
       )
     : [];
 
@@ -61,27 +61,49 @@ function judgeLeadsListArtefact(
     payloadJson?.success_criteria?.target_count ??
     undefined;
 
-  const deliveredCount =
-    successCriteria?.delivered_count ??
-    payloadJson?.delivered_count ??
-    undefined;
+  const deliveredObj: DeliveredInfo | number | undefined = (() => {
+    if (payloadJson?.delivered && typeof payloadJson.delivered === "object") {
+      return payloadJson.delivered as DeliveredInfo;
+    }
+    const dma =
+      successCriteria?.delivered_matching_accumulated ??
+      payloadJson?.delivered_matching_accumulated;
+    if (dma != null) {
+      return { delivered_matching_accumulated: dma } as DeliveredInfo;
+    }
+    const dc =
+      successCriteria?.delivered_count ?? payloadJson?.delivered_count;
+    if (dc != null) return dc as number;
+    return undefined;
+  })();
 
-  const accumulatedCount =
-    successCriteria?.accumulated_count ??
-    payloadJson?.accumulated_count ??
-    undefined;
+  const meta: MetaInfo | undefined = payloadJson?.meta ?? (() => {
+    const m: MetaInfo = {};
+    if (payloadJson?.plan_version != null) m.plan_version = payloadJson.plan_version;
+    if (payloadJson?.radius_km != null) m.radius_km = payloadJson.radius_km;
+    if (payloadJson?.replans_used != null) m.replans_used = payloadJson.replans_used;
+    if (payloadJson?.max_replans != null) m.max_replans = payloadJson.max_replans;
+    if (Array.isArray(payloadJson?.relaxed_constraints))
+      m.relaxed_constraints = payloadJson.relaxed_constraints;
+    return Object.keys(m).length > 0 ? m : undefined;
+  })();
 
-  const planVersion = payloadJson?.plan_version ?? undefined;
-  const radiusKm = payloadJson?.radius_km ?? undefined;
+  const resolvedSuccessCriteria: any = {};
+  if (targetCount != null) resolvedSuccessCriteria.target_count = targetCount;
+  if (requestedCountUser != null) resolvedSuccessCriteria.requested_count_user = requestedCountUser;
+  if (successCriteria?.allow_relax_soft_constraints != null)
+    resolvedSuccessCriteria.allow_relax_soft_constraints = successCriteria.allow_relax_soft_constraints;
+  if (successCriteria?.hard_constraints)
+    resolvedSuccessCriteria.hard_constraints = successCriteria.hard_constraints;
+  if (successCriteria?.soft_constraints)
+    resolvedSuccessCriteria.soft_constraints = successCriteria.soft_constraints;
+
   const attemptHistory = Array.isArray(payloadJson?.attempt_history)
     ? payloadJson.attempt_history
     : undefined;
 
-  const resolvedPlan = plan ?? payloadJson?.plan ?? undefined;
-  const resolvedPlanSummary = planSummary ?? payloadJson?.plan_summary ?? undefined;
-
   console.log(
-    `[Tower][judge-artefact] leads_list resolution: leads=${leads.length} constraints=${constraints.length} requestedCountUser=${requestedCountUser} requestedCount=${requestedCount}`
+    `[Tower][judge-artefact] leads_list resolution: leads=${leads.length} constraints=${constraints.length} requestedCountUser=${requestedCountUser} requestedCount=${requestedCount} delivered=${JSON.stringify(deliveredObj)}`
   );
 
   const towerResult = judgeLeadsList({
@@ -89,15 +111,20 @@ function judgeLeadsListArtefact(
     constraints,
     requested_count_user: requestedCountUser,
     requested_count: requestedCount,
-    accumulated_count: accumulatedCount,
-    delivered_count: deliveredCount,
+    delivered: deliveredObj,
     original_goal: goal,
-    success_criteria: targetCount != null ? { target_count: targetCount } : undefined,
-    plan: resolvedPlan,
-    plan_summary: resolvedPlanSummary,
-    plan_version: planVersion,
-    radius_km: radiusKm,
+    success_criteria:
+      Object.keys(resolvedSuccessCriteria).length > 0
+        ? resolvedSuccessCriteria
+        : undefined,
+    meta,
+    plan: payloadJson?.plan,
+    plan_summary: payloadJson?.plan_summary,
+    plan_version: payloadJson?.plan_version,
+    radius_km: payloadJson?.radius_km,
     attempt_history: attemptHistory,
+    artefact_title: artefactTitle,
+    artefact_summary: artefactSummary,
   });
 
   let verdict: "pass" | "fail";
@@ -130,6 +157,7 @@ function judgeLeadsListArtefact(
       gaps: towerResult.gaps,
       confidence: towerResult.confidence,
       towerVerdict: towerResult.verdict,
+      towerAction: towerResult.action,
       constraint_results: towerResult.constraint_results ?? [],
     },
     suggested_changes: towerResult.suggested_changes,
@@ -151,7 +179,8 @@ router.post("/judge-artefact", async (req, res) => {
       return;
     }
 
-    const { runId, artefactId, goal, successCriteria, artefactType } = parsed.data;
+    const { runId, artefactId, goal, successCriteria, artefactType } =
+      parsed.data;
 
     let artefactRow: any = null;
     try {
@@ -160,12 +189,20 @@ router.post("/judge-artefact", async (req, res) => {
       );
       artefactRow = result.rows?.[0] ?? null;
     } catch (dbErr) {
-      console.error("[Tower][judge-artefact] Supabase query failed:", dbErr instanceof Error ? dbErr.message : dbErr);
+      console.error(
+        "[Tower][judge-artefact] Supabase query failed:",
+        dbErr instanceof Error ? dbErr.message : dbErr
+      );
       const failResponse: JudgeArtefactResponse = {
         verdict: "fail",
         action: "stop",
         reasons: ["Supabase query failed while fetching artefact"],
-        metrics: { artefactId, runId, artefactType, error: "supabase_query_failed" },
+        metrics: {
+          artefactId,
+          runId,
+          artefactType,
+          error: "supabase_query_failed",
+        },
         suggested_changes: [],
       };
       res.json(failResponse);
@@ -177,7 +214,12 @@ router.post("/judge-artefact", async (req, res) => {
         verdict: "fail",
         action: "stop",
         reasons: [`Artefact not found: ${artefactId}`],
-        metrics: { artefactId, runId, artefactType, error: "artefact_not_found" },
+        metrics: {
+          artefactId,
+          runId,
+          artefactType,
+          error: "artefact_not_found",
+        },
         suggested_changes: [],
       };
       res.json(failResponse);
@@ -199,8 +241,8 @@ router.post("/judge-artefact", async (req, res) => {
         payloadJson,
         successCriteria,
         goal,
-        payloadJson?.plan,
-        payloadJson?.plan_summary
+        artefactRow.title ?? undefined,
+        artefactRow.summary ?? undefined
       );
       leadsResult.metrics = {
         ...leadsResult.metrics,
@@ -223,7 +265,9 @@ router.post("/judge-artefact", async (req, res) => {
 
     const stepStatus = payloadJson?.step_status;
     const stepType = payloadJson?.step_type as string | undefined;
-    const metrics = payloadJson?.metrics as Record<string, unknown> | undefined;
+    const metrics = payloadJson?.metrics as
+      | Record<string, unknown>
+      | undefined;
 
     let verdict: "pass" | "fail";
     let action: "continue" | "stop" | "retry" | "change_plan";
@@ -233,22 +277,33 @@ router.post("/judge-artefact", async (req, res) => {
       verdict = "fail";
       action = "stop";
       reasons.push(`Artefact step_status is "fail"`);
-    } else if (stepType === "SEARCH_PLACES" && metrics?.places_found === 0) {
+    } else if (
+      stepType === "SEARCH_PLACES" &&
+      metrics?.places_found === 0
+    ) {
       verdict = "fail";
       action = "stop";
       reasons.push(`SEARCH_PLACES returned 0 places_found`);
-    } else if (stepType === "ENRICH_LEADS" && metrics?.leads_enriched === 0) {
+    } else if (
+      stepType === "ENRICH_LEADS" &&
+      metrics?.leads_enriched === 0
+    ) {
       verdict = "fail";
       action = "stop";
       reasons.push(`ENRICH_LEADS returned 0 leads_enriched`);
-    } else if (stepType === "SCORE_LEADS" && metrics?.leads_scored === 0) {
+    } else if (
+      stepType === "SCORE_LEADS" &&
+      metrics?.leads_scored === 0
+    ) {
       verdict = "fail";
       action = "stop";
       reasons.push(`SCORE_LEADS returned 0 leads_scored`);
     } else {
       verdict = "pass";
       action = "continue";
-      reasons.push(`Artefact step_status is "${stepStatus ?? "not set"}" — passing`);
+      reasons.push(
+        `Artefact step_status is "${stepStatus ?? "not set"}" — passing`
+      );
     }
 
     const response: JudgeArtefactResponse = {
@@ -270,7 +325,10 @@ router.post("/judge-artefact", async (req, res) => {
 
     res.json(response);
   } catch (err) {
-    console.error("[Tower][judge-artefact] Unexpected error:", err instanceof Error ? err.message : err);
+    console.error(
+      "[Tower][judge-artefact] Unexpected error:",
+      err instanceof Error ? err.message : err
+    );
     const failResponse: JudgeArtefactResponse = {
       verdict: "fail",
       action: "stop",
