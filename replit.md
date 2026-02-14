@@ -34,6 +34,7 @@ Tower uses user intent (`requested_count_user`) and accumulated matching results
 *   **Label honesty:** Detects `label_misleading` gap when `meta.relaxed_constraints` keywords appear in artefact title/summary.
 *   **Hard constraint enforcement:** Hard constraints are never auto-relaxed; suggests EXPAND_AREA instead.
 Each constraint has `hardness` (hard/soft). Hard violations prevent ACCEPT. Output includes `constraint_results` with per-constraint match counts.
+*   **Rationale wording (Exact vs Closest alignment, Feb 2026):** Tower rationale text uses delivery_summary-aligned language. ACCEPT: "The requested number of exact matches was delivered." STOP with partial: "Only {N} exact matches were found. Remaining results do not meet all stated requirements." STOP with zero exact but closest exist: "No exact matches were found. Closest alternatives were identified after relaxing soft constraints." STOP with nothing: "No results were found that meet the stated requirements." Tower rationale never mentions UI wording, suggestions, or user emotion — facts only.
 
 **UI/UX Decisions:**
 The dashboard features a simplified design with plain language, focusing on three core sections:

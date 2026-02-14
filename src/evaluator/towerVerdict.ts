@@ -336,7 +336,7 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
       requested: 0,
       gaps: ["missing_requested_count_user"],
       confidence: 100,
-      rationale: "Cannot judge: requested_count_user is missing from input.",
+      rationale: "Cannot evaluate: requested_count_user is missing from input.",
       suggested_changes: [],
     };
     console.log(`[TOWER] verdict=STOP reason=missing_requested_count_user`);
@@ -354,8 +354,11 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
       requested: requestedCount,
       gaps: ["no_further_progress_possible"],
       confidence: 95,
-      rationale:
-        "No progress detected across attempts. Stopping to avoid burning replans.",
+      rationale: deliveredCount > 0
+        ? `Only ${deliveredCount} exact matches were found. Remaining results do not meet all stated requirements.`
+        : leads.length > 0
+          ? "No exact matches were found. Closest alternatives were identified after relaxing soft constraints."
+          : "No results were found that meet the stated requirements.",
       suggested_changes: [],
     };
     console.log(`[TOWER] verdict=STOP reason=no_progress_over_attempts`);
@@ -401,7 +404,7 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
         requested: requestedCount,
         gaps,
         confidence: Math.max(80, confidence),
-        rationale: `Delivered ${deliveredCount} matching leads, meeting the requested ${requestedCount}.${labelGaps.length > 0 ? " Warning: label may be misleading about relaxed constraints." : ""}${goal ? ` Goal: "${goal}"` : ""}`,
+        rationale: "The requested number of exact matches was delivered.",
         suggested_changes: [],
         constraint_results: constraintResults,
       };
@@ -432,7 +435,7 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
           ...labelGaps,
         ],
         confidence: 100,
-        rationale: `Hard constraint impossible: ${hardViolations.map((r) => `${r.constraint.type}(${r.constraint.field}=${r.constraint.value})`).join(", ")} — 0 matches in ${leads.length} leads. Max replans exhausted.${goal ? ` Goal: "${goal}"` : ""}`,
+        rationale: `No exact matches were found. Hard constraint impossible: ${hardViolations.map((r) => `${r.constraint.type}(${r.constraint.field}=${r.constraint.value})`).join(", ")} — 0 of ${leads.length} leads meet all stated requirements.`,
         suggested_changes: [],
         constraint_results: constraintResults,
       };
@@ -453,7 +456,7 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
           ...labelGaps,
         ],
         confidence: 100,
-        rationale: `Hard constraint impossible: ${hardViolations.map((r) => `${r.constraint.type}(${r.constraint.field}=${r.constraint.value})`).join(", ")} — 0 matches in ${leads.length} leads.${goal ? ` Goal: "${goal}"` : ""}`,
+        rationale: `No exact matches were found. Hard constraint impossible: ${hardViolations.map((r) => `${r.constraint.type}(${r.constraint.field}=${r.constraint.value})`).join(", ")} — 0 of ${leads.length} leads meet all stated requirements.`,
         suggested_changes: [],
         constraint_results: constraintResults,
       };
@@ -483,7 +486,11 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
         confidence: Math.round(
           30 + (deliveredCount / Math.max(requestedCount, 1)) * 40
         ),
-        rationale: `Hard constraint(s) not fully met: ${hardViolations.map((r) => `${r.constraint.type}(${r.constraint.field}=${r.constraint.value}) matched ${r.matched_count}/${r.total_leads}`).join(", ")}. Suggesting changes.${goal ? ` Goal: "${goal}"` : ""}`,
+        rationale: deliveredCount > 0
+          ? `Only ${deliveredCount} exact matches were found. Remaining results do not meet all stated requirements.`
+          : leads.length > 0
+            ? "No exact matches were found. Closest alternatives were identified after relaxing soft constraints."
+            : "No results were found that meet the stated requirements.",
         suggested_changes: softChanges,
         constraint_results: constraintResults,
       };
@@ -500,7 +507,9 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
       requested: requestedCount,
       gaps: [...gaps, "no_further_progress_possible"],
       confidence: 95,
-      rationale: `Hard constraint impossible: ${hardViolations.map((r) => `${r.constraint.type}(${r.constraint.field}=${r.constraint.value})`).join(", ")} — no viable changes available.${goal ? ` Goal: "${goal}"` : ""}`,
+      rationale: deliveredCount > 0
+        ? `Only ${deliveredCount} exact matches were found. Remaining results do not meet all stated requirements. Hard constraint impossible: ${hardViolations.map((r) => `${r.constraint.type}(${r.constraint.field}=${r.constraint.value})`).join(", ")}.`
+        : `No exact matches were found. Hard constraint impossible: ${hardViolations.map((r) => `${r.constraint.type}(${r.constraint.field}=${r.constraint.value})`).join(", ")} — 0 of ${leads.length} leads meet all stated requirements.`,
       suggested_changes: [],
       constraint_results: constraintResults,
     };
@@ -524,7 +533,11 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
           deliveredCount === 0
             ? 95
             : Math.round(50 + (deliveredCount / requestedCount) * 30),
-        rationale: `Delivered ${deliveredCount} of ${requestedCount} requested.${goal ? ` Goal: "${goal}"` : ""}`,
+        rationale: deliveredCount > 0
+          ? `Only ${deliveredCount} exact matches were found. Remaining results do not meet all stated requirements.`
+          : leads.length > 0
+            ? "No exact matches were found. Closest alternatives were identified after relaxing soft constraints."
+            : "No results were found that meet the stated requirements.",
         suggested_changes: suggestions,
         constraint_results: constraintResults,
       };
@@ -542,7 +555,11 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
         requested: requestedCount,
         gaps: [...gaps, "max_replans_exhausted"],
         confidence: 90,
-        rationale: `Delivered ${deliveredCount} of ${requestedCount} requested. Max replans exhausted, cannot improve further.${goal ? ` Goal: "${goal}"` : ""}`,
+        rationale: deliveredCount > 0
+          ? `Only ${deliveredCount} exact matches were found. Remaining results do not meet all stated requirements.`
+          : leads.length > 0
+            ? "No exact matches were found. Closest alternatives were identified after relaxing soft constraints."
+            : "No results were found that meet the stated requirements.",
         suggested_changes: [],
         constraint_results: constraintResults,
       };
@@ -559,7 +576,11 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
       requested: requestedCount,
       gaps: [...gaps, "no_further_progress_possible"],
       confidence: 90,
-      rationale: `Delivered ${deliveredCount} of ${requestedCount} requested. No viable changes available.${goal ? ` Goal: "${goal}"` : ""}`,
+      rationale: deliveredCount > 0
+        ? `Only ${deliveredCount} exact matches were found. Remaining results do not meet all stated requirements.`
+        : leads.length > 0
+          ? "No exact matches were found. Closest alternatives were identified after relaxing soft constraints."
+          : "No results were found that meet the stated requirements.",
       suggested_changes: [],
       constraint_results: constraintResults,
     };
@@ -576,7 +597,7 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
     requested: requestedCount,
     gaps: [...labelGaps],
     confidence: 100,
-    rationale: `Cannot proceed with requested=${requestedCount}.`,
+    rationale: "No results were found that meet the stated requirements.",
     suggested_changes: [],
   };
   console.log(`[TOWER] verdict=STOP reason=invalid_state`);
