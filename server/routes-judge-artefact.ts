@@ -22,8 +22,8 @@ interface JudgeArtefactResponse {
   suggested_changes: Array<{
     type: string;
     field: string;
-    from: string | null;
-    to: string | null;
+    from: string | number | null;
+    to: string | number | null;
     reason: string;
   }>;
 }
@@ -35,7 +35,7 @@ function judgeLeadsListArtefact(
   plan?: unknown,
   planSummary?: unknown,
   hardConstraints?: string[],
-  softConstraints?: string[]
+  softConstraints?: string[],
 ): JudgeArtefactResponse {
   const targetCount =
     successCriteria?.target_count ??
@@ -104,10 +104,28 @@ function judgeLeadsListArtefact(
     successCriteria?.soft_constraints ??
     undefined;
 
+  const requestedCountUser =
+    successCriteria?.requested_count_user ??
+    payloadJson?.requested_count_user ??
+    undefined;
+
+  const accumulatedCount =
+    successCriteria?.accumulated_count ??
+    payloadJson?.accumulated_count ??
+    undefined;
+
+  const planVersion = payloadJson?.plan_version ?? undefined;
+  const radiusKm = payloadJson?.radius_km ?? undefined;
+  const attemptHistory = Array.isArray(payloadJson?.attempt_history) ? payloadJson.attempt_history : undefined;
+
+  const structuredConstraints = payloadJson?.constraints;
+  const isStructured = structuredConstraints && typeof structuredConstraints === "object" &&
+    Object.values(structuredConstraints).some((v: any) => v && typeof v === "object" && "hardness" in v);
+
   const towerResult = judgeLeadsList({
     leads,
     success_criteria: targetCount != null ? { target_count: targetCount } : undefined,
-    constraints: {
+    constraints: isStructured ? structuredConstraints : {
       ...(constraintsCount != null ? { count: constraintsCount } : {}),
       ...(prefix != null ? { prefix } : {}),
       ...(location != null ? { location } : {}),
@@ -116,11 +134,16 @@ function judgeLeadsListArtefact(
     },
     hard_constraints: Array.isArray(resolvedHardConstraints) ? resolvedHardConstraints : undefined,
     soft_constraints: Array.isArray(resolvedSoftConstraints) ? resolvedSoftConstraints : undefined,
+    requested_count_user: requestedCountUser != null ? requestedCountUser : undefined,
     requested_count: requestedCount != null ? requestedCount : undefined,
+    accumulated_count: accumulatedCount != null ? accumulatedCount : undefined,
     delivered_count: deliveredCount != null ? deliveredCount : undefined,
     original_user_goal: goal,
     plan: resolvedPlan,
     plan_summary: resolvedPlanSummary,
+    plan_version: planVersion,
+    radius_km: radiusKm,
+    attempt_history: attemptHistory,
   });
 
   let verdict: "pass" | "fail";

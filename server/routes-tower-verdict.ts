@@ -10,6 +10,18 @@ router.get("/health", (_req, res) => {
   res.json({ ok: true, version: TOWER_VERSION, time: new Date().toISOString() });
 });
 
+const constraintSpecSchema = z.object({
+  value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
+  hardness: z.enum(["hard", "soft"]),
+  was_relaxed: z.boolean().optional(),
+}).passthrough();
+
+const attemptHistoryEntrySchema = z.object({
+  plan_version: z.number(),
+  radius_km: z.number(),
+  delivered_count: z.number(),
+});
+
 const towerVerdictRequestSchema = z.object({
   artefactType: z.literal("leads_list"),
   run_id: z.string().optional(),
@@ -23,26 +35,31 @@ const towerVerdictRequestSchema = z.object({
     })
     .passthrough()
     .optional(),
-  constraints: z
-    .object({
+  constraints: z.union([
+    z.record(constraintSpecSchema),
+    z.object({
       count: z.number().int().positive().optional(),
       prefix: z.string().optional(),
       prefix_filter: z.string().optional(),
       location: z.string().optional(),
       radius: z.union([z.number(), z.string()]).optional(),
       business_type: z.string().optional(),
-    })
-    .passthrough()
-    .optional(),
+    }).passthrough(),
+  ]).optional(),
   hard_constraints: z.array(z.string()).optional(),
   soft_constraints: z.array(z.string()).optional(),
+  requested_count_user: z.number().int().optional(),
   requested_count: z.number().int().optional(),
+  accumulated_count: z.number().int().optional(),
   delivered_count: z.number().int().optional(),
   delivered: z.number().int().optional(),
   original_user_goal: z.string().optional(),
   normalized_goal: z.string().optional(),
   plan: z.unknown().optional(),
   plan_summary: z.unknown().optional(),
+  plan_version: z.number().optional(),
+  radius_km: z.number().optional(),
+  attempt_history: z.array(attemptHistoryEntrySchema).optional(),
 });
 
 function buildProofVerdict(proofMode: string | undefined, runId: string, artefactId: string) {
@@ -94,13 +111,18 @@ router.post("/tower-verdict", async (req, res) => {
       constraints,
       hard_constraints,
       soft_constraints,
+      requested_count_user,
       requested_count,
+      accumulated_count,
       delivered_count,
       delivered,
       original_user_goal,
       normalized_goal,
       plan,
       plan_summary,
+      plan_version,
+      radius_km,
+      attempt_history,
       run_id,
       goal,
       proof_mode,
@@ -120,16 +142,21 @@ router.post("/tower-verdict", async (req, res) => {
     const result = judgeLeadsList({
       leads,
       success_criteria,
-      constraints,
+      constraints: constraints as any,
       hard_constraints,
       soft_constraints,
+      requested_count_user,
       requested_count,
+      accumulated_count,
       delivered_count,
       delivered,
       original_user_goal,
       normalized_goal,
       plan,
       plan_summary,
+      plan_version,
+      radius_km,
+      attempt_history,
     });
 
     console.log(
