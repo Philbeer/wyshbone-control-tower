@@ -4,6 +4,8 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { judgeLeadsList } from "../src/evaluator/towerVerdict";
 import type { Lead, Constraint, DeliveredInfo, MetaInfo } from "../src/evaluator/towerVerdict";
+import { judgePlasticsInjection } from "../src/evaluator/plasticsInjectionRubric";
+import type { PlasticsRubricInput } from "../src/evaluator/plasticsInjectionRubric";
 
 const router = express.Router();
 
@@ -260,6 +262,82 @@ router.post("/judge-artefact", async (req, res) => {
       );
 
       res.json(leadsResult);
+      return;
+    }
+
+    if (artefactType === "factory_state" || artefactType === "factory_decision") {
+      const plasticsConstraints = payloadJson?.constraints ?? successCriteria?.constraints;
+      const factoryState = payloadJson?.factory_state;
+
+      if (!plasticsConstraints || !factoryState || plasticsConstraints.max_scrap_percent == null || factoryState.scrap_rate_now == null) {
+        const failResponse: JudgeArtefactResponse = {
+          verdict: "fail",
+          action: "stop",
+          reasons: ["Missing required plastics fields: constraints.max_scrap_percent and factory_state.scrap_rate_now"],
+          metrics: { artefactId, runId, artefactType, error: "missing_plastics_fields" },
+          suggested_changes: [],
+        };
+        res.json(failResponse);
+        return;
+      }
+
+      const rubricInput: PlasticsRubricInput = {
+        constraints: plasticsConstraints,
+        factory_state: factoryState,
+        factory_decision: payloadJson?.factory_decision,
+        history: payloadJson?.history,
+      };
+
+      const plasticsResult = judgePlasticsInjection(rubricInput);
+
+      let pVerdict: "pass" | "fail";
+      let pAction: "continue" | "stop" | "retry" | "change_plan";
+
+      if (plasticsResult.verdict === "ACCEPT") {
+        pVerdict = "pass";
+        pAction = "continue";
+      } else if (plasticsResult.verdict === "CHANGE_PLAN") {
+        pVerdict = "fail";
+        pAction = "change_plan";
+      } else {
+        pVerdict = "fail";
+        pAction = "stop";
+      }
+
+      const plasticsResponse: JudgeArtefactResponse = {
+        verdict: pVerdict,
+        action: pAction,
+        reasons: [
+          plasticsResult.reason,
+          ...plasticsResult.gaps.map((g) => `gap: ${g}`),
+        ],
+        metrics: {
+          artefactId,
+          runId,
+          artefactType,
+          goal,
+          scrap_rate_now: plasticsResult.scrap_rate_now,
+          max_scrap_percent: plasticsResult.max_scrap_percent,
+          confidence: plasticsResult.confidence,
+          towerVerdict: plasticsResult.verdict,
+          towerAction: plasticsResult.action,
+          step: plasticsResult.step,
+          judgedAt: new Date().toISOString(),
+        },
+        suggested_changes: plasticsResult.suggested_changes.map((s) => ({
+          type: "CHANGE_QUERY",
+          field: "mitigation",
+          from: null,
+          to: null,
+          reason: s,
+        })),
+      };
+
+      console.log(
+        `[Tower][judge-artefact] ${artefactType} run_id=${runId} verdict=${pVerdict} action=${pAction} scrap=${plasticsResult.scrap_rate_now} max=${plasticsResult.max_scrap_percent}`
+      );
+
+      res.json(plasticsResponse);
       return;
     }
 

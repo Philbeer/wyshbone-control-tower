@@ -1,10 +1,12 @@
 import express from "express";
 import { z } from "zod";
 import { judgeLeadsList } from "../src/evaluator/towerVerdict";
+import { judgePlasticsInjection } from "../src/evaluator/plasticsInjectionRubric";
+import type { PlasticsRubricInput, PlasticsStepSnapshot } from "../src/evaluator/plasticsInjectionRubric";
 
 const router = express.Router();
 
-const TOWER_VERSION = "3.0.0";
+const TOWER_VERSION = "3.1.0";
 
 router.get("/health", (_req, res) => {
   res.json({ ok: true, version: TOWER_VERSION, time: new Date().toISOString() });
@@ -70,6 +72,47 @@ const successCriteriaSchema = z
     allow_relax_soft_constraints: z.boolean().optional(),
   })
   .passthrough();
+
+const plasticsConstraintsSchema = z.object({
+  max_scrap_percent: z.number(),
+  max_energy_kwh_per_good_part: z.number().optional(),
+  deadline_step: z.number().int().optional(),
+});
+
+const plasticsFactoryStateSchema = z.object({
+  scrap_rate_now: z.number(),
+  achievable_scrap_floor: z.number().optional(),
+  defect_type: z.string().optional(),
+  energy_kwh_per_good_part: z.number().optional(),
+  moisture_level: z.number().optional(),
+  tool_condition: z.string().optional(),
+  step: z.number().int().optional(),
+});
+
+const plasticsFactoryDecisionSchema = z.object({
+  action: z.string(),
+  parameters: z.record(z.unknown()).optional(),
+});
+
+const plasticsStepSnapshotSchema = z.object({
+  step: z.number().int(),
+  scrap_rate: z.number(),
+  defect_type: z.string().optional(),
+  energy_kwh_per_good_part: z.number().optional(),
+  decision_action: z.string().optional(),
+});
+
+const plasticsVerdictRequestSchema = z.object({
+  artefactType: z.enum(["factory_state", "factory_decision"]),
+  run_id: z.string().optional(),
+  artefactId: z.string().optional(),
+  goal: z.string().optional(),
+  proof_mode: z.string().optional(),
+  constraints: plasticsConstraintsSchema,
+  factory_state: plasticsFactoryStateSchema,
+  factory_decision: plasticsFactoryDecisionSchema.optional(),
+  history: z.array(plasticsStepSnapshotSchema).optional(),
+});
 
 const towerVerdictRequestSchema = z.object({
   artefactType: z.literal("leads_list"),
@@ -145,6 +188,52 @@ function buildProofVerdict(
 
 router.post("/tower-verdict", async (req, res) => {
   try {
+    const artefactType = req.body?.artefactType;
+
+    if (artefactType === "factory_state" || artefactType === "factory_decision") {
+      const parsed = plasticsVerdictRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        const issues = parsed.error.issues.map((i) => ({
+          path: i.path.join("."),
+          message: i.message,
+        }));
+        res.status(400).json({ error: "Validation failed", details: issues });
+        return;
+      }
+
+      const data = parsed.data;
+
+      if (data.goal === "Proof Tower Loop") {
+        const result = buildProofVerdict(
+          data.proof_mode,
+          data.run_id ?? "none",
+          data.artefactId ?? "none"
+        );
+        res.json(result);
+        return;
+      }
+
+      const rubricInput: PlasticsRubricInput = {
+        constraints: data.constraints,
+        factory_state: data.factory_state,
+        factory_decision: data.factory_decision,
+        history: data.history as PlasticsStepSnapshot[] | undefined,
+      };
+
+      const result = judgePlasticsInjection(rubricInput);
+
+      console.log(
+        `[TOWER_IN] run_id=${data.run_id ?? "none"} artefactType=${artefactType} verdict=${result.verdict} action=${result.action} scrap_rate=${result.scrap_rate_now} max_scrap=${result.max_scrap_percent} step=${result.step ?? "?"}`
+      );
+
+      res.json({
+        ...result,
+        artefactType,
+        run_id: data.run_id,
+      });
+      return;
+    }
+
     const parsed = towerVerdictRequestSchema.safeParse(req.body);
 
     if (!parsed.success) {
