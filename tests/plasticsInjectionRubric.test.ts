@@ -183,7 +183,7 @@ test("CHANGE_PLAN: scrap rising for 2 consecutive steps (above limit)", () => {
   expect(result.action).toBe("change_plan");
   expect(result.gaps).toContain("scrap_rising_trend");
   expect(result.gaps).toContain("machine_unstable");
-  expect(result.reason).toContain("Current machine is unstable");
+  expect(result.reason).toContain("Current machine (unknown) is unstable");
   expect(result.reason).toContain("Switch to alternate machine profile");
 });
 
@@ -403,6 +403,101 @@ test("Deadline met — scrap within limit, no STOP", () => {
   if (result.verdict === "STOP" && result.gaps.includes("deadline_infeasible")) {
     throw new Error("Should not stop for deadline when scrap is within limit");
   }
+});
+
+test("Machine field flows through to output", () => {
+  const result = judgePlasticsInjection({
+    constraints: { max_scrap_percent: 5 },
+    factory_state: { scrap_rate_now: 3, step: 1, machine: "M1" },
+  });
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.machine).toBe("M1");
+});
+
+test("Machine field appears in CHANGE_PLAN reason", () => {
+  const result = judgePlasticsInjection({
+    constraints: { max_scrap_percent: 5 },
+    factory_state: { scrap_rate_now: 8, step: 2, machine: "M1" },
+    factory_decision: { action: "continue" },
+  });
+  expect(result.verdict).toBe("CHANGE_PLAN");
+  expect(result.machine).toBe("M1");
+  expect(result.reason).toContain("Current machine (M1)");
+});
+
+test("Machine field undefined when not provided", () => {
+  const result = judgePlasticsInjection({
+    constraints: { max_scrap_percent: 5 },
+    factory_state: { scrap_rate_now: 3, step: 1 },
+  });
+  if (result.machine !== undefined) {
+    throw new Error(`Expected machine to be undefined, got ${result.machine}`);
+  }
+});
+
+test("defect_type as array: detects shift from string to array", () => {
+  const result = judgePlasticsInjection({
+    constraints: { max_scrap_percent: 5 },
+    factory_state: { scrap_rate_now: 7, defect_type: ["short_shot", "flash"], step: 3 },
+    history: [
+      { step: 1, scrap_rate: 6, defect_type: "short_shot" },
+      { step: 2, scrap_rate: 7, defect_type: "short_shot", decision_action: "adjust_temp" },
+      { step: 3, scrap_rate: 7, defect_type: ["short_shot", "flash"] },
+    ],
+  });
+  expect(result.verdict).toBe("CHANGE_PLAN");
+  expect(result.gaps).toContain("defect_type_shifted");
+  expect(result.reason).toContain("short_shot, flash");
+});
+
+test("defect_type as array: same array does NOT trigger shift", () => {
+  const result = judgePlasticsInjection({
+    constraints: { max_scrap_percent: 5 },
+    factory_state: { scrap_rate_now: 7, defect_type: ["flash", "short_shot"], step: 3 },
+    history: [
+      { step: 1, scrap_rate: 6, defect_type: ["short_shot", "flash"] },
+      { step: 2, scrap_rate: 7, defect_type: ["flash", "short_shot"], decision_action: "adjust_temp" },
+      { step: 3, scrap_rate: 7, defect_type: ["flash", "short_shot"] },
+    ],
+  });
+  if (result.gaps.includes("defect_type_shifted")) {
+    throw new Error("Should not detect defect shift when arrays contain the same elements");
+  }
+});
+
+test("3-step UI scenario: M1→M1→M2 with machine switch", () => {
+  const step1 = judgePlasticsInjection({
+    constraints: { max_scrap_percent: 7 },
+    factory_state: { scrap_rate_now: 4.2, achievable_scrap_floor: 2, defect_type: "short_shot", machine: "M1", step: 1 },
+    history: [{ step: 1, scrap_rate: 4.2, defect_type: "short_shot", machine: "M1" }],
+  });
+  expect(step1.verdict).toBe("ACCEPT");
+  expect(step1.machine).toBe("M1");
+
+  const step2 = judgePlasticsInjection({
+    constraints: { max_scrap_percent: 7 },
+    factory_state: { scrap_rate_now: 8.1, achievable_scrap_floor: 2, defect_type: ["short_shot", "flash"], machine: "M1", step: 2 },
+    factory_decision: { action: "continue" },
+    history: [
+      { step: 1, scrap_rate: 4.2, defect_type: "short_shot", machine: "M1" },
+      { step: 2, scrap_rate: 8.1, defect_type: ["short_shot", "flash"], machine: "M1" },
+    ],
+  });
+  expect(step2.verdict).toBe("CHANGE_PLAN");
+  expect(step2.machine).toBe("M1");
+  expect(step2.reason).toContain("Switch to alternate machine profile");
+
+  const step3 = judgePlasticsInjection({
+    constraints: { max_scrap_percent: 7 },
+    factory_state: { scrap_rate_now: 1.8, achievable_scrap_floor: 1.5, defect_type: "none", machine: "M2", step: 3 },
+    history: [
+      { step: 1, scrap_rate: 4.2, defect_type: "short_shot", machine: "M1" },
+      { step: 2, scrap_rate: 8.1, defect_type: ["short_shot", "flash"], machine: "M1" },
+      { step: 3, scrap_rate: 1.8, defect_type: "none", machine: "M2" },
+    ],
+  });
+  expect(step3.verdict).toBe("ACCEPT");
+  expect(step3.machine).toBe("M2");
 });
 
 runTests();

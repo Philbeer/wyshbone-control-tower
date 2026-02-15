@@ -9,10 +9,11 @@ export interface PlasticsConstraints {
 export interface PlasticsFactoryState {
   scrap_rate_now: number;
   achievable_scrap_floor?: number;
-  defect_type?: string;
+  defect_type?: string | string[];
   energy_kwh_per_good_part?: number;
   moisture_level?: number;
   tool_condition?: string;
+  machine?: string;
   step?: number;
 }
 
@@ -24,9 +25,10 @@ export interface PlasticsFactoryDecision {
 export interface PlasticsStepSnapshot {
   step: number;
   scrap_rate: number;
-  defect_type?: string;
+  defect_type?: string | string[];
   energy_kwh_per_good_part?: number;
   decision_action?: string;
+  machine?: string;
 }
 
 export interface PlasticsRubricInput {
@@ -46,6 +48,7 @@ export interface PlasticsTowerJudgement {
   gaps: string[];
   suggested_changes: string[];
   step?: number;
+  machine?: string;
 }
 
 function verdictToAction(verdict: PlasticsVerdictAction): "continue" | "stop" | "change_plan" {
@@ -67,12 +70,26 @@ function isScrapRisingForTwoSteps(history: PlasticsStepSnapshot[]): boolean {
   return h[2].scrap_rate > h[1].scrap_rate && h[1].scrap_rate > h[0].scrap_rate;
 }
 
+function normalizeDefectType(dt: string | string[] | undefined): string {
+  if (!dt) return "";
+  if (Array.isArray(dt)) return [...dt].sort().join(",");
+  return dt;
+}
+
+function defectTypeLabel(dt: string | string[] | undefined): string {
+  if (!dt) return "none";
+  if (Array.isArray(dt)) return dt.join(", ");
+  return dt;
+}
+
 function didDefectShiftAfterMitigation(history: PlasticsStepSnapshot[]): boolean {
   if (history.length < 2) return false;
   const last = history[history.length - 1];
   const prev = history[history.length - 2];
-  if (!last.defect_type || !prev.defect_type) return false;
-  if (prev.decision_action && last.defect_type !== prev.defect_type) {
+  const lastNorm = normalizeDefectType(last.defect_type);
+  const prevNorm = normalizeDefectType(prev.defect_type);
+  if (!lastNorm || !prevNorm) return false;
+  if (prev.decision_action && lastNorm !== prevNorm) {
     return true;
   }
   return false;
@@ -93,17 +110,16 @@ function isRepeatingFailingAction(history: PlasticsStepSnapshot[], currentDecisi
 export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowerJudgement {
   const { constraints, factory_state, factory_decision, history } = input;
   const { max_scrap_percent } = constraints;
-  const { scrap_rate_now, achievable_scrap_floor } = factory_state;
+  const { scrap_rate_now, achievable_scrap_floor, machine } = factory_state;
   const steps = history ?? [];
-  const gaps: string[] = [];
-  const suggested_changes: string[] = [];
+  const machineLabel = machine ?? "unknown";
 
   if (
     achievable_scrap_floor != null &&
     max_scrap_percent < achievable_scrap_floor
   ) {
     const reason = `constraint impossible under current moisture/tool state — max_scrap_percent (${max_scrap_percent}%) is below achievable_scrap_floor (${achievable_scrap_floor}%)`;
-    console.log(`[TOWER_PLASTICS] verdict=STOP reason=constraint_impossible step=${factory_state.step ?? "?"}`);
+    console.log(`[TOWER_PLASTICS] verdict=STOP reason=constraint_impossible step=${factory_state.step ?? "?"} machine=${machineLabel}`);
     return {
       verdict: "STOP",
       action: "stop",
@@ -114,12 +130,13 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
       gaps: ["constraint_impossible"],
       suggested_changes: ["reduce moisture or repair tooling before retrying"],
       step: factory_state.step,
+      machine,
     };
   }
 
   if (scrap_rate_now >= 50) {
     const reason = `extreme scrap rate (${scrap_rate_now}%) — immediate stop required`;
-    console.log(`[TOWER_PLASTICS] verdict=STOP reason=extreme_scrap step=${factory_state.step ?? "?"}`);
+    console.log(`[TOWER_PLASTICS] verdict=STOP reason=extreme_scrap step=${factory_state.step ?? "?"} machine=${machineLabel}`);
     return {
       verdict: "STOP",
       action: "stop",
@@ -130,6 +147,7 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
       gaps: ["extreme_scrap"],
       suggested_changes: ["halt production and investigate root cause"],
       step: factory_state.step,
+      machine,
     };
   }
 
@@ -137,7 +155,7 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
     const stepsLeft = constraints.deadline_step - factory_state.step;
     if (stepsLeft <= 0 && scrap_rate_now > max_scrap_percent) {
       const reason = `deadline reached at step ${factory_state.step} with scrap_rate (${scrap_rate_now}%) still above max (${max_scrap_percent}%)`;
-      console.log(`[TOWER_PLASTICS] verdict=STOP reason=deadline_infeasible step=${factory_state.step}`);
+      console.log(`[TOWER_PLASTICS] verdict=STOP reason=deadline_infeasible step=${factory_state.step} machine=${machineLabel}`);
       return {
         verdict: "STOP",
         action: "stop",
@@ -148,14 +166,15 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         gaps: ["deadline_infeasible"],
         suggested_changes: ["extend deadline or relax scrap constraint"],
         step: factory_state.step,
+        machine,
       };
     }
   }
 
   if (scrap_rate_now > max_scrap_percent) {
     if (isScrapRisingForTwoSteps(steps)) {
-      const reason = `Current machine is unstable under these conditions; scrap rising for 2 consecutive steps (now ${scrap_rate_now}%, limit ${max_scrap_percent}%). Switch to alternate machine profile.`;
-      console.log(`[TOWER_PLASTICS] verdict=CHANGE_PLAN reason=scrap_rising_2_steps step=${factory_state.step ?? "?"}`);
+      const reason = `Current machine (${machineLabel}) is unstable under these conditions; scrap rising for 2 consecutive steps (now ${scrap_rate_now}%, limit ${max_scrap_percent}%). Switch to alternate machine profile.`;
+      console.log(`[TOWER_PLASTICS] verdict=CHANGE_PLAN reason=scrap_rising_2_steps step=${factory_state.step ?? "?"} machine=${machineLabel}`);
       return {
         verdict: "CHANGE_PLAN",
         action: "change_plan",
@@ -166,14 +185,15 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         gaps: ["scrap_rising_trend", "machine_unstable"],
         suggested_changes: ["switch to alternate machine profile"],
         step: factory_state.step,
+        machine,
       };
     }
 
     if (didDefectShiftAfterMitigation(steps)) {
       const last = steps[steps.length - 1];
       const prev = steps[steps.length - 2];
-      const reason = `Current machine is unstable under these conditions; defect shifted from "${prev.defect_type}" to "${last.defect_type}" after mitigation, scrap still ${scrap_rate_now}%. Switch to alternate machine profile.`;
-      console.log(`[TOWER_PLASTICS] verdict=CHANGE_PLAN reason=defect_shift step=${factory_state.step ?? "?"}`);
+      const reason = `Current machine (${machineLabel}) is unstable under these conditions; defect shifted from "${defectTypeLabel(prev.defect_type)}" to "${defectTypeLabel(last.defect_type)}" after mitigation, scrap still ${scrap_rate_now}%. Switch to alternate machine profile.`;
+      console.log(`[TOWER_PLASTICS] verdict=CHANGE_PLAN reason=defect_shift step=${factory_state.step ?? "?"} machine=${machineLabel}`);
       return {
         verdict: "CHANGE_PLAN",
         action: "change_plan",
@@ -184,6 +204,7 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         gaps: ["defect_type_shifted", "machine_unstable"],
         suggested_changes: ["switch to alternate machine profile"],
         step: factory_state.step,
+        machine,
       };
     }
 
@@ -194,9 +215,9 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
 
     if (decisionIsContinue || repeating) {
       const reason = repeating
-        ? `Current machine is unstable under these conditions; repeating failing action "${factory_decision?.action}" while scrap_rate (${scrap_rate_now}%) exceeds max (${max_scrap_percent}%). Switch to alternate machine profile.`
-        : `Current machine is unstable under these conditions; decision is "${factory_decision?.action}" but scrap_rate (${scrap_rate_now}%) exceeds max (${max_scrap_percent}%). Switch to alternate machine profile.`;
-      console.log(`[TOWER_PLASTICS] verdict=CHANGE_PLAN reason=continue_while_failing step=${factory_state.step ?? "?"}`);
+        ? `Current machine (${machineLabel}) is unstable under these conditions; repeating failing action "${factory_decision?.action}" while scrap_rate (${scrap_rate_now}%) exceeds max (${max_scrap_percent}%). Switch to alternate machine profile.`
+        : `Current machine (${machineLabel}) is unstable under these conditions; decision is "${factory_decision?.action}" but scrap_rate (${scrap_rate_now}%) exceeds max (${max_scrap_percent}%). Switch to alternate machine profile.`;
+      console.log(`[TOWER_PLASTICS] verdict=CHANGE_PLAN reason=continue_while_failing step=${factory_state.step ?? "?"} machine=${machineLabel}`);
       return {
         verdict: "CHANGE_PLAN",
         action: "change_plan",
@@ -207,11 +228,12 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         gaps: ["decision_ineffective", "machine_unstable"],
         suggested_changes: ["switch to alternate machine profile"],
         step: factory_state.step,
+        machine,
       };
     }
 
     const reason = `scrap_rate (${scrap_rate_now}%) exceeds max (${max_scrap_percent}%) but active mitigation in progress`;
-    console.log(`[TOWER_PLASTICS] verdict=ACCEPT reason=mitigation_in_progress step=${factory_state.step ?? "?"}`);
+    console.log(`[TOWER_PLASTICS] verdict=ACCEPT reason=mitigation_in_progress step=${factory_state.step ?? "?"} machine=${machineLabel}`);
     return {
       verdict: "ACCEPT",
       action: "continue",
@@ -222,13 +244,14 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
       gaps: ["scrap_above_target"],
       suggested_changes: [],
       step: factory_state.step,
+      machine,
     };
   }
 
   if (scrap_rate_now <= max_scrap_percent) {
     if (isScrapRisingForTwoSteps(steps)) {
-      const reason = `Current machine is unstable under these conditions; scrap rising for 2 steps (now ${scrap_rate_now}%, limit ${max_scrap_percent}%). Switch to alternate machine profile.`;
-      console.log(`[TOWER_PLASTICS] verdict=CHANGE_PLAN reason=rising_trend_within_limit step=${factory_state.step ?? "?"}`);
+      const reason = `Current machine (${machineLabel}) is unstable under these conditions; scrap rising for 2 steps (now ${scrap_rate_now}%, limit ${max_scrap_percent}%). Switch to alternate machine profile.`;
+      console.log(`[TOWER_PLASTICS] verdict=CHANGE_PLAN reason=rising_trend_within_limit step=${factory_state.step ?? "?"} machine=${machineLabel}`);
       return {
         verdict: "CHANGE_PLAN",
         action: "change_plan",
@@ -239,14 +262,15 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         gaps: ["scrap_rising_trend", "machine_unstable"],
         suggested_changes: ["switch to alternate machine profile"],
         step: factory_state.step,
+        machine,
       };
     }
 
     if (didDefectShiftAfterMitigation(steps)) {
       const last = steps[steps.length - 1];
       const prev = steps[steps.length - 2];
-      const reason = `Current machine is unstable under these conditions; defect shifted from "${prev.defect_type}" to "${last.defect_type}" after mitigation, scrap ${scrap_rate_now}%. Switch to alternate machine profile.`;
-      console.log(`[TOWER_PLASTICS] verdict=CHANGE_PLAN reason=defect_shift_within_limit step=${factory_state.step ?? "?"}`);
+      const reason = `Current machine (${machineLabel}) is unstable under these conditions; defect shifted from "${defectTypeLabel(prev.defect_type)}" to "${defectTypeLabel(last.defect_type)}" after mitigation, scrap ${scrap_rate_now}%. Switch to alternate machine profile.`;
+      console.log(`[TOWER_PLASTICS] verdict=CHANGE_PLAN reason=defect_shift_within_limit step=${factory_state.step ?? "?"} machine=${machineLabel}`);
       return {
         verdict: "CHANGE_PLAN",
         action: "change_plan",
@@ -257,12 +281,13 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         gaps: ["defect_type_shifted", "machine_unstable"],
         suggested_changes: ["switch to alternate machine profile"],
         step: factory_state.step,
+        machine,
       };
     }
 
     if (!isScrapWorsening(steps) || steps.length < 2) {
       const reason = `scrap_rate (${scrap_rate_now}%) within limit (${max_scrap_percent}%) and not worsening — on track`;
-      console.log(`[TOWER_PLASTICS] verdict=ACCEPT reason=within_limit step=${factory_state.step ?? "?"}`);
+      console.log(`[TOWER_PLASTICS] verdict=ACCEPT reason=within_limit step=${factory_state.step ?? "?"} machine=${machineLabel}`);
       return {
         verdict: "ACCEPT",
         action: "continue",
@@ -273,11 +298,12 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         gaps: [],
         suggested_changes: [],
         step: factory_state.step,
+        machine,
       };
     }
 
     const reason = `scrap_rate (${scrap_rate_now}%) within limit (${max_scrap_percent}%) but slightly worsening — monitor closely`;
-    console.log(`[TOWER_PLASTICS] verdict=ACCEPT reason=within_limit_slight_rise step=${factory_state.step ?? "?"}`);
+    console.log(`[TOWER_PLASTICS] verdict=ACCEPT reason=within_limit_slight_rise step=${factory_state.step ?? "?"} machine=${machineLabel}`);
     return {
       verdict: "ACCEPT",
       action: "continue",
@@ -288,10 +314,11 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
       gaps: ["slight_worsening"],
       suggested_changes: [],
       step: factory_state.step,
+      machine,
     };
   }
 
-  console.log(`[TOWER_PLASTICS] verdict=STOP reason=fallback step=${factory_state.step ?? "?"}`);
+  console.log(`[TOWER_PLASTICS] verdict=STOP reason=fallback step=${factory_state.step ?? "?"} machine=${machineLabel}`);
   return {
     verdict: "STOP",
     action: "stop",
@@ -302,5 +329,6 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
     gaps: ["unknown_state"],
     suggested_changes: [],
     step: factory_state.step,
+    machine,
   };
 }

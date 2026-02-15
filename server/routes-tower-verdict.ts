@@ -79,13 +79,16 @@ const plasticsConstraintsSchema = z.object({
   deadline_step: z.number().int().optional(),
 });
 
+const defectTypeSchema = z.union([z.string(), z.array(z.string())]).optional();
+
 const plasticsFactoryStateSchema = z.object({
   scrap_rate_now: z.number(),
   achievable_scrap_floor: z.number().optional(),
-  defect_type: z.string().optional(),
+  defect_type: defectTypeSchema,
   energy_kwh_per_good_part: z.number().optional(),
   moisture_level: z.number().optional(),
   tool_condition: z.string().optional(),
+  machine: z.string().optional(),
   step: z.number().int().optional(),
 });
 
@@ -97,9 +100,10 @@ const plasticsFactoryDecisionSchema = z.object({
 const plasticsStepSnapshotSchema = z.object({
   step: z.number().int(),
   scrap_rate: z.number(),
-  defect_type: z.string().optional(),
+  defect_type: defectTypeSchema,
   energy_kwh_per_good_part: z.number().optional(),
   decision_action: z.string().optional(),
+  machine: z.string().optional(),
 });
 
 const plasticsVerdictRequestSchema = z.object({

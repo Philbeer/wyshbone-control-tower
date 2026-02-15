@@ -322,6 +322,7 @@ router.post("/judge-artefact", async (req, res) => {
           towerVerdict: plasticsResult.verdict,
           towerAction: plasticsResult.action,
           step: plasticsResult.step,
+          machine: plasticsResult.machine,
           judgedAt: new Date().toISOString(),
         },
         suggested_changes: plasticsResult.suggested_changes.map((s) => ({
