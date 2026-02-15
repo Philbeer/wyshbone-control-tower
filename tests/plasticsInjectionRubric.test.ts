@@ -146,6 +146,9 @@ test("CHANGE_PLAN: scrap > max and decision is 'continue' (no rising trend)", ()
   expect(result.verdict).toBe("CHANGE_PLAN");
   expect(result.action).toBe("change_plan");
   expect(result.gaps).toContain("decision_ineffective");
+  expect(result.gaps).toContain("machine_unstable");
+  expect(result.reason).toContain("Switch to alternate machine profile");
+  expect(result.suggested_changes).toContain("switch to alternate machine profile");
 });
 
 test("CHANGE_PLAN: repeating failing action", () => {
@@ -161,6 +164,8 @@ test("CHANGE_PLAN: repeating failing action", () => {
   expect(result.verdict).toBe("CHANGE_PLAN");
   expect(result.action).toBe("change_plan");
   expect(result.reason).toContain("repeating failing action");
+  expect(result.reason).toContain("Switch to alternate machine profile");
+  expect(result.gaps).toContain("machine_unstable");
 });
 
 test("CHANGE_PLAN: scrap rising for 2 consecutive steps (above limit)", () => {
@@ -177,6 +182,9 @@ test("CHANGE_PLAN: scrap rising for 2 consecutive steps (above limit)", () => {
   expect(result.verdict).toBe("CHANGE_PLAN");
   expect(result.action).toBe("change_plan");
   expect(result.gaps).toContain("scrap_rising_trend");
+  expect(result.gaps).toContain("machine_unstable");
+  expect(result.reason).toContain("Current machine is unstable");
+  expect(result.reason).toContain("Switch to alternate machine profile");
 });
 
 test("CHANGE_PLAN: scrap rising for 2 consecutive steps (within limit)", () => {
@@ -193,6 +201,8 @@ test("CHANGE_PLAN: scrap rising for 2 consecutive steps (within limit)", () => {
   expect(result.verdict).toBe("CHANGE_PLAN");
   expect(result.action).toBe("change_plan");
   expect(result.gaps).toContain("scrap_rising_trend");
+  expect(result.gaps).toContain("machine_unstable");
+  expect(result.reason).toContain("Switch to alternate machine profile");
 });
 
 test("CHANGE_PLAN: defect shifts after mitigation (above limit)", () => {
@@ -208,7 +218,9 @@ test("CHANGE_PLAN: defect shifts after mitigation (above limit)", () => {
   expect(result.verdict).toBe("CHANGE_PLAN");
   expect(result.action).toBe("change_plan");
   expect(result.gaps).toContain("defect_type_shifted");
+  expect(result.gaps).toContain("machine_unstable");
   expect(result.reason).toContain("defect shifted");
+  expect(result.reason).toContain("Switch to alternate machine profile");
 });
 
 test("CHANGE_PLAN: defect shifts after mitigation (within limit)", () => {
@@ -224,6 +236,8 @@ test("CHANGE_PLAN: defect shifts after mitigation (within limit)", () => {
   expect(result.verdict).toBe("CHANGE_PLAN");
   expect(result.action).toBe("change_plan");
   expect(result.gaps).toContain("defect_type_shifted");
+  expect(result.gaps).toContain("machine_unstable");
+  expect(result.reason).toContain("Switch to alternate machine profile");
 });
 
 test("ACCEPT: scrap > max but active mitigation in progress (not continue, not repeat)", () => {
@@ -342,6 +356,8 @@ test("CHANGE_PLAN: decision is 'no_change' while above limit", () => {
   });
   expect(result.verdict).toBe("CHANGE_PLAN");
   expect(result.action).toBe("change_plan");
+  expect(result.gaps).toContain("machine_unstable");
+  expect(result.reason).toContain("Switch to alternate machine profile");
 });
 
 test("Energy tracking flows through to output", () => {

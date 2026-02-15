@@ -154,7 +154,7 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
 
   if (scrap_rate_now > max_scrap_percent) {
     if (isScrapRisingForTwoSteps(steps)) {
-      const reason = `scrap_rate rising for 2 consecutive steps (now ${scrap_rate_now}%, limit ${max_scrap_percent}%) — current approach is not working`;
+      const reason = `Current machine is unstable under these conditions; scrap rising for 2 consecutive steps (now ${scrap_rate_now}%, limit ${max_scrap_percent}%). Switch to alternate machine profile.`;
       console.log(`[TOWER_PLASTICS] verdict=CHANGE_PLAN reason=scrap_rising_2_steps step=${factory_state.step ?? "?"}`);
       return {
         verdict: "CHANGE_PLAN",
@@ -163,8 +163,8 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         max_scrap_percent,
         confidence: 90,
         reason,
-        gaps: ["scrap_rising_trend"],
-        suggested_changes: ["try a different mitigation strategy"],
+        gaps: ["scrap_rising_trend", "machine_unstable"],
+        suggested_changes: ["switch to alternate machine profile"],
         step: factory_state.step,
       };
     }
@@ -172,7 +172,7 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
     if (didDefectShiftAfterMitigation(steps)) {
       const last = steps[steps.length - 1];
       const prev = steps[steps.length - 2];
-      const reason = `defect shifted from "${prev.defect_type}" to "${last.defect_type}" after mitigation — side effect detected, scrap still ${scrap_rate_now}%`;
+      const reason = `Current machine is unstable under these conditions; defect shifted from "${prev.defect_type}" to "${last.defect_type}" after mitigation, scrap still ${scrap_rate_now}%. Switch to alternate machine profile.`;
       console.log(`[TOWER_PLASTICS] verdict=CHANGE_PLAN reason=defect_shift step=${factory_state.step ?? "?"}`);
       return {
         verdict: "CHANGE_PLAN",
@@ -181,8 +181,8 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         max_scrap_percent,
         confidence: 85,
         reason,
-        gaps: ["defect_type_shifted"],
-        suggested_changes: ["address the new defect type rather than repeating previous fix"],
+        gaps: ["defect_type_shifted", "machine_unstable"],
+        suggested_changes: ["switch to alternate machine profile"],
         step: factory_state.step,
       };
     }
@@ -194,8 +194,8 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
 
     if (decisionIsContinue || repeating) {
       const reason = repeating
-        ? `repeating failing action "${factory_decision?.action}" while scrap_rate (${scrap_rate_now}%) exceeds max (${max_scrap_percent}%)`
-        : `decision is "${factory_decision?.action}" but scrap_rate (${scrap_rate_now}%) exceeds max (${max_scrap_percent}%) — plan must change`;
+        ? `Current machine is unstable under these conditions; repeating failing action "${factory_decision?.action}" while scrap_rate (${scrap_rate_now}%) exceeds max (${max_scrap_percent}%). Switch to alternate machine profile.`
+        : `Current machine is unstable under these conditions; decision is "${factory_decision?.action}" but scrap_rate (${scrap_rate_now}%) exceeds max (${max_scrap_percent}%). Switch to alternate machine profile.`;
       console.log(`[TOWER_PLASTICS] verdict=CHANGE_PLAN reason=continue_while_failing step=${factory_state.step ?? "?"}`);
       return {
         verdict: "CHANGE_PLAN",
@@ -204,8 +204,8 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         max_scrap_percent,
         confidence: 90,
         reason,
-        gaps: ["decision_ineffective"],
-        suggested_changes: ["change mitigation approach — current action is not reducing scrap"],
+        gaps: ["decision_ineffective", "machine_unstable"],
+        suggested_changes: ["switch to alternate machine profile"],
         step: factory_state.step,
       };
     }
@@ -227,7 +227,7 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
 
   if (scrap_rate_now <= max_scrap_percent) {
     if (isScrapRisingForTwoSteps(steps)) {
-      const reason = `scrap_rate rising for 2 steps (now ${scrap_rate_now}%) — still within limit (${max_scrap_percent}%) but trend is concerning`;
+      const reason = `Current machine is unstable under these conditions; scrap rising for 2 steps (now ${scrap_rate_now}%, limit ${max_scrap_percent}%). Switch to alternate machine profile.`;
       console.log(`[TOWER_PLASTICS] verdict=CHANGE_PLAN reason=rising_trend_within_limit step=${factory_state.step ?? "?"}`);
       return {
         verdict: "CHANGE_PLAN",
@@ -236,8 +236,8 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         max_scrap_percent,
         confidence: 75,
         reason,
-        gaps: ["scrap_rising_trend"],
-        suggested_changes: ["adjust parameters to arrest rising trend before it exceeds limit"],
+        gaps: ["scrap_rising_trend", "machine_unstable"],
+        suggested_changes: ["switch to alternate machine profile"],
         step: factory_state.step,
       };
     }
@@ -245,7 +245,7 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
     if (didDefectShiftAfterMitigation(steps)) {
       const last = steps[steps.length - 1];
       const prev = steps[steps.length - 2];
-      const reason = `defect shifted from "${prev.defect_type}" to "${last.defect_type}" after mitigation — new issue emerging, scrap ${scrap_rate_now}%`;
+      const reason = `Current machine is unstable under these conditions; defect shifted from "${prev.defect_type}" to "${last.defect_type}" after mitigation, scrap ${scrap_rate_now}%. Switch to alternate machine profile.`;
       console.log(`[TOWER_PLASTICS] verdict=CHANGE_PLAN reason=defect_shift_within_limit step=${factory_state.step ?? "?"}`);
       return {
         verdict: "CHANGE_PLAN",
@@ -254,8 +254,8 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         max_scrap_percent,
         confidence: 70,
         reason,
-        gaps: ["defect_type_shifted"],
-        suggested_changes: ["investigate and address the new defect type"],
+        gaps: ["defect_type_shifted", "machine_unstable"],
+        suggested_changes: ["switch to alternate machine profile"],
         step: factory_state.step,
       };
     }
