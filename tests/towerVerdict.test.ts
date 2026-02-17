@@ -1,5 +1,7 @@
 import {
   judgeLeadsList,
+  migrateLegacyConstraints,
+  normalizeConstraintHardness,
   TowerVerdictInput,
   Lead,
   Constraint,
@@ -924,6 +926,176 @@ test("Acceptance B extension: all hard with NAME_STARTS_WITH(Z) and 0 name match
   });
   expect(result.verdict).toBe("STOP");
   expect(result.rationale).toContain("impossible");
+});
+
+test("Swan case: 1 of 4 pubs with hard NAME_CONTAINS produces CHANGE_PLAN + EXPAND_AREA", () => {
+  const constraints: Constraint[] = [
+    { type: "NAME_CONTAINS", field: "name", value: "swan", hardness: "hard" },
+    { type: "LOCATION", field: "location", value: "arundel", hardness: "hard" },
+  ];
+  const leads: Lead[] = [
+    { name: "The Swan Inn", address: "Arundel High Street" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads,
+    constraints,
+    original_goal: "find 4 pubs in arundel that have the word swan in the name",
+  });
+  expect(result.verdict).toBe("CHANGE_PLAN");
+  expect(result.action).toBe("change_plan");
+  expect(result.delivered).toBe(1);
+  expect(result.requested).toBe(4);
+  const expandArea = result.suggested_changes.find((s) => s.type === "EXPAND_AREA");
+  if (!expandArea) throw new Error("Expected EXPAND_AREA suggestion");
+  expect(expandArea.field).toBe("radius_km");
+});
+
+test("Swan case with legacy string constraints produces CHANGE_PLAN", () => {
+  const leads: Lead[] = [
+    { name: "The Swan Inn", address: "Arundel High Street" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads,
+    hard_constraints: ["NAME_CONTAINS:swan", "LOCATION:arundel"],
+    original_goal: "find 4 pubs in arundel that have the word swan in the name",
+  });
+  expect(result.verdict).toBe("CHANGE_PLAN");
+  expect(result.action).toBe("change_plan");
+  expect(result.delivered).toBe(1);
+  const expandArea = result.suggested_changes.find((s) => s.type === "EXPAND_AREA");
+  if (!expandArea) throw new Error("Expected EXPAND_AREA suggestion from legacy constraints");
+});
+
+test("Swan case with constraints missing hardness defaults to hard and produces CHANGE_PLAN", () => {
+  const leads: Lead[] = [
+    { name: "The Swan Inn", address: "Arundel High Street" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads,
+    constraints: [
+      { type: "NAME_CONTAINS", field: "name", value: "swan" } as any,
+      { type: "LOCATION", field: "location", value: "arundel" } as any,
+    ],
+    original_goal: "find 4 pubs in arundel that have the word swan in the name",
+  });
+  expect(result.verdict).toBe("CHANGE_PLAN");
+  expect(result.action).toBe("change_plan");
+  expect(result.delivered).toBe(1);
+  const expandArea = result.suggested_changes.find((s) => s.type === "EXPAND_AREA");
+  if (!expandArea) throw new Error("Expected EXPAND_AREA after hardness defaulting");
+});
+
+test("Swan case with success_criteria.hard_constraints (no hardness field) produces CHANGE_PLAN", () => {
+  const leads: Lead[] = [
+    { name: "The Swan Inn", address: "Arundel High Street" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads,
+    success_criteria: {
+      requested_count_user: 4,
+      hard_constraints: [
+        { type: "NAME_CONTAINS", field: "name", value: "swan" },
+        { type: "LOCATION", field: "location", value: "arundel" },
+      ],
+    },
+    original_goal: "find 4 pubs in arundel that have the word swan in the name",
+  });
+  expect(result.verdict).toBe("CHANGE_PLAN");
+  expect(result.action).toBe("change_plan");
+  expect(result.delivered).toBe(1);
+});
+
+test("migrateLegacyConstraints parses NAME_CONTAINS and LOCATION strings", () => {
+  const result = migrateLegacyConstraints(
+    ["NAME_CONTAINS:swan", "LOCATION:arundel"],
+    ["COUNT_MIN:4"]
+  );
+  expect(result.length).toBe(3);
+  expect(result[0].type).toBe("NAME_CONTAINS");
+  expect(result[0].field).toBe("name");
+  expect(result[0].value as string).toBe("swan");
+  expect(result[0].hardness).toBe("hard");
+  expect(result[1].type).toBe("LOCATION");
+  expect(result[1].hardness).toBe("hard");
+  expect(result[2].type).toBe("COUNT_MIN");
+  expect(result[2].hardness).toBe("soft");
+  expect(result[2].value as number).toBe(4);
+});
+
+test("migrateLegacyConstraints skips unparseable strings", () => {
+  const result = migrateLegacyConstraints(
+    ["NAME_CONTAINS:swan", "INVALID_FORMAT", "NO_TYPE:value"],
+    []
+  );
+  expect(result.length).toBe(1);
+  expect(result[0].type).toBe("NAME_CONTAINS");
+});
+
+test("normalizeConstraintHardness defaults NAME_CONTAINS to hard", () => {
+  const result = normalizeConstraintHardness({ type: "NAME_CONTAINS", field: "name", value: "swan" });
+  if (!result) throw new Error("Expected non-null constraint");
+  expect(result.hardness).toBe("hard");
+});
+
+test("normalizeConstraintHardness preserves explicit soft", () => {
+  const result = normalizeConstraintHardness({ type: "NAME_CONTAINS", field: "name", value: "swan", hardness: "soft" });
+  if (!result) throw new Error("Expected non-null constraint");
+  expect(result.hardness).toBe("soft");
+});
+
+test("normalizeConstraintHardness defaults COUNT_MIN to soft", () => {
+  const result = normalizeConstraintHardness({ type: "COUNT_MIN", field: "count", value: 5 });
+  if (!result) throw new Error("Expected non-null constraint");
+  expect(result.hardness).toBe("soft");
+});
+
+test("normalizeConstraintHardness returns null for missing fields", () => {
+  const result = normalizeConstraintHardness({ type: "NAME_CONTAINS" } as any);
+  if (result !== null) throw new Error("Expected null for missing field/value");
+});
+
+test("Swan case: 4 of 4 delivered produces ACCEPT", () => {
+  const constraints: Constraint[] = [
+    { type: "NAME_CONTAINS", field: "name", value: "swan", hardness: "hard" },
+    { type: "LOCATION", field: "location", value: "arundel", hardness: "hard" },
+  ];
+  const leads: Lead[] = [
+    { name: "The Swan Inn" },
+    { name: "Swan Hotel" },
+    { name: "Black Swan Pub" },
+    { name: "Old Swan Brewery" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads,
+    constraints,
+    original_goal: "find 4 pubs in arundel that have the word swan in the name",
+  });
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.delivered).toBe(4);
+});
+
+test("Swan case with replans exhausted produces STOP", () => {
+  const constraints: Constraint[] = [
+    { type: "NAME_CONTAINS", field: "name", value: "swan", hardness: "hard" },
+  ];
+  const leads: Lead[] = [
+    { name: "The Swan Inn" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads,
+    constraints,
+    meta: { replans_used: 3, max_replans: 3, radius_km: 50 },
+    original_goal: "find 4 pubs in arundel that have the word swan in the name",
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.action).toBe("stop");
+  expect(result.gaps).toContain("max_replans_exhausted");
 });
 
 runTests();

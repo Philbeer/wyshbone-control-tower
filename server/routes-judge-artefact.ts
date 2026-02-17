@@ -2,7 +2,7 @@ import express from "express";
 import { db } from "../src/lib/db";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import { judgeLeadsList } from "../src/evaluator/towerVerdict";
+import { judgeLeadsList, normalizeConstraintHardness } from "../src/evaluator/towerVerdict";
 import type { Lead, Constraint, DeliveredInfo, MetaInfo } from "../src/evaluator/towerVerdict";
 import { judgePlasticsInjection } from "../src/evaluator/plasticsInjectionRubric";
 import type { PlasticsRubricInput } from "../src/evaluator/plasticsInjectionRubric";
@@ -43,9 +43,9 @@ function judgeLeadsListArtefact(
     : [];
 
   const constraints: Constraint[] = Array.isArray(payloadJson?.constraints)
-    ? payloadJson.constraints.filter(
-        (c: any) => c && c.type && c.field && c.value !== undefined && c.hardness
-      )
+    ? payloadJson.constraints
+        .map((c: any) => normalizeConstraintHardness(c))
+        .filter((c: Constraint | null): c is Constraint => c !== null)
     : [];
 
   const requestedCountUser =

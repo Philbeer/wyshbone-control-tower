@@ -318,10 +318,118 @@ function verdictToAction(verdict: TowerVerdictAction): "continue" | "stop" | "ch
   return "stop";
 }
 
+function inferFieldFromType(type: string): string {
+  if (type === "NAME_CONTAINS" || type === "NAME_STARTS_WITH") return "name";
+  if (type === "LOCATION") return "location";
+  if (type === "COUNT_MIN") return "count";
+  return "unknown";
+}
+
+function defaultHardnessForType(type: string): "hard" | "soft" {
+  if (type === "NAME_CONTAINS" || type === "NAME_STARTS_WITH" || type === "LOCATION") return "hard";
+  return "soft";
+}
+
+function parseLegacyConstraintString(raw: string, hardness: "hard" | "soft"): Constraint | null {
+  const colonIdx = raw.indexOf(":");
+  if (colonIdx === -1) return null;
+
+  const typePart = raw.substring(0, colonIdx).trim().toUpperCase();
+  const valuePart = raw.substring(colonIdx + 1).trim();
+
+  const validTypes: ConstraintType[] = ["NAME_CONTAINS", "NAME_STARTS_WITH", "LOCATION", "COUNT_MIN"];
+  if (!validTypes.includes(typePart as ConstraintType)) return null;
+
+  const type = typePart as ConstraintType;
+  const value = type === "COUNT_MIN" ? Number(valuePart) : valuePart;
+  if (type === "COUNT_MIN" && isNaN(value as number)) return null;
+
+  return {
+    type,
+    field: inferFieldFromType(type),
+    value,
+    hardness,
+  };
+}
+
+export function migrateLegacyConstraints(
+  hardConstraints?: string[],
+  softConstraints?: string[]
+): Constraint[] {
+  const result: Constraint[] = [];
+
+  if (Array.isArray(hardConstraints)) {
+    for (const raw of hardConstraints) {
+      const parsed = parseLegacyConstraintString(raw, "hard");
+      if (parsed) result.push(parsed);
+    }
+  }
+
+  if (Array.isArray(softConstraints)) {
+    for (const raw of softConstraints) {
+      const parsed = parseLegacyConstraintString(raw, "soft");
+      if (parsed) result.push(parsed);
+    }
+  }
+
+  return result;
+}
+
+export function normalizeConstraintHardness(obj: Record<string, any>): Constraint | null {
+  if (!obj || !obj.type || !obj.field || obj.value === undefined) return null;
+
+  const validTypes: ConstraintType[] = ["NAME_CONTAINS", "NAME_STARTS_WITH", "LOCATION", "COUNT_MIN"];
+  if (!validTypes.includes(obj.type as ConstraintType)) return null;
+
+  return {
+    type: obj.type as ConstraintType,
+    field: obj.field as string,
+    value: obj.value as string | number,
+    hardness: obj.hardness === "hard" || obj.hardness === "soft"
+      ? obj.hardness
+      : defaultHardnessForType(obj.type),
+  };
+}
+
+function resolveConstraints(input: TowerVerdictInput): Constraint[] {
+  if (Array.isArray(input.constraints) && input.constraints.length > 0) {
+    const normalized = input.constraints
+      .map((c) => normalizeConstraintHardness(c as any))
+      .filter((c): c is Constraint => c !== null);
+    if (normalized.length > 0) return normalized;
+  }
+
+  const legacy = migrateLegacyConstraints(
+    input.hard_constraints,
+    input.soft_constraints
+  );
+  if (legacy.length > 0) return legacy;
+
+  const sc = input.success_criteria;
+  if (sc) {
+    const scConstraints: Constraint[] = [];
+    if (Array.isArray(sc.hard_constraints)) {
+      for (const c of sc.hard_constraints) {
+        const norm = normalizeConstraintHardness({ ...c, hardness: (c as any).hardness ?? "hard" });
+        if (norm) scConstraints.push(norm);
+      }
+    }
+    if (Array.isArray(sc.soft_constraints)) {
+      for (const c of sc.soft_constraints) {
+        const norm = normalizeConstraintHardness({ ...c, hardness: (c as any).hardness ?? "soft" });
+        if (norm) scConstraints.push(norm);
+      }
+    }
+    if (scConstraints.length > 0) return scConstraints;
+  }
+
+  return [];
+}
+
 export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
   const requestedCount = resolveRequestedCount(input);
   const leads = resolveLeads(input);
-  const constraints = Array.isArray(input.constraints) ? input.constraints : [];
+  const constraints = resolveConstraints(input);
   const goal =
     input.original_goal ??
     input.original_user_goal ??
