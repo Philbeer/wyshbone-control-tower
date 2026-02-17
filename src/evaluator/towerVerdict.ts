@@ -639,7 +639,12 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
       gaps.push("insufficient_count");
     }
 
-    const softChanges = buildSuggestions(input, constraints, constraintResults, deliveredCount, requestedCount);
+    let softChanges = buildSuggestions(input, constraints, constraintResults, deliveredCount, requestedCount);
+
+    if (canReplan(input) && softChanges.length === 0 && isLocationExpandable(constraints, input)) {
+      const fallback = buildFallbackExpandArea(input, deliveredCount, requestedCount);
+      if (fallback) softChanges = [fallback];
+    }
 
     if (canReplan(input) && softChanges.length > 0) {
       const result: TowerVerdict = {
@@ -685,7 +690,12 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
   if (deliveredCount < requestedCount && requestedCount > 0) {
     const gaps: string[] = ["insufficient_count", ...labelGaps];
 
-    const suggestions = buildSuggestions(input, constraints, constraintResults, deliveredCount, requestedCount);
+    let suggestions = buildSuggestions(input, constraints, constraintResults, deliveredCount, requestedCount);
+
+    if (canReplan(input) && suggestions.length === 0 && isLocationExpandable(constraints, input)) {
+      const fallback = buildFallbackExpandArea(input, deliveredCount, requestedCount);
+      if (fallback) suggestions = [fallback];
+    }
 
     if (canReplan(input) && suggestions.length > 0) {
       const result: TowerVerdict = {
@@ -750,7 +760,7 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
       constraint_results: constraintResults,
     };
     console.log(
-      `[TOWER] verdict=STOP delivered=${deliveredCount} requested=${requestedCount} reason=no_suggestions`
+      `[TOWER] verdict=STOP delivered=${deliveredCount} requested=${requestedCount} reason=no_suggestions_location_not_expandable`
     );
     return result;
   }
@@ -767,6 +777,35 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
   };
   console.log(`[TOWER] verdict=STOP reason=invalid_state`);
   return result;
+}
+
+const MAX_RADIUS_KM = 50;
+
+function isLocationExpandable(constraints: Constraint[], input: TowerVerdictInput): boolean {
+  const locationHard = constraints.some(
+    (c) => c.type === "LOCATION" && c.hardness === "hard"
+  );
+  if (locationHard) return false;
+
+  const meta = getMeta(input);
+  const currentRadius = meta.radius_km ?? 5;
+  if (currentRadius >= MAX_RADIUS_KM) return false;
+
+  return true;
+}
+
+function buildFallbackExpandArea(input: TowerVerdictInput, deliveredCount: number, requestedCount: number): SuggestedChange | null {
+  const meta = getMeta(input);
+  const currentRadius = meta.radius_km ?? 5;
+  if (currentRadius >= MAX_RADIUS_KM) return null;
+
+  return {
+    type: "EXPAND_AREA",
+    field: "radius_km",
+    from: currentRadius,
+    to: Math.min(currentRadius * 2, MAX_RADIUS_KM),
+    reason: `Insufficient matches (${deliveredCount} of ${requestedCount}). Expanding search area because location is soft and replans remain.`,
+  };
 }
 
 function buildSuggestions(
@@ -793,24 +832,25 @@ function buildSuggestions(
   );
 
   if (deliveredCount < requestedCount) {
-    if (locationSoft.length > 0 && canRelaxSoft) {
-      const currentRadius = meta.radius_km ?? 5;
+    const currentRadius = meta.radius_km ?? 5;
+    const canExpandRadius = currentRadius < MAX_RADIUS_KM;
+
+    if (locationSoft.length > 0 && canRelaxSoft && canExpandRadius) {
       for (const lc of locationSoft) {
         changes.push({
           type: "EXPAND_AREA",
           field: "radius_km",
           from: currentRadius,
-          to: Math.min(currentRadius * 2, 50),
+          to: Math.min(currentRadius * 2, MAX_RADIUS_KM),
           reason: `Insufficient matches (${deliveredCount} of ${requestedCount}). Expanding search area.`,
         });
       }
-    } else if (hasHardNameConstraints) {
-      const currentRadius = meta.radius_km ?? 5;
+    } else if (hasHardNameConstraints && canExpandRadius) {
       changes.push({
         type: "EXPAND_AREA",
         field: "radius_km",
         from: currentRadius,
-        to: Math.min(currentRadius * 2, 50),
+        to: Math.min(currentRadius * 2, MAX_RADIUS_KM),
         reason: `Hard name constraint limits results. Expanding area instead of relaxing name filter.`,
       });
     }

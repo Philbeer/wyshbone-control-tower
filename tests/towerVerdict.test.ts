@@ -1213,6 +1213,159 @@ test("Swan case: structured_constraints fallback when constraints is empty", () 
   expect(result.delivered).toBe(1);
 });
 
+test("Policy: shortfall + canReplan + no constraints → CHANGE_PLAN with fallback EXPAND_AREA (Case B)", () => {
+  const leads: Lead[] = [
+    { name: "The Swan Inn" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads,
+    original_goal: "find 4 pubs in arundel",
+  });
+  expect(result.verdict).toBe("CHANGE_PLAN");
+  expect(result.action).toBe("change_plan");
+  expect(result.gaps).toContain("insufficient_count");
+  const hasExpandArea = result.suggested_changes.some(s => s.type === "EXPAND_AREA");
+  if (!hasExpandArea) {
+    throw new Error(`Expected EXPAND_AREA suggestion but got: ${JSON.stringify(result.suggested_changes.map(s => s.type))}`);
+  }
+  const expandSuggestion = result.suggested_changes.find(s => s.type === "EXPAND_AREA")!;
+  if (!expandSuggestion.reason.includes("location is soft and replans remain")) {
+    throw new Error(`Expected reason to mention 'location is soft and replans remain' but got: ${expandSuggestion.reason}`);
+  }
+});
+
+test("Policy: shortfall + canReplan + soft location constraint → CHANGE_PLAN with EXPAND_AREA (Case A)", () => {
+  const leads: Lead[] = [
+    { name: "The Swan Inn" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads,
+    constraints: [
+      { type: "LOCATION", field: "location", value: "arundel", hardness: "soft" },
+      { type: "NAME_CONTAINS", field: "name", value: "swan", hardness: "soft" },
+    ],
+    original_goal: "find 4 pubs in arundel with swan in the name",
+  });
+  expect(result.verdict).toBe("CHANGE_PLAN");
+  expect(result.action).toBe("change_plan");
+  expect(result.gaps).toContain("insufficient_count");
+  const hasExpandArea = result.suggested_changes.some(s => s.type === "EXPAND_AREA");
+  if (!hasExpandArea) {
+    throw new Error(`Expected EXPAND_AREA suggestion but got: ${JSON.stringify(result.suggested_changes.map(s => s.type))}`);
+  }
+});
+
+test("Policy: shortfall + replans exhausted → STOP (Case C)", () => {
+  const leads: Lead[] = [
+    { name: "The Swan Inn" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads,
+    constraints: [
+      { type: "LOCATION", field: "location", value: "arundel", hardness: "soft" },
+    ],
+    meta: { replans_used: 3, max_replans: 3 },
+    original_goal: "find 4 pubs in arundel",
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.action).toBe("stop");
+  expect(result.gaps).toContain("max_replans_exhausted");
+});
+
+test("Policy: shortfall + location hard → STOP (Case D)", () => {
+  const leads: Lead[] = [
+    { name: "The Swan Inn" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads,
+    constraints: [
+      { type: "LOCATION", field: "location", value: "arundel", hardness: "hard" },
+    ],
+    original_goal: "find 4 pubs in arundel",
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.action).toBe("stop");
+});
+
+test("Policy: shortfall + max radius already reached (50km) → STOP (Case E)", () => {
+  const leads: Lead[] = [
+    { name: "The Swan Inn" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads,
+    constraints: [
+      { type: "LOCATION", field: "location", value: "arundel", hardness: "soft" },
+    ],
+    meta: { radius_km: 50 },
+    original_goal: "find 4 pubs in arundel",
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.action).toBe("stop");
+});
+
+test("Policy: shortfall + no constraints + radius at cap → STOP", () => {
+  const leads: Lead[] = [
+    { name: "Some Pub" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads,
+    meta: { radius_km: 50 },
+    original_goal: "find 4 pubs",
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.action).toBe("stop");
+});
+
+test("Policy: shortfall + no constraints + replans exhausted → STOP", () => {
+  const leads: Lead[] = [
+    { name: "Some Pub" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads,
+    meta: { replans_used: 5, max_replans: 5 },
+    original_goal: "find 4 pubs",
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.action).toBe("stop");
+  expect(result.gaps).toContain("max_replans_exhausted");
+});
+
+test("Policy: zero leads + canReplan + no constraints → CHANGE_PLAN with EXPAND_AREA", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads: [],
+    original_goal: "find 4 pubs in arundel",
+  });
+  expect(result.verdict).toBe("CHANGE_PLAN");
+  expect(result.action).toBe("change_plan");
+  const hasExpandArea = result.suggested_changes.some(s => s.type === "EXPAND_AREA");
+  if (!hasExpandArea) {
+    throw new Error(`Expected EXPAND_AREA fallback but got: ${JSON.stringify(result.suggested_changes.map(s => s.type))}`);
+  }
+});
+
+test("Policy: EXPAND_AREA doubles radius up to 50km cap", () => {
+  const leads: Lead[] = [{ name: "Pub A" }];
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads,
+    meta: { radius_km: 30 },
+    original_goal: "find 4 pubs",
+  });
+  expect(result.verdict).toBe("CHANGE_PLAN");
+  const expandSuggestion = result.suggested_changes.find(s => s.type === "EXPAND_AREA");
+  if (!expandSuggestion) throw new Error("Missing EXPAND_AREA");
+  expect(expandSuggestion.from as number).toBe(30);
+  expect(expandSuggestion.to as number).toBe(50);
+});
+
 test("Swan case: constraints field takes priority over structured_constraints", () => {
   const leads: Lead[] = [
     { name: "The White Swan" },

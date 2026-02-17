@@ -1,0 +1,78 @@
+We want Tower to recommend replanning instead of stopping in the common leadgen case:
+
+Policy change required
+When judging a leads_list artefact:
+
+If delivered < requested
+
+And replans are available (canReplan(input) true)
+
+And location is a soft constraint (i.e., expanding radius is allowed)
+
+Then Tower must return:
+
+verdict: fail
+
+action: change_plan
+
+with a suggestion: EXPAND_AREA (e.g., radius_km doubles up to a cap)
+Instead of returning action: stop with gap no_further_progress_possible.
+
+Current problem
+In production, Tower often returns stop because:
+
+constraints are missing/empty OR legacy constraints are not passed through on judge-artefact route,
+
+which yields no suggestions,
+
+then Tower falls through to STOP.
+
+We already have a Supervisor override working (stop→change_plan), but we want Tower to do it correctly so Supervisor doesn’t need to override.
+
+Deliverables
+
+Implement the policy change in the leads_list verdict path so that:
+
+shortfall + canReplan + soft location ⇒ CHANGE_PLAN with EXPAND_AREA
+
+even if constraint parsing fails or suggestions are empty, as long as we can safely expand area
+
+Ensure we still STOP when:
+
+replans exhausted
+
+location is hard (not expandable)
+
+or we’ve already expanded to max radius cap (e.g. 50km) and still no progress
+
+Ensure the output includes:
+
+metrics.gaps includes insufficient_count
+
+and a clear reason like “expanding area because location is soft and replans remain”
+
+constraint_results should be populated when possible, but must not block the suggestion
+
+Add/extend tests:
+
+Case A: constraints typed and include soft location → expect CHANGE_PLAN + EXPAND_AREA
+
+Case B: constraints missing/empty but successCriteria indicates location is soft (or location can be inferred) → still expect CHANGE_PLAN + EXPAND_AREA
+
+Case C: replans exhausted → STOP
+
+Case D: location hard → STOP
+
+Provide:
+
+file/line references
+
+test output proving green
+
+Notes / Guidance
+
+Keep the judgement contract (ACCEPT | CHANGE_PLAN | STOP).
+
+Make the behaviour deterministic and explainable.
+
+Don’t rely on Supervisor overrides. Tower should be the authority on replan vs stop.
