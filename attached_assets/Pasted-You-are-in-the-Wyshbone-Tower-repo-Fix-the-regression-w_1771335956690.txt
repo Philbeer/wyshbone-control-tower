@@ -1,0 +1,55 @@
+You are in the Wyshbone Tower repo. Fix the regression where Tower returns STOP on leads_list shortfalls because constraints are missing/empty, preventing suggestion generation (e.g., EXPAND_AREA).
+
+Evidence:
+
+Tower judgement payload shows metrics.constraint_results: [] and gaps include no_further_progress_possible.
+
+Tower logic only uses input.constraints (typed Constraint objects with hardness) and ignores legacy hard_constraints / soft_constraints, or strips malformed constraints missing hardness.
+
+Goal:
+
+When a leads_list shortfall occurs (delivered < requested) and replans are available, Tower should return CHANGE_PLAN with an EXPAND_AREA suggestion when appropriate (e.g., hard NAME_CONTAINS constraint present), instead of STOP.
+
+Maintain strict typed contract going forward, but add backwards-compatible conversion so legacy callers don’t silently break agenticity.
+
+Requirements (do all):
+
+Implement a constraint migration/conversion layer in the Tower judge-artefact request handling path:
+
+If input.constraints is empty or absent, but hard_constraints and/or soft_constraints exist, convert them into typed Constraint[].
+
+Parse common legacy encodings like:
+
+NAME_CONTAINS:swan → { type:"NAME_CONTAINS", field:"name", value:"swan", hardness:"hard" }
+
+NAME_STARTS_WITH:P → { type:"NAME_STARTS_WITH", field:"name", value:"P", hardness:"hard" }
+
+Location constraints should map to { type:"LOCATION", field:"location", value:"Arundel", hardness:"soft" } (or equivalent)
+
+If a constraint object exists but is missing hardness, default it sensibly (name/location default hard unless explicitly soft).
+
+Ensure the migrated typed constraints are what judgeLeadsList() uses (so buildSuggestions() can generate EXPAND_AREA).
+
+Add/extend tests:
+
+A leads_list judgement where requested=4, delivered=1, and NAME_CONTAINS=swan is present in legacy format must return:
+
+verdict=FAIL
+
+action=CHANGE_PLAN
+
+includes an EXPAND_AREA suggestion (doubling radius up to cap).
+
+Add a test for missing-hardness typed constraint being defaulted, not filtered out.
+
+Keep behaviour unchanged for cases where STOP is genuinely correct (e.g., replans exhausted).
+
+Output:
+
+files changed with line references
+
+test output proving green
+
+short note explaining how constraints now flow from legacy → typed
+
+Do not touch Supervisor in this change. Fix it at Tower boundary so all callers benefit.
