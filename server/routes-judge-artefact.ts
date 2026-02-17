@@ -42,11 +42,24 @@ function judgeLeadsListArtefact(
     ? payloadJson.leads.filter((l: any) => l && typeof l.name === "string")
     : [];
 
-  const constraints: Constraint[] = Array.isArray(payloadJson?.constraints)
-    ? payloadJson.constraints
+  const DEBUG = process.env.DEBUG_TOWER_CONSTRAINTS === "true";
+
+  const rawConstraints = payloadJson?.constraints;
+  const rawHardConstraints = payloadJson?.hard_constraints ?? successCriteria?.hard_constraints;
+  const rawSoftConstraints = payloadJson?.soft_constraints ?? successCriteria?.soft_constraints;
+
+  const constraints: Constraint[] = Array.isArray(rawConstraints)
+    ? rawConstraints
         .map((c: any) => normalizeConstraintHardness(c))
         .filter((c: Constraint | null): c is Constraint => c !== null)
     : [];
+
+  if (DEBUG) {
+    console.log(`[Tower][DEBUG] raw input.constraints exists=${Array.isArray(rawConstraints)} length=${Array.isArray(rawConstraints) ? rawConstraints.length : 0}`);
+    console.log(`[Tower][DEBUG] raw hard_constraints exists=${Array.isArray(rawHardConstraints)} length=${Array.isArray(rawHardConstraints) ? rawHardConstraints.length : 0}`);
+    console.log(`[Tower][DEBUG] raw soft_constraints exists=${Array.isArray(rawSoftConstraints)} length=${Array.isArray(rawSoftConstraints) ? rawSoftConstraints.length : 0}`);
+    console.log(`[Tower][DEBUG] after normalizeConstraintHardness: typed constraints length=${constraints.length} preview=${JSON.stringify(constraints.slice(0, 2).map((c) => ({ type: c.type, field: c.field, hardness: c.hardness })))}`);
+  }
 
   const requestedCountUser =
     successCriteria?.requested_count_user ??
@@ -104,6 +117,9 @@ function judgeLeadsListArtefact(
     ? payloadJson.attempt_history
     : undefined;
 
+  const legacyHard: string[] | undefined = Array.isArray(rawHardConstraints) ? rawHardConstraints : undefined;
+  const legacySoft: string[] | undefined = Array.isArray(rawSoftConstraints) ? rawSoftConstraints : undefined;
+
   console.log(
     `[Tower][judge-artefact] leads_list resolution: leads=${leads.length} constraints=${constraints.length} requestedCountUser=${requestedCountUser} requestedCount=${requestedCount} delivered=${JSON.stringify(deliveredObj)}`
   );
@@ -125,9 +141,18 @@ function judgeLeadsListArtefact(
     plan_version: payloadJson?.plan_version,
     radius_km: payloadJson?.radius_km,
     attempt_history: attemptHistory,
+    hard_constraints: legacyHard,
+    soft_constraints: legacySoft,
     artefact_title: artefactTitle,
     artefact_summary: artefactSummary,
   });
+
+  if (DEBUG) {
+    console.log(`[Tower][DEBUG] after judgeLeadsList: verdict=${towerResult.verdict} action=${towerResult.action} constraint_results=${towerResult.constraint_results?.length ?? 0} suggestions=${towerResult.suggested_changes.length}`);
+    if (towerResult.constraint_results && towerResult.constraint_results.length > 0) {
+      console.log(`[Tower][DEBUG] constraint_results preview=${JSON.stringify(towerResult.constraint_results.slice(0, 2).map((r) => ({ type: r.constraint.type, hardness: r.constraint.hardness, matched: r.matched_count, passed: r.passed })))}`);
+    }
+  }
 
   let verdict: "pass" | "fail";
   let action: "continue" | "stop" | "retry" | "change_plan";

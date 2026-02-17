@@ -1,6 +1,7 @@
 import express from "express";
 import { z } from "zod";
 import { judgeLeadsList } from "../src/evaluator/towerVerdict";
+import type { Constraint } from "../src/evaluator/towerVerdict";
 import { judgePlasticsInjection } from "../src/evaluator/plasticsInjectionRubric";
 import type { PlasticsRubricInput, PlasticsStepSnapshot } from "../src/evaluator/plasticsInjectionRubric";
 
@@ -16,7 +17,7 @@ const constraintSchema = z.object({
   type: z.enum(["NAME_CONTAINS", "NAME_STARTS_WITH", "LOCATION", "COUNT_MIN"]),
   field: z.string(),
   value: z.union([z.string(), z.number()]),
-  hardness: z.enum(["hard", "soft"]),
+  hardness: z.enum(["hard", "soft"]).optional(),
 });
 
 const leadSchema = z
@@ -261,9 +262,21 @@ router.post("/tower-verdict", async (req, res) => {
       return;
     }
 
+    const DEBUG = process.env.DEBUG_TOWER_CONSTRAINTS === "true";
+
+    if (DEBUG) {
+      console.log(`[Tower][DEBUG][tower-verdict] raw input.constraints exists=${Array.isArray(data.constraints)} length=${Array.isArray(data.constraints) ? data.constraints.length : 0}`);
+      console.log(`[Tower][DEBUG][tower-verdict] raw hard_constraints exists=${Array.isArray(data.hard_constraints)} length=${Array.isArray(data.hard_constraints) ? data.hard_constraints.length : 0}`);
+      console.log(`[Tower][DEBUG][tower-verdict] raw soft_constraints exists=${Array.isArray(data.soft_constraints)} length=${Array.isArray(data.soft_constraints) ? data.soft_constraints.length : 0}`);
+      if (data.success_criteria) {
+        console.log(`[Tower][DEBUG][tower-verdict] success_criteria.hard_constraints exists=${Array.isArray(data.success_criteria.hard_constraints)} length=${Array.isArray(data.success_criteria.hard_constraints) ? data.success_criteria.hard_constraints.length : 0}`);
+        console.log(`[Tower][DEBUG][tower-verdict] success_criteria.soft_constraints exists=${Array.isArray(data.success_criteria.soft_constraints)} length=${Array.isArray(data.success_criteria.soft_constraints) ? data.success_criteria.soft_constraints.length : 0}`);
+      }
+    }
+
     const result = judgeLeadsList({
       leads: data.leads,
-      constraints: data.constraints,
+      constraints: data.constraints as Constraint[] | undefined,
       requested_count_user: data.requested_count_user,
       requested_count: data.requested_count,
       accumulated_count: data.accumulated_count,
@@ -284,6 +297,16 @@ router.post("/tower-verdict", async (req, res) => {
       artefact_title: data.artefact_title,
       artefact_summary: data.artefact_summary,
     });
+
+    if (DEBUG) {
+      console.log(`[Tower][DEBUG][tower-verdict] after judgeLeadsList: verdict=${result.verdict} action=${result.action} delivered=${result.delivered} requested=${result.requested} constraint_results=${result.constraint_results?.length ?? 0} suggestions=${result.suggested_changes.length}`);
+      if (result.constraint_results && result.constraint_results.length > 0) {
+        console.log(`[Tower][DEBUG][tower-verdict] constraint_results preview=${JSON.stringify(result.constraint_results.slice(0, 2).map((r) => ({ type: r.constraint.type, hardness: r.constraint.hardness, matched: r.matched_count, passed: r.passed })))}`);
+      }
+      if (result.suggested_changes.length > 0) {
+        console.log(`[Tower][DEBUG][tower-verdict] suggestions preview=${JSON.stringify(result.suggested_changes.slice(0, 2).map((s) => ({ type: s.type, field: s.field })))}`);
+      }
+    }
 
     console.log(
       `[TOWER_IN] run_id=${data.run_id ?? "none"} verdict=${result.verdict} action=${result.action} requested=${result.requested} delivered=${result.delivered} suggestions=${result.suggested_changes.length}`
