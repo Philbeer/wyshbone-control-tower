@@ -29,7 +29,8 @@ The system incorporates a sophisticated evaluation suite for automated testing, 
 Tower uses user intent (`requested_count_user`) and accumulated matching results (`delivered_matching_accumulated`) for judgement.
 *   **Requested resolution priority:** `requested_count_user` > `success_criteria.requested_count_user` > `success_criteria.target_count` > `requested_count`.
 *   **Delivered resolution priority:** `delivered.delivered_matching_accumulated` > `leads.length` (when constraints applied) > `delivered.delivered_matching_this_plan`. Never uses `delivered_total_*` for success.
-*   **Constraint types:** NAME_CONTAINS (word-boundary), NAME_STARTS_WITH (prefix), LOCATION (trusted from Supervisor), COUNT_MIN (against matched leads).
+*   **Constraint types:** NAME_CONTAINS (word-boundary), NAME_STARTS_WITH (prefix), LOCATION (trusted from Supervisor), COUNT_MIN (against matched leads). Supervisor stores constraints as `structured_constraints` with `hard: boolean` and `LOCATION_EQUALS` type; Tower normalizes these via `normalizeStructuredConstraints` (converts `hard` boolean to `hardness` string, maps `LOCATION_EQUALS` to `LOCATION`).
+*   **Constraint resolution priority:** `constraints` (typed) > `structured_constraints` (Supervisor format) > `hard_constraints`/`soft_constraints` (legacy strings) > `success_criteria` objects.
 *   **Replan-aware verdict logic:** Uses `meta.replans_used` / `meta.max_replans` and `allow_relax_soft_constraints` to decide CHANGE_PLAN vs STOP.
 *   **Suggested change types:** RELAX_CONSTRAINT, EXPAND_AREA, INCREASE_SEARCH_BUDGET, CHANGE_QUERY, STOP_CONDITION — all strictly typed objects.
 *   **Label honesty:** Detects `label_misleading` gap when `meta.relaxed_constraints` keywords appear in artefact title/summary.
