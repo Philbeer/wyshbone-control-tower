@@ -2,8 +2,8 @@ import express from "express";
 import { db } from "../src/lib/db";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import { judgeLeadsList, normalizeConstraintHardness } from "../src/evaluator/towerVerdict";
-import type { Lead, Constraint, DeliveredInfo, MetaInfo } from "../src/evaluator/towerVerdict";
+import { judgeLeadsList, normalizeConstraintHardness, normalizeStructuredConstraints } from "../src/evaluator/towerVerdict";
+import type { Lead, Constraint, DeliveredInfo, MetaInfo, StructuredConstraint } from "../src/evaluator/towerVerdict";
 import { judgePlasticsInjection } from "../src/evaluator/plasticsInjectionRubric";
 import type { PlasticsRubricInput } from "../src/evaluator/plasticsInjectionRubric";
 
@@ -45,20 +45,26 @@ function judgeLeadsListArtefact(
   const DEBUG = process.env.DEBUG_TOWER_CONSTRAINTS === "true";
 
   const rawConstraints = payloadJson?.constraints;
+  const rawStructuredConstraints: StructuredConstraint[] | undefined = Array.isArray(payloadJson?.structured_constraints) ? payloadJson.structured_constraints : undefined;
   const rawHardConstraints = payloadJson?.hard_constraints ?? successCriteria?.hard_constraints;
   const rawSoftConstraints = payloadJson?.soft_constraints ?? successCriteria?.soft_constraints;
 
-  const constraints: Constraint[] = Array.isArray(rawConstraints)
-    ? rawConstraints
-        .map((c: any) => normalizeConstraintHardness(c))
-        .filter((c: Constraint | null): c is Constraint => c !== null)
-    : [];
+  let constraints: Constraint[] = [];
+  if (Array.isArray(rawConstraints) && rawConstraints.length > 0) {
+    constraints = rawConstraints
+      .map((c: any) => normalizeConstraintHardness(c))
+      .filter((c: Constraint | null): c is Constraint => c !== null);
+  }
+  if (constraints.length === 0 && rawStructuredConstraints && rawStructuredConstraints.length > 0) {
+    constraints = normalizeStructuredConstraints(rawStructuredConstraints);
+  }
 
   if (DEBUG) {
     console.log(`[Tower][DEBUG] raw input.constraints exists=${Array.isArray(rawConstraints)} length=${Array.isArray(rawConstraints) ? rawConstraints.length : 0}`);
+    console.log(`[Tower][DEBUG] raw structured_constraints exists=${!!rawStructuredConstraints} length=${rawStructuredConstraints?.length ?? 0}`);
     console.log(`[Tower][DEBUG] raw hard_constraints exists=${Array.isArray(rawHardConstraints)} length=${Array.isArray(rawHardConstraints) ? rawHardConstraints.length : 0}`);
     console.log(`[Tower][DEBUG] raw soft_constraints exists=${Array.isArray(rawSoftConstraints)} length=${Array.isArray(rawSoftConstraints) ? rawSoftConstraints.length : 0}`);
-    console.log(`[Tower][DEBUG] after normalizeConstraintHardness: typed constraints length=${constraints.length} preview=${JSON.stringify(constraints.slice(0, 2).map((c) => ({ type: c.type, field: c.field, hardness: c.hardness })))}`);
+    console.log(`[Tower][DEBUG] after normalization: typed constraints length=${constraints.length} preview=${JSON.stringify(constraints.slice(0, 3).map((c) => ({ type: c.type, field: c.field, hardness: c.hardness, value: c.value })))}`);
   }
 
   const requestedCountUser =

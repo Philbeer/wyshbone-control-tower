@@ -111,8 +111,21 @@ export interface TowerVerdictInput {
   hard_constraints?: string[];
   soft_constraints?: string[];
 
+  structured_constraints?: StructuredConstraint[];
+
   artefact_title?: string;
   artefact_summary?: string;
+}
+
+export interface StructuredConstraint {
+  id?: string;
+  type: string;
+  field?: string;
+  value: string | number;
+  hard?: boolean;
+  hardness?: "hard" | "soft";
+  operator?: string;
+  rationale?: string;
 }
 
 export interface AttemptHistoryEntry {
@@ -391,11 +404,55 @@ export function normalizeConstraintHardness(obj: Record<string, any>): Constrain
   };
 }
 
+const SUPERVISOR_TYPE_MAP: Record<string, ConstraintType> = {
+  LOCATION_EQUALS: "LOCATION",
+  LOCATION: "LOCATION",
+  NAME_CONTAINS: "NAME_CONTAINS",
+  NAME_STARTS_WITH: "NAME_STARTS_WITH",
+  COUNT_MIN: "COUNT_MIN",
+};
+
+export function normalizeStructuredConstraint(sc: StructuredConstraint): Constraint | null {
+  if (!sc || !sc.type || sc.value === undefined) return null;
+
+  const normalizedType = SUPERVISOR_TYPE_MAP[sc.type];
+  if (!normalizedType) return null;
+
+  const field = sc.field ?? inferFieldFromType(normalizedType);
+
+  let hardness: "hard" | "soft";
+  if (sc.hardness === "hard" || sc.hardness === "soft") {
+    hardness = sc.hardness;
+  } else if (typeof sc.hard === "boolean") {
+    hardness = sc.hard ? "hard" : "soft";
+  } else {
+    hardness = defaultHardnessForType(normalizedType);
+  }
+
+  return {
+    type: normalizedType,
+    field,
+    value: normalizedType === "COUNT_MIN" ? Number(sc.value) : sc.value,
+    hardness,
+  };
+}
+
+export function normalizeStructuredConstraints(scs: StructuredConstraint[]): Constraint[] {
+  return scs
+    .map(normalizeStructuredConstraint)
+    .filter((c): c is Constraint => c !== null);
+}
+
 function resolveConstraints(input: TowerVerdictInput): Constraint[] {
   if (Array.isArray(input.constraints) && input.constraints.length > 0) {
     const normalized = input.constraints
       .map((c) => normalizeConstraintHardness(c as any))
       .filter((c): c is Constraint => c !== null);
+    if (normalized.length > 0) return normalized;
+  }
+
+  if (Array.isArray(input.structured_constraints) && input.structured_constraints.length > 0) {
+    const normalized = normalizeStructuredConstraints(input.structured_constraints);
     if (normalized.length > 0) return normalized;
   }
 

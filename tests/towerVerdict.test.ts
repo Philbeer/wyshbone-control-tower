@@ -2,9 +2,12 @@ import {
   judgeLeadsList,
   migrateLegacyConstraints,
   normalizeConstraintHardness,
+  normalizeStructuredConstraint,
+  normalizeStructuredConstraints,
   TowerVerdictInput,
   Lead,
   Constraint,
+  StructuredConstraint,
 } from "../src/evaluator/towerVerdict";
 
 let passed = 0;
@@ -1096,6 +1099,137 @@ test("Swan case with replans exhausted produces STOP", () => {
   expect(result.verdict).toBe("STOP");
   expect(result.action).toBe("stop");
   expect(result.gaps).toContain("max_replans_exhausted");
+});
+
+test("normalizeStructuredConstraint converts LOCATION_EQUALS to LOCATION", () => {
+  const sc: StructuredConstraint = {
+    id: "c_location",
+    type: "LOCATION_EQUALS",
+    field: "location",
+    value: "arundel",
+    hard: false,
+    operator: "=",
+    rationale: "User specified the location as arundel",
+  };
+  const result = normalizeStructuredConstraint(sc);
+  expect(result!.type).toBe("LOCATION");
+  expect(result!.field).toBe("location");
+  expect(result!.hardness).toBe("soft");
+  expect(result!.value as string).toBe("arundel");
+});
+
+test("normalizeStructuredConstraint converts hard:true to hardness hard", () => {
+  const sc: StructuredConstraint = {
+    id: "c_count",
+    type: "COUNT_MIN",
+    field: "count",
+    value: 4,
+    hard: true,
+    operator: ">=",
+  };
+  const result = normalizeStructuredConstraint(sc);
+  expect(result!.type).toBe("COUNT_MIN");
+  expect(result!.hardness).toBe("hard");
+  expect(result!.value as number).toBe(4);
+});
+
+test("normalizeStructuredConstraint converts NAME_CONTAINS with hard:false to soft", () => {
+  const sc: StructuredConstraint = {
+    id: "c_name_contains",
+    type: "NAME_CONTAINS",
+    field: "name",
+    value: "swan",
+    hard: false,
+    operator: "contains_word",
+  };
+  const result = normalizeStructuredConstraint(sc);
+  expect(result!.type).toBe("NAME_CONTAINS");
+  expect(result!.hardness).toBe("soft");
+  expect(result!.value as string).toBe("swan");
+});
+
+test("normalizeStructuredConstraints converts batch of Supervisor constraints", () => {
+  const scs: StructuredConstraint[] = [
+    { id: "c_count", type: "COUNT_MIN", field: "count", value: 4, hard: true, operator: ">=" },
+    { id: "c_location", type: "LOCATION_EQUALS", field: "location", value: "arundel", hard: false, operator: "=" },
+    { id: "c_name_contains", type: "NAME_CONTAINS", field: "name", value: "swan", hard: false, operator: "contains_word" },
+  ];
+  const result = normalizeStructuredConstraints(scs);
+  expect(result.length).toBe(3);
+  expect(result[0].type).toBe("COUNT_MIN");
+  expect(result[0].hardness).toBe("hard");
+  expect(result[1].type).toBe("LOCATION");
+  expect(result[1].hardness).toBe("soft");
+  expect(result[2].type).toBe("NAME_CONTAINS");
+  expect(result[2].hardness).toBe("soft");
+});
+
+test("normalizeStructuredConstraint rejects unknown type", () => {
+  const sc: StructuredConstraint = {
+    type: "UNKNOWN_TYPE",
+    value: "test",
+  };
+  const result = normalizeStructuredConstraint(sc);
+  expect(result).toBe(null);
+});
+
+test("Swan case with real Supabase structured_constraints: CHANGE_PLAN with EXPAND_AREA", () => {
+  const leads: Lead[] = [
+    { name: "The White Swan", phone: "01903 882677", address: "16 Chichester Rd, Arundel BN18 0AD, UK" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads,
+    structured_constraints: [
+      { id: "c_count", type: "COUNT_MIN", field: "count", value: 4, hard: true, operator: ">=" },
+      { id: "c_location", type: "LOCATION_EQUALS", field: "location", value: "arundel", hard: false, operator: "=" },
+      { id: "c_name_contains", type: "NAME_CONTAINS", field: "name", value: "swan", hard: false, operator: "contains_word" },
+    ],
+    original_goal: "find 4 pubs in arundel that have the word swan in the name",
+  });
+  expect(result.verdict).toBe("CHANGE_PLAN");
+  expect(result.action).toBe("change_plan");
+  expect(result.delivered).toBe(1);
+  const hasExpandArea = result.suggested_changes.some(s => s.type === "EXPAND_AREA");
+  if (!hasExpandArea) {
+    throw new Error(`Expected EXPAND_AREA suggestion but got: ${JSON.stringify(result.suggested_changes.map(s => s.type))}`);
+  }
+});
+
+test("Swan case: structured_constraints fallback when constraints is empty", () => {
+  const leads: Lead[] = [
+    { name: "The White Swan" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 4,
+    leads,
+    constraints: [],
+    structured_constraints: [
+      { id: "c_name_contains", type: "NAME_CONTAINS", field: "name", value: "swan", hard: false },
+    ],
+    original_goal: "find pubs with swan in the name",
+  });
+  expect(result.verdict).toBe("CHANGE_PLAN");
+  expect(result.delivered).toBe(1);
+});
+
+test("Swan case: constraints field takes priority over structured_constraints", () => {
+  const leads: Lead[] = [
+    { name: "The White Swan" },
+    { name: "The Black Bull" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads,
+    constraints: [
+      { type: "NAME_CONTAINS", field: "name", value: "swan", hardness: "soft" },
+    ],
+    structured_constraints: [
+      { type: "NAME_CONTAINS", field: "name", value: "bull", hard: false },
+    ],
+    original_goal: "find pubs",
+  });
+  expect(result.constraint_results![0].constraint.value as string).toBe("swan");
 });
 
 runTests();
