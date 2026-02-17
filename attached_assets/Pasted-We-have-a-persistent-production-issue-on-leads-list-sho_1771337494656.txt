@@ -1,0 +1,65 @@
+We have a persistent production issue: on leads_list shortfall (delivered < requested) Tower is returning verdict fail with action stop and metrics.constraint_results: [], causing Supervisor to halt instead of replanning (EXPAND_AREA).
+
+You previously found that CHANGE_PLAN depends on typed constraints being present (or legacy constraints being converted), and you implemented/validated fixes in tests with DEBUG_TOWER_CONSTRAINTS logs. However, live runs still show constraint_results: [] and action stop.
+
+Your job: produce an evidence-based investigation and a plan focused on the live judge-artefact path.
+
+Deliverables:
+
+Confirm which routes exist and are used:
+
+Identify the handler for /api/tower/judge-artefact (or whatever Supervisor calls).
+
+Identify the handler for any “tower-verdict” route (if present) and note differences.
+
+Trace the judge-artefact flow end-to-end:
+
+Where does it obtain the artefact payload (Supabase fetch, etc.)?
+
+Where does it extract constraints from the artefact payload_json?
+
+Does it pass through legacy hard_constraints / soft_constraints to the leads verdict logic?
+
+Does it normalise hardness if missing?
+Provide exact file + line references.
+
+Add/confirm guarded debug logging (DEBUG_TOWER_CONSTRAINTS=true) on the judge-artefact path:
+
+log raw input: presence/length of constraints, hard_constraints, soft_constraints
+
+log post-normalisation: final typed constraint count and first 2 items
+
+log final decision: action and whether suggestions were generated
+
+Reproduce using a real artefact:
+
+Run/execute the same Swan scenario against the environment Tower is currently serving (not just unit tests).
+
+If Supabase lookup blocks reproduction, provide a plan to reproduce using the actual stored leads_list artefact for a real runId/artefactId.
+
+Conclusion (single root cause):
+
+Choose ONE: (a) judge-artefact route still strips/ignores constraints, (b) artefacts don’t contain constraints, (c) conversion code not deployed / wrong server, (d) schema validation rejects before conversion.
+Must be backed by logs or code traces.
+
+Plan:
+
+Smallest fix that guarantees judge-artefact uses constraints:
+
+pass through legacy fields OR convert inside judge-artefact handler before calling verdict logic
+
+ensure hardness normalisation happens after validation
+
+Add/extend an integration test for judge-artefact path that simulates an artefact payload with legacy constraints and expects CHANGE_PLAN with EXPAND_AREA.
+
+Validation criteria:
+
+On Swan run: Tower returns fail + action change_plan, constraint_results non-empty, suggestions include EXPAND_AREA.
+
+Rules:
+
+No broad refactors. Fix the contract/passthrough issue.
+
+Production-grade: one fix path that works for all callers.
+
+Provide exact files/lines and log snippets as evidence.
