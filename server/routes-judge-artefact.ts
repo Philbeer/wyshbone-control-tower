@@ -272,6 +272,67 @@ router.post("/judge-artefact", async (req, res) => {
     }
 
     if (artefactType === "leads_list") {
+      if (!payloadJson?.verification_summary) {
+        try {
+          const cvlResult = await db.execute(
+            sql`SELECT payload_json FROM artefacts
+                WHERE run_id = ${runId}
+                  AND artefact_type = 'lead_verification'
+                ORDER BY created_at DESC
+                LIMIT 1`
+          );
+          const cvlRow = cvlResult.rows?.[0];
+          if (cvlRow) {
+            let cvlPayload: any = null;
+            try {
+              cvlPayload =
+                typeof cvlRow.payload_json === "string"
+                  ? JSON.parse(cvlRow.payload_json)
+                  : cvlRow.payload_json;
+            } catch {}
+
+            if (cvlPayload) {
+              if (cvlPayload.verification_summary) {
+                payloadJson = payloadJson ?? {};
+                payloadJson.verification_summary = cvlPayload.verification_summary;
+                console.log(
+                  `[Tower][judge-artefact] Merged verification_summary from lead_verification artefact for run_id=${runId} verified_exact_count=${cvlPayload.verification_summary.verified_exact_count}`
+                );
+              }
+              if (cvlPayload.constraints_extracted && !payloadJson?.constraints_extracted) {
+                payloadJson.constraints_extracted = cvlPayload.constraints_extracted;
+              }
+              if (cvlPayload.all_hard_satisfied != null) {
+                const vs = payloadJson.verification_summary ?? {};
+                if (vs.verified_exact_count == null && typeof cvlPayload.verified_exact === "number") {
+                  payloadJson.verification_summary = {
+                    ...vs,
+                    verified_exact_count: cvlPayload.verified_exact,
+                  };
+                  console.log(
+                    `[Tower][judge-artefact] Built verification_summary from lead_verification fields: verified_exact=${cvlPayload.verified_exact} all_hard_satisfied=${cvlPayload.all_hard_satisfied}`
+                  );
+                }
+                if (!payloadJson.verification_summary && typeof cvlPayload.verified_exact === "number") {
+                  payloadJson.verification_summary = {
+                    verified_exact_count: cvlPayload.verified_exact,
+                  };
+                }
+              }
+            }
+          } else {
+            console.log(
+              `[Tower][judge-artefact] No lead_verification artefact found for run_id=${runId}`
+            );
+          }
+        } catch (cvlErr) {
+          console.error(
+            `[Tower][judge-artefact] CVL lookup failed for run_id=${runId}:`,
+            cvlErr instanceof Error ? cvlErr.message : cvlErr
+          );
+        }
+      }
+
       const leadsResult = judgeLeadsListArtefact(
         payloadJson,
         successCriteria,
