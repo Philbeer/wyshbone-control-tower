@@ -128,7 +128,7 @@ test("STOP when requested_count_user is missing", () => {
   });
   expect(result.verdict).toBe("STOP");
   expect(result.action).toBe("stop");
-  expect(result.gaps).toContain("missing_requested_count_user");
+  expect(result.gaps).toContain("MISSING_REQUESTED_COUNT");
 });
 
 test("ACCEPT: basic count met with no constraints", () => {
@@ -394,7 +394,7 @@ test("Hard constraint violated: NAME_STARTS_WITH hard with no matches", () => {
       "Cannot ACCEPT when hard NAME_STARTS_WITH constraint violated"
     );
   }
-  expect(result.gaps).toContain("hard_constraint_violated(name)");
+  expect(result.gaps).toContain("HARD_CONSTRAINT_VIOLATED");
 });
 
 test("Hard constraint prevents ACCEPT even when count is met", () => {
@@ -591,7 +591,7 @@ test("No-progress safety check still works", () => {
   });
   expect(result.verdict).toBe("STOP");
   expect(result.action).toBe("stop");
-  expect(result.gaps).toContain("no_further_progress_possible");
+  expect(result.gaps).toContain("NO_PROGRESS");
 });
 
 // ── Replan context ──
@@ -636,7 +636,7 @@ test("STOP when max_replans exhausted", () => {
   });
   expect(result.verdict).toBe("STOP");
   expect(result.action).toBe("stop");
-  expect(result.gaps).toContain("max_replans_exhausted");
+  expect(result.gaps).toContain("MAX_REPLANS_EXHAUSTED");
 });
 
 test("STOP when allow_relax_soft_constraints is false and max replans exhausted", () => {
@@ -670,7 +670,7 @@ test("label_misleading gap when relaxed_constraints present in title", () => {
     artefact_title: "Pubs starting with prefix P in Arundel",
     original_goal: "Find 3 pubs starting with P",
   });
-  expect(result.gaps).toContain("label_misleading");
+  expect(result.gaps).toContain("LABEL_MISLEADING");
 });
 
 test("no label_misleading gap when no relaxed_constraints", () => {
@@ -682,8 +682,8 @@ test("no label_misleading gap when no relaxed_constraints", () => {
     original_goal: "Find 3 pubs",
   });
   for (const gap of result.gaps) {
-    if (gap === "label_misleading") {
-      throw new Error("Should not have label_misleading when no relaxed_constraints");
+    if (gap === "LABEL_MISLEADING") {
+      throw new Error("Should not have LABEL_MISLEADING when no relaxed_constraints");
     }
   }
 });
@@ -772,7 +772,7 @@ test("Acceptance A.1: dentist requested=4, delivered_matching_accumulated=1 → 
     throw new Error("Must not ACCEPT with only 1 delivered");
   }
   expect(result.action).toBe("change_plan");
-  expect(result.gaps).toContain("insufficient_count");
+  expect(result.gaps).toContain("INSUFFICIENT_COUNT");
   const expandArea = result.suggested_changes.find(
     (c) => c.type === "EXPAND_AREA"
   );
@@ -1099,7 +1099,7 @@ test("Swan case with replans exhausted produces STOP", () => {
   });
   expect(result.verdict).toBe("STOP");
   expect(result.action).toBe("stop");
-  expect(result.gaps).toContain("max_replans_exhausted");
+  expect(result.gaps).toContain("MAX_REPLANS_EXHAUSTED");
 });
 
 test("normalizeStructuredConstraint converts LOCATION_EQUALS to LOCATION", () => {
@@ -1225,7 +1225,7 @@ test("Policy: shortfall + canReplan + no constraints → CHANGE_PLAN with fallba
   });
   expect(result.verdict).toBe("CHANGE_PLAN");
   expect(result.action).toBe("change_plan");
-  expect(result.gaps).toContain("insufficient_count");
+  expect(result.gaps).toContain("INSUFFICIENT_COUNT");
   const hasExpandArea = result.suggested_changes.some(s => s.type === "EXPAND_AREA");
   if (!hasExpandArea) {
     throw new Error(`Expected EXPAND_AREA suggestion but got: ${JSON.stringify(result.suggested_changes.map(s => s.type))}`);
@@ -1251,7 +1251,7 @@ test("Policy: shortfall + canReplan + soft location constraint → CHANGE_PLAN w
   });
   expect(result.verdict).toBe("CHANGE_PLAN");
   expect(result.action).toBe("change_plan");
-  expect(result.gaps).toContain("insufficient_count");
+  expect(result.gaps).toContain("INSUFFICIENT_COUNT");
   const hasExpandArea = result.suggested_changes.some(s => s.type === "EXPAND_AREA");
   if (!hasExpandArea) {
     throw new Error(`Expected EXPAND_AREA suggestion but got: ${JSON.stringify(result.suggested_changes.map(s => s.type))}`);
@@ -1273,7 +1273,7 @@ test("Policy: shortfall + replans exhausted → STOP (Case C)", () => {
   });
   expect(result.verdict).toBe("STOP");
   expect(result.action).toBe("stop");
-  expect(result.gaps).toContain("max_replans_exhausted");
+  expect(result.gaps).toContain("MAX_REPLANS_EXHAUSTED");
 });
 
 test("Policy: shortfall + location hard → STOP (Case D)", () => {
@@ -1335,7 +1335,7 @@ test("Policy: shortfall + no constraints + replans exhausted → STOP", () => {
   });
   expect(result.verdict).toBe("STOP");
   expect(result.action).toBe("stop");
-  expect(result.gaps).toContain("max_replans_exhausted");
+  expect(result.gaps).toContain("MAX_REPLANS_EXHAUSTED");
 });
 
 test("Policy: zero leads + canReplan + no constraints → CHANGE_PLAN with EXPAND_AREA", () => {
@@ -1439,9 +1439,9 @@ test("CVL: LOCATION no longer auto-passes when CVL says unknown", () => {
   if (result.verdict === "ACCEPT") {
     throw new Error("Must NOT accept when hard LOCATION constraint status is unknown");
   }
-  const hasUnknownGap = result.gaps.some(g => g.includes("hard_constraint_unknown"));
+  const hasUnknownGap = result.gaps.some(g => g.includes("HARD_CONSTRAINT_UNKNOWN"));
   if (!hasUnknownGap) {
-    throw new Error(`Expected hard_constraint_unknown gap but got: ${JSON.stringify(result.gaps)}`);
+    throw new Error(`Expected HARD_CONSTRAINT_UNKNOWN gap but got: ${JSON.stringify(result.gaps)}`);
   }
 });
 
@@ -1464,9 +1464,9 @@ test("CVL: LOCATION no longer auto-passes when CVL says no", () => {
   if (result.verdict === "ACCEPT") {
     throw new Error("Must NOT accept when hard LOCATION constraint status is no");
   }
-  const hasViolation = result.gaps.some(g => g.includes("hard_constraint_violated"));
+  const hasViolation = result.gaps.some(g => g.includes("HARD_CONSTRAINT_VIOLATED"));
   if (!hasViolation) {
-    throw new Error(`Expected hard_constraint_violated gap but got: ${JSON.stringify(result.gaps)}`);
+    throw new Error(`Expected HARD_CONSTRAINT_VIOLATED gap but got: ${JSON.stringify(result.gaps)}`);
   }
 });
 
@@ -1576,7 +1576,7 @@ test("CVL: hard constraint unknown + unverifiable + no replans → STOP", () => 
     },
   });
   expect(result.verdict).toBe("STOP");
-  expect(result.gaps).toContain("hard_constraint_unverifiable");
+  expect(result.gaps).toContain("HARD_CONSTRAINT_UNVERIFIABLE");
 });
 
 test("CVL: legacy behaviour preserved when CVL absent", () => {
@@ -1601,7 +1601,7 @@ test("CVL: location_not_verifiable gap when no CVL and LOCATION constraint prese
     original_goal: "Find 3 places in Arundel",
   });
   expect(result.verdict).toBe("ACCEPT");
-  expect(result.gaps).toContain("location_not_verifiable");
+  expect(result.gaps).toContain("LOCATION_NOT_VERIFIABLE");
 });
 
 test("CVL: no location_not_verifiable gap when CVL present", () => {
@@ -1621,7 +1621,7 @@ test("CVL: no location_not_verifiable gap when CVL present", () => {
   });
   expect(result.verdict).toBe("ACCEPT");
   for (const gap of result.gaps) {
-    if (gap === "location_not_verifiable") {
+    if (gap === "LOCATION_NOT_VERIFIABLE") {
       throw new Error("Should not have location_not_verifiable when CVL is present");
     }
   }

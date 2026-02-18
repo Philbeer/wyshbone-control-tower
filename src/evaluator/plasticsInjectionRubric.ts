@@ -49,6 +49,7 @@ export interface PlasticsTowerJudgement {
   suggested_changes: string[];
   step?: number;
   machine?: string;
+  stop_reason?: { code: string; message: string; evidence?: Record<string, unknown> };
 }
 
 function verdictToAction(verdict: PlasticsVerdictAction): "continue" | "stop" | "change_plan" {
@@ -127,10 +128,15 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
       max_scrap_percent,
       confidence: 100,
       reason,
-      gaps: ["constraint_impossible"],
+      gaps: ["CONSTRAINT_IMPOSSIBLE"],
       suggested_changes: ["reduce moisture or repair tooling before retrying"],
       step: factory_state.step,
       machine,
+      stop_reason: {
+        code: "CONSTRAINT_IMPOSSIBLE",
+        message: reason,
+        evidence: { max_scrap_percent, achievable_scrap_floor, scrap_rate_now },
+      },
     };
   }
 
@@ -144,10 +150,15 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
       max_scrap_percent,
       confidence: 100,
       reason,
-      gaps: ["extreme_scrap"],
+      gaps: ["EXTREME_SCRAP"],
       suggested_changes: ["halt production and investigate root cause"],
       step: factory_state.step,
       machine,
+      stop_reason: {
+        code: "EXTREME_SCRAP",
+        message: reason,
+        evidence: { scrap_rate_now },
+      },
     };
   }
 
@@ -163,10 +174,15 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         max_scrap_percent,
         confidence: 95,
         reason,
-        gaps: ["deadline_infeasible"],
+        gaps: ["DEADLINE_INFEASIBLE"],
         suggested_changes: ["extend deadline or relax scrap constraint"],
         step: factory_state.step,
         machine,
+        stop_reason: {
+          code: "DEADLINE_INFEASIBLE",
+          message: reason,
+          evidence: { step: factory_state.step, deadline_step: constraints.deadline_step, scrap_rate_now, max_scrap_percent },
+        },
       };
     }
   }
@@ -182,10 +198,15 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         max_scrap_percent,
         confidence: 90,
         reason,
-        gaps: ["scrap_rising_trend", "machine_unstable"],
+        gaps: ["SCRAP_RISING_TREND", "MACHINE_UNSTABLE"],
         suggested_changes: ["switch to alternate machine profile"],
         step: factory_state.step,
         machine,
+        stop_reason: {
+          code: "SCRAP_RISING_TREND",
+          message: reason,
+          evidence: { scrap_rate_now, max_scrap_percent, machine: machineLabel },
+        },
       };
     }
 
@@ -201,10 +222,15 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         max_scrap_percent,
         confidence: 85,
         reason,
-        gaps: ["defect_type_shifted", "machine_unstable"],
+        gaps: ["DEFECT_TYPE_SHIFTED", "MACHINE_UNSTABLE"],
         suggested_changes: ["switch to alternate machine profile"],
         step: factory_state.step,
         machine,
+        stop_reason: {
+          code: "DEFECT_TYPE_SHIFTED",
+          message: reason,
+          evidence: { from_defect: defectTypeLabel(prev.defect_type), to_defect: defectTypeLabel(last.defect_type), scrap_rate_now, machine: machineLabel },
+        },
       };
     }
 
@@ -225,10 +251,15 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         max_scrap_percent,
         confidence: 90,
         reason,
-        gaps: ["decision_ineffective", "machine_unstable"],
+        gaps: ["DECISION_INEFFECTIVE", "MACHINE_UNSTABLE"],
         suggested_changes: ["switch to alternate machine profile"],
         step: factory_state.step,
         machine,
+        stop_reason: {
+          code: "DECISION_INEFFECTIVE",
+          message: reason,
+          evidence: { decision_action: factory_decision?.action, scrap_rate_now, max_scrap_percent, machine: machineLabel },
+        },
       };
     }
 
@@ -241,7 +272,7 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
       max_scrap_percent,
       confidence: 60,
       reason,
-      gaps: ["scrap_above_target"],
+      gaps: ["SCRAP_ABOVE_TARGET"],
       suggested_changes: [],
       step: factory_state.step,
       machine,
@@ -259,10 +290,15 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         max_scrap_percent,
         confidence: 75,
         reason,
-        gaps: ["scrap_rising_trend", "machine_unstable"],
+        gaps: ["SCRAP_RISING_TREND", "MACHINE_UNSTABLE"],
         suggested_changes: ["switch to alternate machine profile"],
         step: factory_state.step,
         machine,
+        stop_reason: {
+          code: "SCRAP_RISING_TREND",
+          message: reason,
+          evidence: { scrap_rate_now, max_scrap_percent, machine: machineLabel },
+        },
       };
     }
 
@@ -278,10 +314,15 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
         max_scrap_percent,
         confidence: 70,
         reason,
-        gaps: ["defect_type_shifted", "machine_unstable"],
+        gaps: ["DEFECT_TYPE_SHIFTED", "MACHINE_UNSTABLE"],
         suggested_changes: ["switch to alternate machine profile"],
         step: factory_state.step,
         machine,
+        stop_reason: {
+          code: "DEFECT_TYPE_SHIFTED",
+          message: reason,
+          evidence: { from_defect: defectTypeLabel(prev.defect_type), to_defect: defectTypeLabel(last.defect_type), scrap_rate_now, machine: machineLabel },
+        },
       };
     }
 
@@ -311,7 +352,7 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
       max_scrap_percent,
       confidence: 75,
       reason,
-      gaps: ["slight_worsening"],
+      gaps: ["SLIGHT_WORSENING"],
       suggested_changes: [],
       step: factory_state.step,
       machine,
@@ -326,9 +367,14 @@ export function judgePlasticsInjection(input: PlasticsRubricInput): PlasticsTowe
     max_scrap_percent,
     confidence: 50,
     reason: "unable to determine verdict from current state",
-    gaps: ["unknown_state"],
+    gaps: ["UNKNOWN_STATE"],
     suggested_changes: [],
     step: factory_state.step,
     machine,
+    stop_reason: {
+      code: "UNKNOWN_STATE",
+      message: "unable to determine verdict from current state",
+      evidence: { scrap_rate_now, max_scrap_percent, machine: machineLabel },
+    },
   };
 }

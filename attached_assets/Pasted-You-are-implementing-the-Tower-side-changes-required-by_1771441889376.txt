@@ -1,0 +1,100 @@
+You are implementing the Tower side changes required by “WYSHBONE 1 DAY DEMO USABLE PLAN (CANONICAL)”.
+
+CRITICAL DB RULE:
+
+Persist Tower verdicts to Supabase Postgres ONLY.
+
+No local DB, no file DB, no sqlite fallback.
+
+If any local DB adapter exists, remove it or make it throw loudly.
+
+GOALS:
+
+Unify Tower verdict enum across all Tower verdict outputs:
+Use ONLY: "ACCEPT" | "CHANGE_PLAN" | "STOP"
+
+Add structured stop_reason to all verdict outputs:
+stop_reason?: { code: string, message: string, evidence?: object }
+
+Convert free-form gaps strings into stable codes.
+
+Do not embed dynamic values inside the code. Put them in evidence.
+
+Persist verdict results for replay and Supervisor truth closure:
+Create table tower_verdicts in Supabase with:
+
+id uuid pk default gen_random_uuid()
+
+run_id uuid not null
+
+artefact_id uuid null
+
+artefact_type text not null
+
+verdict text not null check in ('ACCEPT','CHANGE_PLAN','STOP')
+
+stop_reason jsonb null
+
+delivered int null
+
+requested int null
+
+gaps jsonb not null default '[]'
+
+suggested_changes jsonb not null default '[]'
+
+confidence int null
+
+rationale text null
+
+created_at timestamptz not null default now()
+
+Ensure BOTH routes persist:
+
+/tower-verdict route (leads verdict)
+
+/judge-artefact route (adapter route)
+Both must:
+
+return the canonical verdict enum
+
+write a row into tower_verdicts in Supabase
+
+Demo determinism:
+proof_mode already exists on /tower-verdict. Add the same proof_mode support to /judge-artefact so demo orchestrator can force:
+
+proof_mode=ACCEPT
+
+proof_mode=CHANGE_PLAN
+
+proof_mode=STOP
+
+IMPLEMENTATION NOTES:
+
+The legacy evaluate/judgement system can remain, but it must not be used for the canonical delivery_summary truth.
+
+Canonical truth uses the Tower verdict records you persist in tower_verdicts.
+
+DELIVERABLES:
+A) SQL migration for tower_verdicts
+B) Code changes to output stop_reason structured
+C) Code changes to persist verdicts for both routes
+D) Add a small DB connection assertion log that confirms Supabase host (never secrets)
+
+ACCEPTANCE TESTS:
+
+Hitting /tower-verdict for a run creates a tower_verdicts row in Supabase.
+
+Hitting /judge-artefact for a run also creates a tower_verdicts row.
+
+proof_mode on both routes forces the verdict and persists it.
+
+At the end output:
+
+files changed
+
+SQL migration
+
+curl commands to test each route
+
+example SQL to verify persistence

@@ -3,9 +3,10 @@ import { db } from "../src/lib/db";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { judgeLeadsList, normalizeConstraintHardness, normalizeStructuredConstraints } from "../src/evaluator/towerVerdict";
-import type { Lead, Constraint, DeliveredInfo, MetaInfo, StructuredConstraint } from "../src/evaluator/towerVerdict";
+import type { Lead, Constraint, DeliveredInfo, MetaInfo, StructuredConstraint, StopReason } from "../src/evaluator/towerVerdict";
 import { judgePlasticsInjection } from "../src/evaluator/plasticsInjectionRubric";
 import type { PlasticsRubricInput } from "../src/evaluator/plasticsInjectionRubric";
+import { towerVerdicts } from "../shared/schema";
 
 const router = express.Router();
 
@@ -15,11 +16,14 @@ const judgeArtefactRequestSchema = z.object({
   goal: z.string().min(1),
   successCriteria: z.any().optional(),
   artefactType: z.string().min(1),
+  proof_mode: z.string().optional(),
 });
 
 interface JudgeArtefactResponse {
   verdict: "pass" | "fail";
   action: "continue" | "stop" | "retry" | "change_plan";
+  towerVerdict: "ACCEPT" | "CHANGE_PLAN" | "STOP";
+  stop_reason?: StopReason | null;
   reasons: string[];
   metrics: Record<string, unknown>;
   suggested_changes: Array<{
@@ -29,6 +33,67 @@ interface JudgeArtefactResponse {
     to: string | number | null;
     reason: string;
   }>;
+}
+
+async function persistTowerVerdict(row: {
+  run_id: string;
+  artefact_id?: string | null;
+  artefact_type: string;
+  verdict: string;
+  stop_reason?: StopReason | null;
+  delivered?: number | null;
+  requested?: number | null;
+  gaps: string[];
+  suggested_changes: any[];
+  confidence?: number | null;
+  rationale?: string | null;
+}): Promise<void> {
+  try {
+    await db.insert(towerVerdicts).values({
+      run_id: row.run_id,
+      artefact_id: row.artefact_id ?? null,
+      artefact_type: row.artefact_type,
+      verdict: row.verdict,
+      stop_reason: row.stop_reason ?? null,
+      delivered: row.delivered ?? null,
+      requested: row.requested ?? null,
+      gaps: row.gaps,
+      suggested_changes: row.suggested_changes,
+      confidence: row.confidence ?? null,
+      rationale: row.rationale ?? null,
+    });
+    console.log(`[TOWER_PERSIST] verdict=${row.verdict} run_id=${row.run_id} artefact_type=${row.artefact_type} via=judge-artefact`);
+  } catch (err) {
+    console.error(
+      "[TOWER_PERSIST] Failed to persist tower verdict (judge-artefact):",
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
+function buildProofVerdict(
+  proofMode: string | undefined
+): { towerVerdict: "ACCEPT" | "CHANGE_PLAN" | "STOP"; rationale: string; stopReason?: StopReason } {
+  if (proofMode === "STOP") {
+    return {
+      towerVerdict: "STOP",
+      rationale: "Proof stop",
+      stopReason: { code: "PROOF_STOP", message: "Forced STOP via proof_mode" },
+    };
+  } else if (proofMode === "CHANGE_PLAN") {
+    return {
+      towerVerdict: "CHANGE_PLAN",
+      rationale: "Proof change plan",
+      stopReason: { code: "PROOF_CHANGE_PLAN", message: "Forced CHANGE_PLAN via proof_mode" },
+    };
+  }
+  return { towerVerdict: "ACCEPT", rationale: "Proof accept" };
+}
+
+function towerVerdictToPassFail(v: "ACCEPT" | "CHANGE_PLAN" | "STOP"): { verdict: "pass" | "fail"; action: "continue" | "stop" | "change_plan" } {
+  if (v === "ACCEPT") return { verdict: "pass", action: "continue" };
+  if (v === "CHANGE_PLAN") return { verdict: "fail", action: "change_plan" };
+  return { verdict: "fail", action: "stop" };
 }
 
 function judgeLeadsListArtefact(
@@ -162,26 +227,13 @@ function judgeLeadsListArtefact(
     }
   }
 
-  let verdict: "pass" | "fail";
-  let action: "continue" | "stop" | "retry" | "change_plan";
-
-  if (towerResult.verdict === "ACCEPT") {
-    verdict = "pass";
-    action = "continue";
-  } else if (towerResult.verdict === "CHANGE_PLAN") {
-    verdict = "fail";
-    action = "change_plan";
-  } else if (towerResult.verdict === "STOP") {
-    verdict = "fail";
-    action = "stop";
-  } else {
-    verdict = "fail";
-    action = "retry";
-  }
+  const { verdict, action } = towerVerdictToPassFail(towerResult.verdict);
 
   const response: JudgeArtefactResponse = {
     verdict,
     action,
+    towerVerdict: towerResult.verdict,
+    stop_reason: towerResult.stop_reason ?? null,
     reasons: [
       towerResult.rationale,
       ...towerResult.gaps.map((g) => `gap: ${g}`),
@@ -214,8 +266,48 @@ router.post("/judge-artefact", async (req, res) => {
       return;
     }
 
-    const { runId, artefactId, goal, successCriteria, artefactType } =
+    const { runId, artefactId, goal, successCriteria, artefactType, proof_mode } =
       parsed.data;
+
+    if (proof_mode) {
+      const proof = buildProofVerdict(proof_mode);
+      const { verdict, action } = towerVerdictToPassFail(proof.towerVerdict);
+      const proofResponse: JudgeArtefactResponse = {
+        verdict,
+        action,
+        towerVerdict: proof.towerVerdict,
+        stop_reason: proof.stopReason ?? null,
+        reasons: [proof.rationale],
+        metrics: {
+          artefactId,
+          runId,
+          artefactType,
+          goal,
+          towerVerdict: proof.towerVerdict,
+          judgedAt: new Date().toISOString(),
+        },
+        suggested_changes: [],
+      };
+
+      console.log(`[TOWER_PROOF] run_id=${runId} artefactId=${artefactId} verdict=${proof.towerVerdict} via=judge-artefact`);
+
+      await persistTowerVerdict({
+        run_id: runId,
+        artefact_id: artefactId,
+        artefact_type: artefactType,
+        verdict: proof.towerVerdict,
+        stop_reason: proof.stopReason,
+        delivered: 0,
+        requested: 0,
+        gaps: [],
+        suggested_changes: [],
+        confidence: 100,
+        rationale: proof.rationale,
+      });
+
+      res.json(proofResponse);
+      return;
+    }
 
     let artefactRow: any = null;
     try {
@@ -231,6 +323,8 @@ router.post("/judge-artefact", async (req, res) => {
       const failResponse: JudgeArtefactResponse = {
         verdict: "fail",
         action: "stop",
+        towerVerdict: "STOP",
+        stop_reason: { code: "DB_ERROR", message: "Supabase query failed while fetching artefact" },
         reasons: ["Supabase query failed while fetching artefact"],
         metrics: {
           artefactId,
@@ -240,6 +334,18 @@ router.post("/judge-artefact", async (req, res) => {
         },
         suggested_changes: [],
       };
+
+      await persistTowerVerdict({
+        run_id: runId,
+        artefact_id: artefactId,
+        artefact_type: artefactType,
+        verdict: "STOP",
+        stop_reason: failResponse.stop_reason,
+        gaps: ["DB_ERROR"],
+        suggested_changes: [],
+        rationale: "Supabase query failed while fetching artefact",
+      });
+
       res.json(failResponse);
       return;
     }
@@ -248,6 +354,8 @@ router.post("/judge-artefact", async (req, res) => {
       const failResponse: JudgeArtefactResponse = {
         verdict: "fail",
         action: "stop",
+        towerVerdict: "STOP",
+        stop_reason: { code: "ARTEFACT_NOT_FOUND", message: `Artefact not found: ${artefactId}`, evidence: { artefact_id: artefactId } },
         reasons: [`Artefact not found: ${artefactId}`],
         metrics: {
           artefactId,
@@ -257,6 +365,18 @@ router.post("/judge-artefact", async (req, res) => {
         },
         suggested_changes: [],
       };
+
+      await persistTowerVerdict({
+        run_id: runId,
+        artefact_id: artefactId,
+        artefact_type: artefactType,
+        verdict: "STOP",
+        stop_reason: failResponse.stop_reason,
+        gaps: ["ARTEFACT_NOT_FOUND"],
+        suggested_changes: [],
+        rationale: `Artefact not found: ${artefactId}`,
+      });
+
       res.json(failResponse);
       return;
     }
@@ -352,8 +472,22 @@ router.post("/judge-artefact", async (req, res) => {
       };
 
       console.log(
-        `[Tower][judge-artefact] leads_list run_id=${runId} verdict=${leadsResult.verdict} action=${leadsResult.action} delivered=${leadsResult.metrics.delivered} requested=${leadsResult.metrics.requested}`
+        `[Tower][judge-artefact] leads_list run_id=${runId} verdict=${leadsResult.verdict} towerVerdict=${leadsResult.towerVerdict} action=${leadsResult.action} delivered=${leadsResult.metrics.delivered} requested=${leadsResult.metrics.requested}`
       );
+
+      await persistTowerVerdict({
+        run_id: runId,
+        artefact_id: artefactId,
+        artefact_type: artefactType,
+        verdict: leadsResult.towerVerdict,
+        stop_reason: leadsResult.stop_reason,
+        delivered: (leadsResult.metrics.delivered as number) ?? null,
+        requested: (leadsResult.metrics.requested as number) ?? null,
+        gaps: (leadsResult.metrics.gaps as string[]) ?? [],
+        suggested_changes: leadsResult.suggested_changes,
+        confidence: (leadsResult.metrics.confidence as number) ?? null,
+        rationale: leadsResult.reasons[0] ?? null,
+      });
 
       res.json(leadsResult);
       return;
@@ -367,10 +501,24 @@ router.post("/judge-artefact", async (req, res) => {
         const failResponse: JudgeArtefactResponse = {
           verdict: "fail",
           action: "stop",
+          towerVerdict: "STOP",
+          stop_reason: { code: "MISSING_PLASTICS_FIELDS", message: "Missing required plastics fields: constraints.max_scrap_percent and factory_state.scrap_rate_now" },
           reasons: ["Missing required plastics fields: constraints.max_scrap_percent and factory_state.scrap_rate_now"],
           metrics: { artefactId, runId, artefactType, error: "missing_plastics_fields" },
           suggested_changes: [],
         };
+
+        await persistTowerVerdict({
+          run_id: runId,
+          artefact_id: artefactId,
+          artefact_type: artefactType,
+          verdict: "STOP",
+          stop_reason: failResponse.stop_reason,
+          gaps: ["MISSING_PLASTICS_FIELDS"],
+          suggested_changes: [],
+          rationale: failResponse.reasons[0],
+        });
+
         res.json(failResponse);
         return;
       }
@@ -383,24 +531,13 @@ router.post("/judge-artefact", async (req, res) => {
       };
 
       const plasticsResult = judgePlasticsInjection(rubricInput);
-
-      let pVerdict: "pass" | "fail";
-      let pAction: "continue" | "stop" | "retry" | "change_plan";
-
-      if (plasticsResult.verdict === "ACCEPT") {
-        pVerdict = "pass";
-        pAction = "continue";
-      } else if (plasticsResult.verdict === "CHANGE_PLAN") {
-        pVerdict = "fail";
-        pAction = "change_plan";
-      } else {
-        pVerdict = "fail";
-        pAction = "stop";
-      }
+      const { verdict: pVerdict, action: pAction } = towerVerdictToPassFail(plasticsResult.verdict);
 
       const plasticsResponse: JudgeArtefactResponse = {
         verdict: pVerdict,
         action: pAction,
+        towerVerdict: plasticsResult.verdict,
+        stop_reason: plasticsResult.stop_reason ?? null,
         reasons: [
           plasticsResult.reason,
           ...plasticsResult.gaps.map((g) => `gap: ${g}`),
@@ -429,8 +566,20 @@ router.post("/judge-artefact", async (req, res) => {
       };
 
       console.log(
-        `[Tower][judge-artefact] ${artefactType} run_id=${runId} verdict=${pVerdict} action=${pAction} scrap=${plasticsResult.scrap_rate_now} max=${plasticsResult.max_scrap_percent}`
+        `[Tower][judge-artefact] ${artefactType} run_id=${runId} towerVerdict=${plasticsResult.verdict} action=${pAction} scrap=${plasticsResult.scrap_rate_now} max=${plasticsResult.max_scrap_percent}`
       );
+
+      await persistTowerVerdict({
+        run_id: runId,
+        artefact_id: artefactId,
+        artefact_type: artefactType,
+        verdict: plasticsResult.verdict,
+        stop_reason: plasticsResult.stop_reason,
+        gaps: plasticsResult.gaps,
+        suggested_changes: plasticsResult.suggested_changes.map(s => ({ type: "CHANGE_QUERY", reason: s })),
+        confidence: plasticsResult.confidence,
+        rationale: plasticsResult.reason,
+      });
 
       res.json(plasticsResponse);
       return;
@@ -442,46 +591,49 @@ router.post("/judge-artefact", async (req, res) => {
       | Record<string, unknown>
       | undefined;
 
-    let verdict: "pass" | "fail";
-    let action: "continue" | "stop" | "retry" | "change_plan";
+    let canonicalVerdict: "ACCEPT" | "CHANGE_PLAN" | "STOP";
+    let stopReason: StopReason | null = null;
     const reasons: string[] = [];
 
     if (stepStatus === "fail") {
-      verdict = "fail";
-      action = "stop";
+      canonicalVerdict = "STOP";
       reasons.push(`Artefact step_status is "fail"`);
+      stopReason = { code: "STEP_FAILED", message: `Artefact step_status is "fail"`, evidence: { step_type: stepType } };
     } else if (
       stepType === "SEARCH_PLACES" &&
       metrics?.places_found === 0
     ) {
-      verdict = "fail";
-      action = "stop";
+      canonicalVerdict = "STOP";
       reasons.push(`SEARCH_PLACES returned 0 places_found`);
+      stopReason = { code: "ZERO_RESULTS", message: "SEARCH_PLACES returned 0 places_found", evidence: { step_type: stepType } };
     } else if (
       stepType === "ENRICH_LEADS" &&
       metrics?.leads_enriched === 0
     ) {
-      verdict = "fail";
-      action = "stop";
+      canonicalVerdict = "STOP";
       reasons.push(`ENRICH_LEADS returned 0 leads_enriched`);
+      stopReason = { code: "ZERO_RESULTS", message: "ENRICH_LEADS returned 0 leads_enriched", evidence: { step_type: stepType } };
     } else if (
       stepType === "SCORE_LEADS" &&
       metrics?.leads_scored === 0
     ) {
-      verdict = "fail";
-      action = "stop";
+      canonicalVerdict = "STOP";
       reasons.push(`SCORE_LEADS returned 0 leads_scored`);
+      stopReason = { code: "ZERO_RESULTS", message: "SCORE_LEADS returned 0 leads_scored", evidence: { step_type: stepType } };
     } else {
-      verdict = "pass";
-      action = "continue";
+      canonicalVerdict = "ACCEPT";
       reasons.push(
         `Artefact step_status is "${stepStatus ?? "not set"}" — passing`
       );
     }
 
+    const { verdict, action } = towerVerdictToPassFail(canonicalVerdict);
+
     const response: JudgeArtefactResponse = {
       verdict,
       action,
+      towerVerdict: canonicalVerdict,
+      stop_reason: stopReason,
       reasons,
       metrics: {
         artefactId,
@@ -491,10 +643,22 @@ router.post("/judge-artefact", async (req, res) => {
         artefactTitle: artefactRow.title ?? null,
         artefactSummary: artefactRow.summary ?? null,
         stepStatus: stepStatus ?? null,
+        towerVerdict: canonicalVerdict,
         judgedAt: new Date().toISOString(),
       },
       suggested_changes: [],
     };
+
+    await persistTowerVerdict({
+      run_id: runId,
+      artefact_id: artefactId,
+      artefact_type: artefactType,
+      verdict: canonicalVerdict,
+      stop_reason: stopReason,
+      gaps: stopReason ? [stopReason.code] : [],
+      suggested_changes: [],
+      rationale: reasons[0] ?? null,
+    });
 
     res.json(response);
   } catch (err) {
@@ -505,6 +669,8 @@ router.post("/judge-artefact", async (req, res) => {
     const failResponse: JudgeArtefactResponse = {
       verdict: "fail",
       action: "stop",
+      towerVerdict: "STOP",
+      stop_reason: { code: "INTERNAL_ERROR", message: "Unexpected error during artefact judgement" },
       reasons: ["Unexpected error during artefact judgement"],
       metrics: { error: "unexpected_error" },
       suggested_changes: [],

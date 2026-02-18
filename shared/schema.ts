@@ -358,6 +358,39 @@ export type FailureMemory = Omit<FailureMemoryRow, 'successRate' | 'timesApplied
   timesApplied: number;
 };
 
+export const towerVerdictEnum = z.enum(["ACCEPT", "CHANGE_PLAN", "STOP"]);
+export type TowerVerdictValue = z.infer<typeof towerVerdictEnum>;
+
+export const stopReasonSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  evidence: z.record(z.unknown()).optional(),
+});
+export type StopReason = z.infer<typeof stopReasonSchema>;
+
+export const towerVerdicts = pgTable("tower_verdicts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  run_id: text("run_id").notNull(),
+  artefact_id: text("artefact_id"),
+  artefact_type: text("artefact_type").notNull(),
+  verdict: text("verdict").notNull(),
+  stop_reason: jsonb("stop_reason").$type<StopReason | null>(),
+  delivered: integer("delivered"),
+  requested: integer("requested"),
+  gaps: jsonb("gaps").$type<string[]>().notNull().default([]),
+  suggested_changes: jsonb("suggested_changes").$type<any[]>().notNull().default([]),
+  confidence: integer("confidence"),
+  rationale: text("rationale"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertTowerVerdictSchema = createInsertSchema(towerVerdicts).omit({
+  id: true,
+  created_at: true,
+});
+export type InsertTowerVerdict = z.infer<typeof insertTowerVerdictSchema>;
+export type TowerVerdictRow = typeof towerVerdicts.$inferSelect;
+
 export const judgementEvaluations = pgTable("judgement_evaluations", {
   id: uuid("id").primaryKey().defaultRandom(),
   run_id: text("run_id").notNull(),

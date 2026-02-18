@@ -1,13 +1,15 @@
 import express from "express";
 import { z } from "zod";
 import { judgeLeadsList } from "../src/evaluator/towerVerdict";
-import type { Constraint } from "../src/evaluator/towerVerdict";
+import type { Constraint, StopReason } from "../src/evaluator/towerVerdict";
 import { judgePlasticsInjection } from "../src/evaluator/plasticsInjectionRubric";
 import type { PlasticsRubricInput, PlasticsStepSnapshot } from "../src/evaluator/plasticsInjectionRubric";
+import { db } from "../src/lib/db";
+import { towerVerdicts } from "../shared/schema";
 
 const router = express.Router();
 
-const TOWER_VERSION = "3.1.0";
+const TOWER_VERSION = "3.2.0";
 
 router.get("/health", (_req, res) => {
   res.json({ ok: true, version: TOWER_VERSION, time: new Date().toISOString() });
@@ -178,20 +180,59 @@ const towerVerdictRequestSchema = z.object({
   constraints_extracted: constraintsExtractedSchema.optional(),
 });
 
+async function persistTowerVerdict(row: {
+  run_id: string;
+  artefact_id?: string | null;
+  artefact_type: string;
+  verdict: string;
+  stop_reason?: StopReason | null;
+  delivered?: number | null;
+  requested?: number | null;
+  gaps: string[];
+  suggested_changes: any[];
+  confidence?: number | null;
+  rationale?: string | null;
+}): Promise<void> {
+  try {
+    await db.insert(towerVerdicts).values({
+      run_id: row.run_id,
+      artefact_id: row.artefact_id ?? null,
+      artefact_type: row.artefact_type,
+      verdict: row.verdict,
+      stop_reason: row.stop_reason ?? null,
+      delivered: row.delivered ?? null,
+      requested: row.requested ?? null,
+      gaps: row.gaps,
+      suggested_changes: row.suggested_changes,
+      confidence: row.confidence ?? null,
+      rationale: row.rationale ?? null,
+    });
+    console.log(`[TOWER_PERSIST] verdict=${row.verdict} run_id=${row.run_id} artefact_type=${row.artefact_type}`);
+  } catch (err) {
+    console.error(
+      "[TOWER_PERSIST] Failed to persist tower verdict:",
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
 function buildProofVerdict(
   proofMode: string | undefined,
   runId: string,
   artefactId: string
 ) {
-  let verdict: string;
+  let verdict: "ACCEPT" | "CHANGE_PLAN" | "STOP";
   let rationale: string;
+  let stopReason: StopReason | undefined;
 
   if (proofMode === "STOP") {
     verdict = "STOP";
     rationale = "Proof stop";
+    stopReason = { code: "PROOF_STOP", message: "Forced STOP via proof_mode" };
   } else if (proofMode === "CHANGE_PLAN") {
     verdict = "CHANGE_PLAN";
     rationale = "Proof change plan";
+    stopReason = { code: "PROOF_CHANGE_PLAN", message: "Forced CHANGE_PLAN via proof_mode" };
   } else {
     verdict = "ACCEPT";
     rationale = "Proof accept";
@@ -203,13 +244,14 @@ function buildProofVerdict(
 
   return {
     verdict,
-    action: verdict === "ACCEPT" ? "continue" : verdict === "CHANGE_PLAN" ? "change_plan" : "stop",
+    action: verdict === "ACCEPT" ? "continue" as const : verdict === "CHANGE_PLAN" ? "change_plan" as const : "stop" as const,
     rationale,
     confidence: 100,
     requested: 0,
     delivered: 0,
-    gaps: [],
-    suggested_changes: [],
+    gaps: [] as string[],
+    suggested_changes: [] as any[],
+    stop_reason: stopReason,
   };
 }
 
@@ -229,13 +271,24 @@ router.post("/tower-verdict", async (req, res) => {
       }
 
       const data = parsed.data;
+      const runId = data.run_id ?? "none";
+      const artId = data.artefactId ?? "none";
 
       if (data.goal === "Proof Tower Loop") {
-        const result = buildProofVerdict(
-          data.proof_mode,
-          data.run_id ?? "none",
-          data.artefactId ?? "none"
-        );
+        const result = buildProofVerdict(data.proof_mode, runId, artId);
+        await persistTowerVerdict({
+          run_id: runId,
+          artefact_id: artId,
+          artefact_type: artefactType,
+          verdict: result.verdict,
+          stop_reason: result.stop_reason,
+          delivered: result.delivered,
+          requested: result.requested,
+          gaps: result.gaps,
+          suggested_changes: result.suggested_changes,
+          confidence: result.confidence,
+          rationale: result.rationale,
+        });
         res.json(result);
         return;
       }
@@ -250,8 +303,22 @@ router.post("/tower-verdict", async (req, res) => {
       const result = judgePlasticsInjection(rubricInput);
 
       console.log(
-        `[TOWER_IN] run_id=${data.run_id ?? "none"} artefactType=${artefactType} verdict=${result.verdict} action=${result.action} scrap_rate=${result.scrap_rate_now} max_scrap=${result.max_scrap_percent} step=${result.step ?? "?"}`
+        `[TOWER_IN] run_id=${runId} artefactType=${artefactType} verdict=${result.verdict} action=${result.action} scrap_rate=${result.scrap_rate_now} max_scrap=${result.max_scrap_percent} step=${result.step ?? "?"}`
       );
+
+      await persistTowerVerdict({
+        run_id: runId,
+        artefact_id: artId,
+        artefact_type: artefactType,
+        verdict: result.verdict,
+        stop_reason: result.stop_reason,
+        delivered: null,
+        requested: null,
+        gaps: result.gaps,
+        suggested_changes: result.suggested_changes.map(s => ({ type: "CHANGE_QUERY", reason: s })),
+        confidence: result.confidence,
+        rationale: result.reason,
+      });
 
       res.json({
         ...result,
@@ -273,13 +340,24 @@ router.post("/tower-verdict", async (req, res) => {
     }
 
     const data = parsed.data;
+    const runId = data.run_id ?? "none";
+    const artId = data.artefactId ?? "none";
 
     if (data.goal === "Proof Tower Loop") {
-      const result = buildProofVerdict(
-        data.proof_mode,
-        data.run_id ?? "none",
-        data.artefactId ?? "none"
-      );
+      const result = buildProofVerdict(data.proof_mode, runId, artId);
+      await persistTowerVerdict({
+        run_id: runId,
+        artefact_id: artId,
+        artefact_type: "leads_list",
+        verdict: result.verdict,
+        stop_reason: result.stop_reason,
+        delivered: result.delivered,
+        requested: result.requested,
+        gaps: result.gaps,
+        suggested_changes: result.suggested_changes,
+        confidence: result.confidence,
+        rationale: result.rationale,
+      });
       res.json(result);
       return;
     }
@@ -333,8 +411,22 @@ router.post("/tower-verdict", async (req, res) => {
     }
 
     console.log(
-      `[TOWER_IN] run_id=${data.run_id ?? "none"} verdict=${result.verdict} action=${result.action} requested=${result.requested} delivered=${result.delivered} suggestions=${result.suggested_changes.length}`
+      `[TOWER_IN] run_id=${runId} verdict=${result.verdict} action=${result.action} requested=${result.requested} delivered=${result.delivered} suggestions=${result.suggested_changes.length}`
     );
+
+    await persistTowerVerdict({
+      run_id: runId,
+      artefact_id: artId,
+      artefact_type: "leads_list",
+      verdict: result.verdict,
+      stop_reason: result.stop_reason,
+      delivered: result.delivered,
+      requested: result.requested,
+      gaps: result.gaps,
+      suggested_changes: result.suggested_changes,
+      confidence: result.confidence,
+      rationale: result.rationale,
+    });
 
     res.json(result);
   } catch (err) {
@@ -347,10 +439,14 @@ router.post("/tower-verdict", async (req, res) => {
       action: "stop",
       delivered: 0,
       requested: 0,
-      gaps: ["internal_error"],
+      gaps: ["INTERNAL_ERROR"],
       confidence: 0,
       rationale: "Internal server error during verdict evaluation.",
       suggested_changes: [],
+      stop_reason: {
+        code: "INTERNAL_ERROR",
+        message: "Internal server error during verdict evaluation.",
+      },
     });
   }
 });

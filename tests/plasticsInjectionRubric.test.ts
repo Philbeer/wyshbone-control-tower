@@ -83,7 +83,7 @@ test("STOP: constraint impossible — max_scrap_percent < achievable_scrap_floor
   });
   expect(result.verdict).toBe("STOP");
   expect(result.action).toBe("stop");
-  expect(result.gaps).toContain("constraint_impossible");
+  expect(result.gaps).toContain("CONSTRAINT_IMPOSSIBLE");
   expect(result.reason).toContain("constraint impossible under current moisture/tool state");
 });
 
@@ -94,7 +94,7 @@ test("STOP: extreme scrap rate (>=50%)", () => {
   });
   expect(result.verdict).toBe("STOP");
   expect(result.action).toBe("stop");
-  expect(result.gaps).toContain("extreme_scrap");
+  expect(result.gaps).toContain("EXTREME_SCRAP");
   expect(result.reason).toContain("extreme scrap rate");
 });
 
@@ -105,7 +105,7 @@ test("STOP: deadline infeasible", () => {
   });
   expect(result.verdict).toBe("STOP");
   expect(result.action).toBe("stop");
-  expect(result.gaps).toContain("deadline_infeasible");
+  expect(result.gaps).toContain("DEADLINE_INFEASIBLE");
 });
 
 test("ACCEPT: scrap within limit and not worsening", () => {
@@ -145,8 +145,8 @@ test("CHANGE_PLAN: scrap > max and decision is 'continue' (no rising trend)", ()
   });
   expect(result.verdict).toBe("CHANGE_PLAN");
   expect(result.action).toBe("change_plan");
-  expect(result.gaps).toContain("decision_ineffective");
-  expect(result.gaps).toContain("machine_unstable");
+  expect(result.gaps).toContain("DECISION_INEFFECTIVE");
+  expect(result.gaps).toContain("MACHINE_UNSTABLE");
   expect(result.reason).toContain("Switch to alternate machine profile");
   expect(result.suggested_changes).toContain("switch to alternate machine profile");
 });
@@ -165,7 +165,7 @@ test("CHANGE_PLAN: repeating failing action", () => {
   expect(result.action).toBe("change_plan");
   expect(result.reason).toContain("repeating failing action");
   expect(result.reason).toContain("Switch to alternate machine profile");
-  expect(result.gaps).toContain("machine_unstable");
+  expect(result.gaps).toContain("MACHINE_UNSTABLE");
 });
 
 test("CHANGE_PLAN: scrap rising for 2 consecutive steps (above limit)", () => {
@@ -181,8 +181,8 @@ test("CHANGE_PLAN: scrap rising for 2 consecutive steps (above limit)", () => {
   });
   expect(result.verdict).toBe("CHANGE_PLAN");
   expect(result.action).toBe("change_plan");
-  expect(result.gaps).toContain("scrap_rising_trend");
-  expect(result.gaps).toContain("machine_unstable");
+  expect(result.gaps).toContain("SCRAP_RISING_TREND");
+  expect(result.gaps).toContain("MACHINE_UNSTABLE");
   expect(result.reason).toContain("Current machine (unknown) is unstable");
   expect(result.reason).toContain("Switch to alternate machine profile");
 });
@@ -200,8 +200,8 @@ test("CHANGE_PLAN: scrap rising for 2 consecutive steps (within limit)", () => {
   });
   expect(result.verdict).toBe("CHANGE_PLAN");
   expect(result.action).toBe("change_plan");
-  expect(result.gaps).toContain("scrap_rising_trend");
-  expect(result.gaps).toContain("machine_unstable");
+  expect(result.gaps).toContain("SCRAP_RISING_TREND");
+  expect(result.gaps).toContain("MACHINE_UNSTABLE");
   expect(result.reason).toContain("Switch to alternate machine profile");
 });
 
@@ -217,8 +217,8 @@ test("CHANGE_PLAN: defect shifts after mitigation (above limit)", () => {
   });
   expect(result.verdict).toBe("CHANGE_PLAN");
   expect(result.action).toBe("change_plan");
-  expect(result.gaps).toContain("defect_type_shifted");
-  expect(result.gaps).toContain("machine_unstable");
+  expect(result.gaps).toContain("DEFECT_TYPE_SHIFTED");
+  expect(result.gaps).toContain("MACHINE_UNSTABLE");
   expect(result.reason).toContain("defect shifted");
   expect(result.reason).toContain("Switch to alternate machine profile");
 });
@@ -235,8 +235,8 @@ test("CHANGE_PLAN: defect shifts after mitigation (within limit)", () => {
   });
   expect(result.verdict).toBe("CHANGE_PLAN");
   expect(result.action).toBe("change_plan");
-  expect(result.gaps).toContain("defect_type_shifted");
-  expect(result.gaps).toContain("machine_unstable");
+  expect(result.gaps).toContain("DEFECT_TYPE_SHIFTED");
+  expect(result.gaps).toContain("MACHINE_UNSTABLE");
   expect(result.reason).toContain("Switch to alternate machine profile");
 });
 
@@ -252,7 +252,7 @@ test("ACCEPT: scrap > max but active mitigation in progress (not continue, not r
   });
   expect(result.verdict).toBe("ACCEPT");
   expect(result.action).toBe("continue");
-  expect(result.gaps).toContain("scrap_above_target");
+  expect(result.gaps).toContain("SCRAP_ABOVE_TARGET");
 });
 
 test("ACCEPT: slight worsening but within limit", () => {
@@ -267,7 +267,7 @@ test("ACCEPT: slight worsening but within limit", () => {
   });
   expect(result.verdict).toBe("CHANGE_PLAN");
   expect(result.action).toBe("change_plan");
-  expect(result.gaps).toContain("scrap_rising_trend");
+  expect(result.gaps).toContain("SCRAP_RISING_TREND");
 });
 
 test("Output always includes required fields", () => {
@@ -339,7 +339,7 @@ test("Multi-step scenario includes STOP for impossible constraint", () => {
     factory_state: { scrap_rate_now: 5, achievable_scrap_floor: 3, step: 1 },
   });
   expect(result1.verdict).toBe("STOP");
-  expect(result1.gaps).toContain("constraint_impossible");
+  expect(result1.gaps).toContain("CONSTRAINT_IMPOSSIBLE");
 
   const result2 = judgePlasticsInjection({
     constraints: { max_scrap_percent: 5 },
@@ -356,7 +356,7 @@ test("CHANGE_PLAN: decision is 'no_change' while above limit", () => {
   });
   expect(result.verdict).toBe("CHANGE_PLAN");
   expect(result.action).toBe("change_plan");
-  expect(result.gaps).toContain("machine_unstable");
+  expect(result.gaps).toContain("MACHINE_UNSTABLE");
   expect(result.reason).toContain("Switch to alternate machine profile");
 });
 
@@ -381,7 +381,7 @@ test("Achievable scrap floor equal to max_scrap_percent does NOT trigger impossi
     constraints: { max_scrap_percent: 4 },
     factory_state: { scrap_rate_now: 4, achievable_scrap_floor: 4, step: 1 },
   });
-  if (result.verdict === "STOP" && result.gaps.includes("constraint_impossible")) {
+  if (result.verdict === "STOP" && result.gaps.includes("CONSTRAINT_IMPOSSIBLE")) {
     throw new Error("Should not be impossible when max_scrap_percent == achievable_scrap_floor");
   }
 });
@@ -392,7 +392,7 @@ test("STOP: deadline past with scrap above limit", () => {
     factory_state: { scrap_rate_now: 6, step: 6 },
   });
   expect(result.verdict).toBe("STOP");
-  expect(result.gaps).toContain("deadline_infeasible");
+  expect(result.gaps).toContain("DEADLINE_INFEASIBLE");
 });
 
 test("Deadline met — scrap within limit, no STOP", () => {
@@ -400,7 +400,7 @@ test("Deadline met — scrap within limit, no STOP", () => {
     constraints: { max_scrap_percent: 5, deadline_step: 4 },
     factory_state: { scrap_rate_now: 3, step: 4 },
   });
-  if (result.verdict === "STOP" && result.gaps.includes("deadline_infeasible")) {
+  if (result.verdict === "STOP" && result.gaps.includes("DEADLINE_INFEASIBLE")) {
     throw new Error("Should not stop for deadline when scrap is within limit");
   }
 });
@@ -446,7 +446,7 @@ test("defect_type as array: detects shift from string to array", () => {
     ],
   });
   expect(result.verdict).toBe("CHANGE_PLAN");
-  expect(result.gaps).toContain("defect_type_shifted");
+  expect(result.gaps).toContain("DEFECT_TYPE_SHIFTED");
   expect(result.reason).toContain("short_shot, flash");
 });
 
@@ -460,7 +460,7 @@ test("defect_type as array: same array does NOT trigger shift", () => {
       { step: 3, scrap_rate: 7, defect_type: ["flash", "short_shot"] },
     ],
   });
-  if (result.gaps.includes("defect_type_shifted")) {
+  if (result.gaps.includes("DEFECT_TYPE_SHIFTED")) {
     throw new Error("Should not detect defect shift when arrays contain the same elements");
   }
 });
