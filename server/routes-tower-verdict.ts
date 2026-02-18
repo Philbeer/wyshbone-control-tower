@@ -119,6 +119,25 @@ const plasticsVerdictRequestSchema = z.object({
   history: z.array(plasticsStepSnapshotSchema).optional(),
 });
 
+const cvlConstraintResultSchema = z.object({
+  constraint_id: z.string().optional(),
+  type: z.string(),
+  field: z.string().optional(),
+  value: z.union([z.string(), z.number()]).optional(),
+  status: z.enum(["yes", "no", "unknown"]),
+  reason: z.string().optional(),
+});
+
+const verificationSummarySchema = z.object({
+  verified_exact_count: z.number(),
+  constraint_results: z.array(cvlConstraintResultSchema).optional(),
+});
+
+const constraintsExtractedSchema = z.object({
+  requested_count_user: z.number().int().optional(),
+  constraints: z.array(constraintSchema).optional(),
+});
+
 const towerVerdictRequestSchema = z.object({
   artefactType: z.literal("leads_list"),
   run_id: z.string().optional(),
@@ -154,6 +173,9 @@ const towerVerdictRequestSchema = z.object({
 
   artefact_title: z.string().optional(),
   artefact_summary: z.string().optional(),
+
+  verification_summary: verificationSummarySchema.optional(),
+  constraints_extracted: constraintsExtractedSchema.optional(),
 });
 
 function buildProofVerdict(
@@ -296,6 +318,8 @@ router.post("/tower-verdict", async (req, res) => {
       soft_constraints: data.soft_constraints,
       artefact_title: data.artefact_title,
       artefact_summary: data.artefact_summary,
+      verification_summary: data.verification_summary,
+      constraints_extracted: data.constraints_extracted as any,
     });
 
     if (DEBUG) {

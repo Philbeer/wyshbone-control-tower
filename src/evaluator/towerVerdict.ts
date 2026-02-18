@@ -24,7 +24,8 @@ export type SuggestedChangeType =
   | "EXPAND_AREA"
   | "INCREASE_SEARCH_BUDGET"
   | "CHANGE_QUERY"
-  | "STOP_CONDITION";
+  | "STOP_CONDITION"
+  | "ADD_VERIFICATION_STEP";
 
 export type SuggestedChangeField =
   | "prefix_filter"
@@ -77,6 +78,27 @@ export interface MetaInfo {
   relaxed_constraints?: string[];
 }
 
+export type CvlConstraintStatus = "yes" | "no" | "unknown";
+
+export interface CvlConstraintResult {
+  constraint_id?: string;
+  type: string;
+  field?: string;
+  value?: string | number;
+  status: CvlConstraintStatus;
+  reason?: string;
+}
+
+export interface CvlVerificationSummary {
+  verified_exact_count: number;
+  constraint_results?: CvlConstraintResult[];
+}
+
+export interface CvlConstraintsExtracted {
+  requested_count_user?: number;
+  constraints?: Constraint[];
+}
+
 export interface TowerVerdictInput {
   original_goal?: string;
   requested_count_user?: number;
@@ -115,6 +137,9 @@ export interface TowerVerdictInput {
 
   artefact_title?: string;
   artefact_summary?: string;
+
+  verification_summary?: CvlVerificationSummary;
+  constraints_extracted?: CvlConstraintsExtracted;
 }
 
 export interface StructuredConstraint {
@@ -154,7 +179,16 @@ function resolveLeads(input: TowerVerdictInput): Lead[] {
   return [];
 }
 
+function hasCvl(input: TowerVerdictInput): boolean {
+  return input.verification_summary != null &&
+    typeof input.verification_summary.verified_exact_count === "number";
+}
+
 function resolveDeliveredCount(input: TowerVerdictInput, matchedLeadCount: number | null): number {
+  if (hasCvl(input)) {
+    return input.verification_summary!.verified_exact_count;
+  }
+
   const delivered = input.delivered;
   if (typeof delivered === "object" && delivered != null) {
     if (delivered.delivered_matching_accumulated != null)
@@ -174,11 +208,43 @@ function resolveDeliveredCount(input: TowerVerdictInput, matchedLeadCount: numbe
   return 0;
 }
 
-function evaluateConstraint(constraint: Constraint, leads: Lead[]): ConstraintResult {
+function findCvlStatusForConstraint(
+  constraint: Constraint,
+  cvlResults?: CvlConstraintResult[]
+): CvlConstraintResult | null {
+  if (!cvlResults || cvlResults.length === 0) return null;
+  const exact = cvlResults.find((cr) => {
+    if (cr.constraint_id && constraint.field && cr.constraint_id === constraint.field) return true;
+    if (cr.type === constraint.type && cr.field === constraint.field) {
+      if (cr.value != null && constraint.value != null) {
+        return String(cr.value).toLowerCase() === String(constraint.value).toLowerCase();
+      }
+      return true;
+    }
+    return false;
+  });
+  if (exact) return exact;
+  return cvlResults.find((cr) => cr.type === constraint.type && cr.field === constraint.field) ?? null;
+}
+
+function evaluateConstraint(
+  constraint: Constraint,
+  leads: Lead[],
+  cvlResults?: CvlConstraintResult[]
+): ConstraintResult {
   const total = leads.length;
+  const cvlMatch = findCvlStatusForConstraint(constraint, cvlResults);
 
   switch (constraint.type) {
     case "NAME_CONTAINS": {
+      if (cvlMatch) {
+        return {
+          constraint,
+          matched_count: cvlMatch.status === "yes" ? total : 0,
+          total_leads: total,
+          passed: cvlMatch.status === "yes",
+        };
+      }
       const word = String(constraint.value).toLowerCase();
       const regex = new RegExp(`\\b${escapeRegex(word)}\\b`, "i");
       const matched = leads.filter((l) => regex.test(l.name));
@@ -191,6 +257,14 @@ function evaluateConstraint(constraint: Constraint, leads: Lead[]): ConstraintRe
     }
 
     case "NAME_STARTS_WITH": {
+      if (cvlMatch) {
+        return {
+          constraint,
+          matched_count: cvlMatch.status === "yes" ? total : 0,
+          total_leads: total,
+          passed: cvlMatch.status === "yes",
+        };
+      }
       const prefix = String(constraint.value).toLowerCase();
       const matched = leads.filter((l) =>
         l.name.toLowerCase().startsWith(prefix)
@@ -204,12 +278,22 @@ function evaluateConstraint(constraint: Constraint, leads: Lead[]): ConstraintRe
     }
 
     case "LOCATION": {
+      if (cvlMatch) {
+        const passed = cvlMatch.status === "yes";
+        return {
+          constraint,
+          matched_count: passed ? total : 0,
+          total_leads: total,
+          passed,
+        };
+      }
       return {
         constraint,
         matched_count: total,
         total_leads: total,
         passed: true,
-      };
+        _locationUnverified: true,
+      } as ConstraintResult & { _locationUnverified?: boolean };
     }
 
     case "COUNT_MIN": {
@@ -530,6 +614,9 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
     return result;
   }
 
+  const cvlPresent = hasCvl(input);
+  const cvlConstraintResults = input.verification_summary?.constraint_results;
+
   const matchedLeadCount =
     leads.length > 0 ? getMatchedLeadCount(constraints, leads) : null;
   const deliveredCount = resolveDeliveredCount(input, matchedLeadCount);
@@ -544,24 +631,128 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
         passed: deliveredCount >= minCount,
       } as ConstraintResult;
     }
-    return evaluateConstraint(c, leads);
+    return evaluateConstraint(c, leads, cvlConstraintResults);
   });
 
+  const hardUnknowns = cvlPresent
+    ? constraints
+        .filter((c) => c.hardness === "hard")
+        .filter((c) => {
+          const cvlMatch = findCvlStatusForConstraint(c, cvlConstraintResults);
+          return cvlMatch != null && cvlMatch.status === "unknown";
+        })
+    : [];
+
+  const hardUnknownKeys = new Set(hardUnknowns.map((c) => `${c.type}:${c.field}:${c.value}`));
+
   const hardViolations = constraintResults.filter(
-    (r) => !r.passed && r.constraint.hardness === "hard"
+    (r) =>
+      !r.passed &&
+      r.constraint.hardness === "hard" &&
+      !hardUnknownKeys.has(`${r.constraint.type}:${r.constraint.field}:${r.constraint.value}`)
   );
+
+  const locationUnverifiedGaps: string[] = [];
+  if (!cvlPresent) {
+    const locationConstraints = constraints.filter((c) => c.type === "LOCATION");
+    if (locationConstraints.length > 0) {
+      locationUnverifiedGaps.push("location_not_verifiable");
+    }
+  }
 
   const labelGaps = checkLabelHonesty(input);
 
   if (deliveredCount >= requestedCount && requestedCount > 0) {
     if (hardViolations.length > 0) {
-      // hard violations but delivered >= requested should not happen if constraints are enforced
-      // but we still need to handle it
+    } else if (hardUnknowns.length > 0) {
+      const unknownIds = hardUnknowns.map(
+        (c) => `${c.type}(${c.field}=${c.value})`
+      );
+      const gaps = [
+        ...unknownIds.map((id) => `hard_constraint_unknown(${id})`),
+        ...locationUnverifiedGaps,
+        ...labelGaps,
+      ];
+
+      const suggestions: SuggestedChange[] = hardUnknowns.map((c) => {
+        const cvlMatch = findCvlStatusForConstraint(c, cvlConstraintResults);
+        const isUnverifiable = cvlMatch?.reason?.toLowerCase().includes("unverifiable");
+        if (isUnverifiable) {
+          return {
+            type: "ADD_VERIFICATION_STEP" as SuggestedChangeType,
+            field: c.field,
+            from: null,
+            to: null,
+            reason: `Hard constraint ${c.type}(${c.field}) is unverifiable: ${cvlMatch?.reason ?? "unknown reason"}`,
+          };
+        }
+        return {
+          type: "ADD_VERIFICATION_STEP" as SuggestedChangeType,
+          field: c.field,
+          from: null,
+          to: null,
+          reason: `Hard constraint ${c.type}(${c.field}) status is unknown — verification needed.`,
+        };
+      });
+
+      const anyUnverifiable = hardUnknowns.some((c) => {
+        const cvlMatch = findCvlStatusForConstraint(c, cvlConstraintResults);
+        return cvlMatch?.reason?.toLowerCase().includes("unverifiable");
+      });
+
+      if (anyUnverifiable && !canReplan(input)) {
+        const result: TowerVerdict = {
+          verdict: "STOP",
+          action: "stop",
+          delivered: deliveredCount,
+          requested: requestedCount,
+          gaps: [...gaps, "hard_constraint_unverifiable"],
+          confidence: 70,
+          rationale: `Count met (${deliveredCount}/${requestedCount}) but hard constraints unverifiable with current tools: ${unknownIds.join(", ")}.`,
+          suggested_changes: suggestions,
+          constraint_results: constraintResults,
+        };
+        console.log(`[TOWER] verdict=STOP reason=hard_constraint_unverifiable`);
+        return result;
+      }
+
+      if (canReplan(input)) {
+        const result: TowerVerdict = {
+          verdict: "CHANGE_PLAN",
+          action: "change_plan",
+          delivered: deliveredCount,
+          requested: requestedCount,
+          gaps,
+          confidence: 60,
+          rationale: `Count met (${deliveredCount}/${requestedCount}) but hard constraints have unknown status: ${unknownIds.join(", ")}. Verification needed before accepting.`,
+          suggested_changes: suggestions,
+          constraint_results: constraintResults,
+        };
+        console.log(`[TOWER] verdict=CHANGE_PLAN reason=hard_constraint_unknown_needs_verification`);
+        return result;
+      }
+
+      const result: TowerVerdict = {
+        verdict: "STOP",
+        action: "stop",
+        delivered: deliveredCount,
+        requested: requestedCount,
+        gaps: [...gaps, "no_further_progress_possible"],
+        confidence: 70,
+        rationale: `Count met (${deliveredCount}/${requestedCount}) but hard constraints have unknown status and no replans remain: ${unknownIds.join(", ")}.`,
+        suggested_changes: [],
+        constraint_results: constraintResults,
+      };
+      console.log(`[TOWER] verdict=STOP reason=hard_unknown_no_replans`);
+      return result;
     } else {
       const ratio = deliveredCount / requestedCount;
       const confidence = Math.min(95, Math.round(80 + (ratio - 1) * 15));
 
-      const gaps = [...labelGaps];
+      const gaps = [...locationUnverifiedGaps, ...labelGaps];
+      const rationale = cvlPresent
+        ? "The requested number of verified matches was delivered. All hard constraints satisfied."
+        : "The requested number of exact matches was delivered.";
       const result: TowerVerdict = {
         verdict: "ACCEPT",
         action: "continue",
@@ -569,12 +760,12 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
         requested: requestedCount,
         gaps,
         confidence: Math.max(80, confidence),
-        rationale: "The requested number of exact matches was delivered.",
+        rationale,
         suggested_changes: [],
         constraint_results: constraintResults,
       };
       console.log(
-        `[TOWER] verdict=ACCEPT delivered=${deliveredCount} requested=${requestedCount}`
+        `[TOWER] verdict=ACCEPT delivered=${deliveredCount} requested=${requestedCount} cvl=${cvlPresent}`
       );
       return result;
     }
@@ -688,7 +879,7 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
   }
 
   if (deliveredCount < requestedCount && requestedCount > 0) {
-    const gaps: string[] = ["insufficient_count", ...labelGaps];
+    const gaps: string[] = ["insufficient_count", ...locationUnverifiedGaps, ...labelGaps];
 
     let suggestions = buildSuggestions(input, constraints, constraintResults, deliveredCount, requestedCount);
 

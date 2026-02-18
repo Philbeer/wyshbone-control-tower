@@ -151,6 +151,8 @@ function judgeLeadsListArtefact(
     soft_constraints: legacySoft,
     artefact_title: artefactTitle,
     artefact_summary: artefactSummary,
+    verification_summary: payloadJson?.verification_summary,
+    constraints_extracted: payloadJson?.constraints_extracted,
   });
 
   if (DEBUG) {

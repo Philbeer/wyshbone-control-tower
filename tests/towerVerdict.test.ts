@@ -485,6 +485,7 @@ test("suggested_changes only contains typed objects, never strings", () => {
         "INCREASE_SEARCH_BUDGET",
         "CHANGE_QUERY",
         "STOP_CONDITION",
+        "ADD_VERIFICATION_STEP",
       ].includes(change.type)
     ) {
       throw new Error(`Invalid suggested_change type: ${change.type}`);
@@ -1383,6 +1384,283 @@ test("Swan case: constraints field takes priority over structured_constraints", 
     original_goal: "find pubs",
   });
   expect(result.constraint_results![0].constraint.value as string).toBe("swan");
+});
+
+// ── CVL-aware judgement tests ──
+
+test("CVL: verified_exact_count overrides delivered_matching_accumulated", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 10,
+    leads: [{ name: "A" }, { name: "B" }],
+    delivered: { delivered_matching_accumulated: 50 },
+    constraints: [],
+    original_goal: "Find 10 things",
+    verification_summary: {
+      verified_exact_count: 2,
+    },
+  });
+  expect(result.delivered).toBe(2);
+  if (result.verdict === "ACCEPT") {
+    throw new Error("Must NOT accept when verified_exact_count (2) < requested (10), even though delivered_matching_accumulated is 50");
+  }
+});
+
+test("CVL: ACCEPT when verified_exact_count meets requested", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: [{ name: "A" }, { name: "B" }, { name: "C" }],
+    delivered: { delivered_matching_accumulated: 1 },
+    constraints: [],
+    original_goal: "Find 3 things",
+    verification_summary: {
+      verified_exact_count: 5,
+    },
+  });
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.delivered).toBe(5);
+});
+
+test("CVL: LOCATION no longer auto-passes when CVL says unknown", () => {
+  const constraints: Constraint[] = [
+    { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: sampleLeads,
+    constraints,
+    original_goal: "Find 3 places in Arundel",
+    verification_summary: {
+      verified_exact_count: 5,
+      constraint_results: [
+        { type: "LOCATION", field: "location", status: "unknown", reason: "unverifiable with current tools" },
+      ],
+    },
+  });
+  if (result.verdict === "ACCEPT") {
+    throw new Error("Must NOT accept when hard LOCATION constraint status is unknown");
+  }
+  const hasUnknownGap = result.gaps.some(g => g.includes("hard_constraint_unknown"));
+  if (!hasUnknownGap) {
+    throw new Error(`Expected hard_constraint_unknown gap but got: ${JSON.stringify(result.gaps)}`);
+  }
+});
+
+test("CVL: LOCATION no longer auto-passes when CVL says no", () => {
+  const constraints: Constraint[] = [
+    { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: sampleLeads,
+    constraints,
+    original_goal: "Find 3 places in Arundel",
+    verification_summary: {
+      verified_exact_count: 5,
+      constraint_results: [
+        { type: "LOCATION", field: "location", status: "no", reason: "leads are in London, not Arundel" },
+      ],
+    },
+  });
+  if (result.verdict === "ACCEPT") {
+    throw new Error("Must NOT accept when hard LOCATION constraint status is no");
+  }
+  const hasViolation = result.gaps.some(g => g.includes("hard_constraint_violated"));
+  if (!hasViolation) {
+    throw new Error(`Expected hard_constraint_violated gap but got: ${JSON.stringify(result.gaps)}`);
+  }
+});
+
+test("CVL: LOCATION passes when CVL says yes", () => {
+  const constraints: Constraint[] = [
+    { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: sampleLeads,
+    constraints,
+    original_goal: "Find 3 places in Arundel",
+    verification_summary: {
+      verified_exact_count: 5,
+      constraint_results: [
+        { type: "LOCATION", field: "location", status: "yes" },
+      ],
+    },
+  });
+  expect(result.verdict).toBe("ACCEPT");
+});
+
+test("CVL: ACCEPT requires all hard constraints = yes", () => {
+  const constraints: Constraint[] = [
+    { type: "NAME_CONTAINS", field: "name", value: "pub", hardness: "hard" },
+    { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: sampleLeads,
+    constraints,
+    original_goal: "Find 3 pubs in Arundel",
+    verification_summary: {
+      verified_exact_count: 5,
+      constraint_results: [
+        { type: "NAME_CONTAINS", field: "name", status: "yes" },
+        { type: "LOCATION", field: "location", status: "no" },
+      ],
+    },
+  });
+  if (result.verdict === "ACCEPT") {
+    throw new Error("Must NOT accept when any hard constraint has status 'no'");
+  }
+});
+
+test("CVL: ACCEPT when all hard constraints = yes and count met", () => {
+  const constraints: Constraint[] = [
+    { type: "NAME_CONTAINS", field: "name", value: "pub", hardness: "hard" },
+    { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: sampleLeads,
+    constraints,
+    original_goal: "Find 3 pubs in Arundel",
+    verification_summary: {
+      verified_exact_count: 5,
+      constraint_results: [
+        { type: "NAME_CONTAINS", field: "name", status: "yes" },
+        { type: "LOCATION", field: "location", status: "yes" },
+      ],
+    },
+  });
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.rationale).toContain("verified");
+});
+
+test("CVL: hard constraint unknown with replans available → CHANGE_PLAN", () => {
+  const constraints: Constraint[] = [
+    { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: sampleLeads,
+    constraints,
+    meta: { replans_used: 0, max_replans: 3 },
+    original_goal: "Find 3 places in Arundel",
+    verification_summary: {
+      verified_exact_count: 5,
+      constraint_results: [
+        { type: "LOCATION", field: "location", status: "unknown" },
+      ],
+    },
+  });
+  expect(result.verdict).toBe("CHANGE_PLAN");
+  const hasAddVerification = result.suggested_changes.some(s => s.type === "ADD_VERIFICATION_STEP");
+  if (!hasAddVerification) {
+    throw new Error(`Expected ADD_VERIFICATION_STEP suggestion but got: ${JSON.stringify(result.suggested_changes.map(s => s.type))}`);
+  }
+});
+
+test("CVL: hard constraint unknown + unverifiable + no replans → STOP", () => {
+  const constraints: Constraint[] = [
+    { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: sampleLeads,
+    constraints,
+    meta: { replans_used: 3, max_replans: 3 },
+    original_goal: "Find 3 places in Arundel",
+    verification_summary: {
+      verified_exact_count: 5,
+      constraint_results: [
+        { type: "LOCATION", field: "location", status: "unknown", reason: "unverifiable with current tools" },
+      ],
+    },
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.gaps).toContain("hard_constraint_unverifiable");
+});
+
+test("CVL: legacy behaviour preserved when CVL absent", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: sampleLeads,
+    constraints: [
+      { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+    ],
+    original_goal: "Find 3 places in Arundel",
+  });
+  expect(result.verdict).toBe("ACCEPT");
+});
+
+test("CVL: location_not_verifiable gap when no CVL and LOCATION constraint present", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: sampleLeads,
+    constraints: [
+      { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+    ],
+    original_goal: "Find 3 places in Arundel",
+  });
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.gaps).toContain("location_not_verifiable");
+});
+
+test("CVL: no location_not_verifiable gap when CVL present", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: sampleLeads,
+    constraints: [
+      { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+    ],
+    original_goal: "Find 3 places in Arundel",
+    verification_summary: {
+      verified_exact_count: 5,
+      constraint_results: [
+        { type: "LOCATION", field: "location", status: "yes" },
+      ],
+    },
+  });
+  expect(result.verdict).toBe("ACCEPT");
+  for (const gap of result.gaps) {
+    if (gap === "location_not_verifiable") {
+      throw new Error("Should not have location_not_verifiable when CVL is present");
+    }
+  }
+});
+
+test("CVL: ADD_VERIFICATION_STEP is a valid suggested_change type", () => {
+  const constraints: Constraint[] = [
+    { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+  ];
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: sampleLeads,
+    constraints,
+    meta: { replans_used: 0, max_replans: 3 },
+    original_goal: "Find 3 places in Arundel",
+    verification_summary: {
+      verified_exact_count: 5,
+      constraint_results: [
+        { type: "LOCATION", field: "location", status: "unknown" },
+      ],
+    },
+  });
+  for (const change of result.suggested_changes) {
+    if (typeof change !== "object") {
+      throw new Error("Suggested change must be an object");
+    }
+    if (
+      ![
+        "RELAX_CONSTRAINT",
+        "EXPAND_AREA",
+        "INCREASE_SEARCH_BUDGET",
+        "CHANGE_QUERY",
+        "STOP_CONDITION",
+        "ADD_VERIFICATION_STEP",
+      ].includes(change.type)
+    ) {
+      throw new Error(`Invalid suggested_change type: ${change.type}`);
+    }
+  }
 });
 
 runTests();

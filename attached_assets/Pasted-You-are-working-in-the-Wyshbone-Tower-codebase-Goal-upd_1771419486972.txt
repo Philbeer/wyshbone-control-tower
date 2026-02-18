@@ -1,0 +1,100 @@
+You are working in the Wyshbone Tower codebase.
+
+Goal: update Tower to judge Lead-Finder runs using CVL artefacts/evidence, not trusted upstream counts.
+
+You have a known baseline:
+
+LOCATION currently always passes (no-op) → must be fixed to use CVL results
+
+delivered_matching_accumulated is currently trusted blindly → must not be used when CVL is present
+
+Constraints (non-negotiable)
+
+Do NOT add new tools.
+
+Do NOT require full semantic goal verification in Phase 1.
+
+Keep judgement logic minimal: use CVL’s verification_summary as the source of truth.
+
+Implement
+1) Add CVL-aware input shape
+
+Extend TowerVerdictInput to accept CVL payloads (or references):
+
+constraints_extracted (requested_count_user, constraints[])
+
+verification_summary (verified_exact_count, constraint_results[])
+
+If Tower is invoked with a single composite input, accept these fields inside success_criteria or meta if that’s how it’s currently wired — but treat them as first-class once present.
+
+2) Change the count gate to prefer verified counts
+
+Current deliveredCount resolution chain must change:
+
+If verification_summary.verified_exact_count exists, use it as deliveredCount.
+
+Only fall back to old deliveredCount heuristics if CVL is not present.
+
+This specifically prevents ACCEPT based on delivered_matching_accumulated.
+
+3) Replace LOCATION no-op with CVL status
+
+For LOCATION constraints:
+
+Do not auto-pass.
+
+If CVL provides status yes/no/unknown for the location constraint, use it.
+
+If CVL absent, retain legacy behaviour but mark in rationale “location not verifiable” (do not silently pass as “true”).
+
+4) Enforce hard-constraint evidence rule (Phase 1)
+
+PASS/ACCEPT only if:
+
+verified_exact_count >= requested_count_user
+
+all hard constraints have status yes (from verification_summary)
+
+If any hard constraint is unknown:
+
+CHANGE_PLAN if replans remain AND progress plausible
+
+STOP if the unknown is due to “unverifiable with current tools” (Supervisor should pass reason; Tower should preserve it)
+
+If any hard constraint is no:
+
+CHANGE_PLAN if replans remain and there is an actionable suggestion
+
+otherwise STOP with explicit constraint_id
+
+5) Suggestions (keep narrow)
+
+Only emit these suggestions in Phase 1:
+
+EXPAND_AREA
+
+ADD_VERIFICATION_STEP
+
+RELAX_CONSTRAINT
+
+Do not invent new suggestion types.
+
+6) Tests
+
+Add/adjust tests that prove:
+
+Tower does NOT accept when delivered_matching_accumulated is high but verified_exact_count is low
+
+LOCATION no longer auto-passes when CVL says unknown/no
+
+ACCEPT requires all hard constraints = yes
+
+Non-goals (do not touch)
+
+Do not redesign leadQuality scoring
+
+Do not implement goal semantic checks
+
+Do not refactor unrelated judgement branches
+
+Deliverable: Tower judgement becomes evidence-based when CVL artefacts are present, while preserving legacy behaviour when CVL is absent.
