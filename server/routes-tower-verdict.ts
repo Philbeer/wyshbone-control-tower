@@ -178,6 +178,7 @@ const towerVerdictRequestSchema = z.object({
 
   verification_summary: verificationSummarySchema.optional(),
   constraints_extracted: constraintsExtractedSchema.optional(),
+  delivery_summary: z.string().optional(),
 });
 
 async function persistTowerVerdict(row: {
@@ -398,6 +399,7 @@ router.post("/tower-verdict", async (req, res) => {
       artefact_summary: data.artefact_summary,
       verification_summary: data.verification_summary,
       constraints_extracted: data.constraints_extracted as any,
+      delivery_summary: data.delivery_summary,
     });
 
     if (DEBUG) {

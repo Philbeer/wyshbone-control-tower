@@ -1,3 +1,5 @@
+import { judgeEvidenceQuality } from "./evidenceQualityJudge";
+
 export type TowerVerdictAction = "ACCEPT" | "CHANGE_PLAN" | "STOP";
 
 export type ConstraintType =
@@ -147,6 +149,8 @@ export interface TowerVerdictInput {
 
   verification_summary?: CvlVerificationSummary;
   constraints_extracted?: CvlConstraintsExtracted;
+
+  delivery_summary?: "PASS" | "PARTIAL" | "STOP" | string;
 }
 
 export interface StructuredConstraint {
@@ -575,6 +579,58 @@ function resolveConstraints(input: TowerVerdictInput): Constraint[] {
 }
 
 export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
+  const coreResult = judgeLeadsListCore(input);
+
+  const leads = resolveLeads(input);
+  const evidenceLeads = leads.map((l) => ({
+    name: l.name,
+    verified: l.verified as boolean | undefined,
+    evidence: l.evidence as string | string[] | Record<string, unknown> | null | undefined,
+    source_url: l.source_url as string | null | undefined,
+  }));
+
+  const hasAnyEvidenceField = evidenceLeads.some(
+    (l) => l.verified !== undefined || l.evidence !== undefined || l.source_url !== undefined
+  );
+
+  if (hasAnyEvidenceField || input.delivery_summary) {
+    const eqResult = judgeEvidenceQuality({
+      leads: evidenceLeads,
+      verified_exact_count: input.verification_summary?.verified_exact_count,
+      requested_count: coreResult.requested,
+      delivery_summary: input.delivery_summary,
+      tower_verdict: coreResult.verdict,
+    });
+
+    if (!eqResult.pass && coreResult.verdict !== "STOP") {
+      console.log(`[TOWER] evidence_quality_override verdict=${coreResult.verdict}→STOP gaps=${eqResult.gaps.join(",")}`);
+      return {
+        ...coreResult,
+        verdict: "STOP",
+        action: "stop",
+        gaps: [...coreResult.gaps, ...eqResult.gaps],
+        stop_reason: eqResult.stop_reason,
+        rationale: `${coreResult.rationale} [Evidence quality: ${eqResult.detail}]`,
+      };
+    }
+
+    if (!eqResult.pass && coreResult.verdict === "STOP") {
+      const extraGaps = eqResult.gaps.filter((g: string) => !coreResult.gaps.includes(g));
+      if (extraGaps.length > 0) {
+        return {
+          ...coreResult,
+          gaps: [...coreResult.gaps, ...extraGaps],
+          stop_reason: eqResult.stop_reason ?? coreResult.stop_reason,
+          rationale: `${coreResult.rationale} [Evidence quality: ${eqResult.detail}]`,
+        };
+      }
+    }
+  }
+
+  return coreResult;
+}
+
+function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
   const requestedCount = resolveRequestedCount(input);
   const leads = resolveLeads(input);
   const constraints = resolveConstraints(input);
