@@ -611,40 +611,40 @@ router.post("/judge-artefact", async (req, res) => {
         confidence: typeof metrics?.confidence === "number" ? metrics.confidence : 0,
         evidence_items: Array.isArray(metrics?.evidence_items) ? metrics.evidence_items as AskLeadQuestionInput["evidence_items"] : [],
         step_status: stepStatus,
+        attribute_type: metrics?.attribute_type as "hard" | "soft" | undefined,
+        capability_says_unverifiable: metrics?.capability_says_unverifiable === true,
+        evidence_sufficient: metrics?.evidence_sufficient !== false,
       };
 
       const askResult = judgeAskLeadQuestion(askInput);
-      const { verdict: askVerdict, action: askAction } = (() => {
-        if (askResult.verdict === "ACCEPT") return { verdict: "pass" as const, action: askResult.action };
-        return { verdict: "fail" as const, action: askResult.action };
-      })();
+      const askVerdict = askResult.towerVerdict === "ACCEPT" ? "pass" as const : "fail" as const;
 
       const askResponse: JudgeArtefactResponse = {
         verdict: askVerdict,
-        action: askAction,
-        towerVerdict: askResult.verdict,
+        action: askResult.action,
+        towerVerdict: askResult.towerVerdict,
         stop_reason: askResult.stop_reason ?? null,
         reasons: [askResult.reason, ...askResult.gaps.map((g) => `gap: ${g}`)],
         metrics: {
+          ...askResult.metrics,
           artefactId,
           runId,
           artefactType,
           goal,
-          confidence: askResult.confidence,
-          towerVerdict: askResult.verdict,
+          towerVerdict: askResult.towerVerdict,
           judgedAt: new Date().toISOString(),
         },
-        suggested_changes: [],
+        suggested_changes: askResult.suggested_changes,
       };
 
       await persistTowerVerdict({
         run_id: runId,
         artefact_id: artefactId,
         artefact_type: artefactType,
-        verdict: askResult.verdict,
+        verdict: askResult.towerVerdict,
         stop_reason: askResult.stop_reason,
         gaps: askResult.gaps,
-        suggested_changes: [],
+        suggested_changes: askResult.suggested_changes,
         confidence: askResult.confidence,
         rationale: askResult.reason,
       });

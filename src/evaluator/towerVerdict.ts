@@ -56,6 +56,7 @@ export interface ConstraintResult {
 export interface StopReason {
   code: string;
   message: string;
+  detail?: string;
   evidence?: Record<string, unknown>;
 }
 
@@ -1102,29 +1103,55 @@ export interface AskLeadQuestionInput {
     source: string;
     url?: string;
     is_official?: boolean;
+    domain?: string;
     [key: string]: unknown;
   }>;
   step_status?: string;
+  attribute_type?: "hard" | "soft";
+  capability_says_unverifiable?: boolean;
+  evidence_sufficient?: boolean;
   [key: string]: unknown;
 }
 
 export interface AskLeadQuestionVerdict {
-  verdict: "ACCEPT" | "CHANGE_PLAN" | "STOP";
+  towerVerdict: "ACCEPT" | "CHANGE_PLAN" | "STOP";
   action: "continue" | "stop" | "retry" | "change_plan";
   reason: string;
   confidence: number;
   gaps: string[];
   stop_reason?: StopReason;
+  suggested_changes: SuggestedChange[];
+  metrics: Record<string, unknown>;
+}
+
+function isVerified(evidenceItems: AskLeadQuestionInput["evidence_items"]): boolean {
+  if (!evidenceItems || evidenceItems.length === 0) return false;
+  const hasOfficialSite = evidenceItems.some((e) => e.is_official === true);
+  if (hasOfficialSite) return true;
+  const independentDomains = new Set(
+    evidenceItems.map((e) => e.domain ?? e.source).filter(Boolean)
+  );
+  return independentDomains.size >= 2;
 }
 
 export function judgeAskLeadQuestion(input: AskLeadQuestionInput): AskLeadQuestionVerdict {
   const confidence = input.confidence;
   const evidenceItems = Array.isArray(input.evidence_items) ? input.evidence_items : [];
+  const attributeType = input.attribute_type;
+  const capabilityUnverifiable = input.capability_says_unverifiable === true;
+  const evidenceSufficient = input.evidence_sufficient !== false;
+
+  const baseMetrics: Record<string, unknown> = {
+    confidence,
+    evidence_count: evidenceItems.length,
+    attribute_type: attributeType ?? null,
+    capability_says_unverifiable: capabilityUnverifiable,
+  };
 
   if (confidence === 1.0) {
     console.log(`[TOWER] ASK_LEAD_QUESTION verdict=STOP reason=invalid_confidence confidence=${confidence}`);
     return {
-      verdict: "STOP",
+      towerVerdict: "STOP",
       action: "stop",
       reason: "invalid_confidence",
       confidence,
@@ -1132,44 +1159,118 @@ export function judgeAskLeadQuestion(input: AskLeadQuestionInput): AskLeadQuesti
       stop_reason: {
         code: "INVALID_CONFIDENCE",
         message: "Confidence of 1.0 is not permitted. No real-world answer can be perfectly certain.",
+        detail: "Cap confidence below 1.0 and provide supporting evidence.",
         evidence: { confidence },
+      },
+      suggested_changes: [],
+      metrics: baseMetrics,
+    };
+  }
+
+  if (attributeType === "hard" && (capabilityUnverifiable || !evidenceSufficient)) {
+    console.log(`[TOWER] ASK_LEAD_QUESTION verdict=STOP reason=UNVERIFIABLE_HARD_CONSTRAINT attribute_type=hard`);
+    return {
+      towerVerdict: "STOP",
+      action: "stop",
+      reason: "unverifiable_hard_constraint",
+      confidence,
+      gaps: ["UNVERIFIABLE_HARD_CONSTRAINT"],
+      stop_reason: {
+        code: "UNVERIFIABLE_HARD_CONSTRAINT",
+        message: "Hard attribute is unverifiable — capability says unverifiable or evidence insufficient.",
+        detail: capabilityUnverifiable
+          ? "The capability reported this attribute as unverifiable with current tools."
+          : "Evidence is insufficient to verify this hard attribute.",
+        evidence: { confidence, attribute_type: attributeType, capability_says_unverifiable: capabilityUnverifiable, evidence_sufficient: evidenceSufficient },
+      },
+      suggested_changes: [],
+      metrics: { ...baseMetrics, verified: false },
+    };
+  }
+
+  if (attributeType === "soft" && (capabilityUnverifiable || !evidenceSufficient)) {
+    const reasonFlags: string[] = [];
+    if (capabilityUnverifiable) reasonFlags.push("CAPABILITY_UNVERIFIABLE");
+    if (!evidenceSufficient) reasonFlags.push("EVIDENCE_INSUFFICIENT");
+
+    console.log(`[TOWER] ASK_LEAD_QUESTION verdict=ACCEPT reason=soft_unverifiable_accepted attribute_type=soft flags=${reasonFlags.join(",")}`);
+    return {
+      towerVerdict: "ACCEPT",
+      action: "continue",
+      reason: "soft_unverifiable_accepted",
+      confidence,
+      gaps: reasonFlags,
+      suggested_changes: [],
+      metrics: {
+        ...baseMetrics,
+        verified: false,
+        reason_flags: reasonFlags,
+        disclosure: "Soft attribute could not be fully verified; unknowns disclosed for delivery_summary.",
       },
     };
   }
 
   if (confidence > 0.85) {
-    const independentSources = new Set(evidenceItems.map((e) => e.source));
-    const independentCount = independentSources.size;
+    const independentDomains = new Set(
+      evidenceItems.map((e) => e.domain ?? e.source).filter(Boolean)
+    );
+    const independentCount = independentDomains.size;
     const hasOfficialSite = evidenceItems.some((e) => e.is_official === true);
+    const verified = isVerified(evidenceItems);
 
-    if (independentCount < 2 || !hasOfficialSite) {
+    if (!verified) {
       const missingParts: string[] = [];
-      if (independentCount < 2) missingParts.push(`only ${independentCount} independent source(s)`);
+      if (independentCount < 2) missingParts.push(`only ${independentCount} independent domain(s)`);
       if (!hasOfficialSite) missingParts.push("no official site evidence");
+
+      const suggestedChanges: SuggestedChange[] = [];
+      if (!hasOfficialSite) {
+        suggestedChanges.push({
+          type: "ADD_VERIFICATION_STEP",
+          field: "evidence",
+          from: null,
+          to: null,
+          reason: "Visit the official site for the entity to obtain first-party evidence.",
+        });
+      }
+      if (independentCount < 2) {
+        suggestedChanges.push({
+          type: "ADD_VERIFICATION_STEP",
+          field: "evidence",
+          from: independentCount,
+          to: 2,
+          reason: "Add a second independent source (different domain) to corroborate the answer.",
+        });
+      }
 
       console.log(`[TOWER] ASK_LEAD_QUESTION verdict=CHANGE_PLAN reason=overconfident_without_support confidence=${confidence} independent=${independentCount} official=${hasOfficialSite}`);
       return {
-        verdict: "CHANGE_PLAN",
+        towerVerdict: "CHANGE_PLAN",
         action: "retry",
         reason: "overconfident_without_support",
         confidence,
         gaps: ["OVERCONFIDENT_WITHOUT_SUPPORT"],
         stop_reason: {
           code: "OVERCONFIDENT_WITHOUT_SUPPORT",
-          message: `Confidence ${confidence} exceeds 0.85 but evidence is insufficient: ${missingParts.join("; ")}. Need 2+ independent sources with at least one official site.`,
-          evidence: { confidence, independent_count: independentCount, has_official_site: hasOfficialSite },
+          message: `Confidence ${confidence} exceeds 0.85 but evidence is insufficient: ${missingParts.join("; ")}. Verified means official site evidence OR 2+ independent domains corroborate.`,
+          detail: `Supervisor should: ${suggestedChanges.map(s => s.reason).join("; ")}`,
+          evidence: { confidence, independent_count: independentCount, has_official_site: hasOfficialSite, verified },
         },
+        suggested_changes: suggestedChanges,
+        metrics: { ...baseMetrics, independent_count: independentCount, has_official_site: hasOfficialSite, verified },
       };
     }
   }
 
   console.log(`[TOWER] ASK_LEAD_QUESTION verdict=ACCEPT confidence=${confidence} evidence_count=${evidenceItems.length}`);
   return {
-    verdict: "ACCEPT",
+    towerVerdict: "ACCEPT",
     action: "continue",
     reason: "evidence_sufficient",
     confidence,
     gaps: [],
+    suggested_changes: [],
+    metrics: { ...baseMetrics, verified: isVerified(evidenceItems) },
   };
 }
 

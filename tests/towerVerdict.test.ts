@@ -1665,9 +1665,9 @@ test("CVL: ADD_VERIFICATION_STEP is a valid suggested_change type", () => {
   }
 });
 
-// ── ASK_LEAD_QUESTION overconfidence flagging (2 example judgements) ──
+// ── ASK_LEAD_QUESTION overconfidence flagging ──
 
-test("Example judgement 1: confidence=1.0 with full evidence → STOP invalid_confidence", () => {
+test("ASK_LEAD_QUESTION: confidence=1.0 with full evidence → STOP invalid_confidence", () => {
   const result = judgeAskLeadQuestion({
     confidence: 1.0,
     evidence_items: [
@@ -1676,27 +1676,163 @@ test("Example judgement 1: confidence=1.0 with full evidence → STOP invalid_co
       { source: "yelp", url: "https://yelp.com/biz/abc", is_official: false },
     ],
   });
-  expect(result.verdict).toBe("STOP");
+  expect(result.towerVerdict).toBe("STOP");
   expect(result.action).toBe("stop");
   expect(result.reason).toBe("invalid_confidence");
   expect(result.gaps).toContain("INVALID_CONFIDENCE");
   if (!result.stop_reason) throw new Error("Expected stop_reason");
   expect(result.stop_reason.code).toBe("INVALID_CONFIDENCE");
+  if (!result.stop_reason.detail) throw new Error("Expected stop_reason.detail");
+  if (!Array.isArray(result.suggested_changes)) throw new Error("Expected suggested_changes array");
+  if (typeof result.metrics !== "object") throw new Error("Expected metrics object");
 });
 
-test("Example judgement 2: confidence=0.92 with 1 non-official source → CHANGE_PLAN/retry overconfident_without_support", () => {
+test("ASK_LEAD_QUESTION: confidence=0.92 with 1 non-official source → CHANGE_PLAN/retry with suggested_changes", () => {
   const result = judgeAskLeadQuestion({
     confidence: 0.92,
     evidence_items: [
       { source: "google_maps", url: "https://maps.google.com/place/456", is_official: false },
     ],
   });
-  expect(result.verdict).toBe("CHANGE_PLAN");
+  expect(result.towerVerdict).toBe("CHANGE_PLAN");
   expect(result.action).toBe("retry");
   expect(result.reason).toBe("overconfident_without_support");
   expect(result.gaps).toContain("OVERCONFIDENT_WITHOUT_SUPPORT");
   if (!result.stop_reason) throw new Error("Expected stop_reason");
   expect(result.stop_reason.code).toBe("OVERCONFIDENT_WITHOUT_SUPPORT");
+  if (!result.stop_reason.detail) throw new Error("Expected stop_reason.detail for retry");
+  if (result.suggested_changes.length === 0) throw new Error("Expected suggested_changes to tell Supervisor what to do");
+  const types = result.suggested_changes.map(s => s.type);
+  if (!types.includes("ADD_VERIFICATION_STEP")) throw new Error("Expected ADD_VERIFICATION_STEP in suggested_changes");
+});
+
+test("ASK_LEAD_QUESTION: confidence=0.92 with official site → ACCEPT (verified via official)", () => {
+  const result = judgeAskLeadQuestion({
+    confidence: 0.92,
+    evidence_items: [
+      { source: "company_website", url: "https://example.com", is_official: true },
+    ],
+  });
+  expect(result.towerVerdict).toBe("ACCEPT");
+  expect(result.action).toBe("continue");
+  if (result.metrics.verified !== true) throw new Error("Expected verified=true when official site present");
+});
+
+test("ASK_LEAD_QUESTION: confidence=0.92 with 2 independent domains → ACCEPT (verified via 2+ domains)", () => {
+  const result = judgeAskLeadQuestion({
+    confidence: 0.92,
+    evidence_items: [
+      { source: "google_maps", domain: "google.com", is_official: false },
+      { source: "yelp", domain: "yelp.com", is_official: false },
+    ],
+  });
+  expect(result.towerVerdict).toBe("ACCEPT");
+  expect(result.action).toBe("continue");
+  if (result.metrics.verified !== true) throw new Error("Expected verified=true with 2+ independent domains");
+});
+
+test("ASK_LEAD_QUESTION: confidence=0.5 with no evidence → ACCEPT (low confidence OK)", () => {
+  const result = judgeAskLeadQuestion({
+    confidence: 0.5,
+    evidence_items: [],
+  });
+  expect(result.towerVerdict).toBe("ACCEPT");
+  expect(result.action).toBe("continue");
+});
+
+// ── ASK_LEAD_QUESTION Template B attribute verification ──
+
+test("ASK_LEAD_QUESTION Template B: HARD attribute unverifiable (capability_says_unverifiable) → STOP", () => {
+  const result = judgeAskLeadQuestion({
+    confidence: 0.6,
+    attribute_type: "hard",
+    capability_says_unverifiable: true,
+    evidence_items: [],
+  });
+  expect(result.towerVerdict).toBe("STOP");
+  expect(result.action).toBe("stop");
+  expect(result.gaps).toContain("UNVERIFIABLE_HARD_CONSTRAINT");
+  if (!result.stop_reason) throw new Error("Expected stop_reason");
+  expect(result.stop_reason.code).toBe("UNVERIFIABLE_HARD_CONSTRAINT");
+  if (!result.stop_reason.detail) throw new Error("Expected stop_reason.detail");
+});
+
+test("ASK_LEAD_QUESTION Template B: HARD attribute evidence_insufficient → STOP", () => {
+  const result = judgeAskLeadQuestion({
+    confidence: 0.6,
+    attribute_type: "hard",
+    evidence_sufficient: false,
+    evidence_items: [],
+  });
+  expect(result.towerVerdict).toBe("STOP");
+  expect(result.action).toBe("stop");
+  expect(result.gaps).toContain("UNVERIFIABLE_HARD_CONSTRAINT");
+  expect(result.stop_reason!.code).toBe("UNVERIFIABLE_HARD_CONSTRAINT");
+});
+
+test("ASK_LEAD_QUESTION Template B: SOFT attribute unverifiable → ACCEPT with reason flags", () => {
+  const result = judgeAskLeadQuestion({
+    confidence: 0.6,
+    attribute_type: "soft",
+    capability_says_unverifiable: true,
+    evidence_items: [],
+  });
+  expect(result.towerVerdict).toBe("ACCEPT");
+  expect(result.action).toBe("continue");
+  expect(result.gaps).toContain("CAPABILITY_UNVERIFIABLE");
+  if (result.metrics.verified !== false) throw new Error("Expected verified=false for soft unverifiable");
+  if (!result.metrics.disclosure) throw new Error("Expected disclosure in metrics for soft unverifiable");
+  if (!Array.isArray(result.metrics.reason_flags)) throw new Error("Expected reason_flags array in metrics");
+});
+
+test("ASK_LEAD_QUESTION Template B: SOFT attribute evidence_insufficient → ACCEPT with flags", () => {
+  const result = judgeAskLeadQuestion({
+    confidence: 0.6,
+    attribute_type: "soft",
+    evidence_sufficient: false,
+    evidence_items: [],
+  });
+  expect(result.towerVerdict).toBe("ACCEPT");
+  expect(result.action).toBe("continue");
+  expect(result.gaps).toContain("EVIDENCE_INSUFFICIENT");
+  if (result.metrics.verified !== false) throw new Error("Expected verified=false for soft unverifiable");
+});
+
+// ── Standardized response shape for ASK_LEAD_QUESTION ──
+
+test("ASK_LEAD_QUESTION: response always includes towerVerdict, action, stop_reason (on STOP), suggested_changes, metrics", () => {
+  const cases: AskLeadQuestionInput[] = [
+    { confidence: 0.5 },
+    { confidence: 1.0 },
+    { confidence: 0.92, evidence_items: [{ source: "x", is_official: false }] },
+    { confidence: 0.6, attribute_type: "hard", capability_says_unverifiable: true },
+    { confidence: 0.6, attribute_type: "soft", capability_says_unverifiable: true },
+  ];
+  for (const c of cases) {
+    const result = judgeAskLeadQuestion(c);
+    if (!["ACCEPT", "CHANGE_PLAN", "STOP"].includes(result.towerVerdict)) {
+      throw new Error(`Invalid towerVerdict: ${result.towerVerdict}`);
+    }
+    if (!["continue", "stop", "retry", "change_plan"].includes(result.action)) {
+      throw new Error(`Invalid action: ${result.action}`);
+    }
+    if (!Array.isArray(result.suggested_changes)) {
+      throw new Error("suggested_changes must be array");
+    }
+    if (typeof result.metrics !== "object" || result.metrics === null) {
+      throw new Error("metrics must be object");
+    }
+    if (result.towerVerdict === "STOP") {
+      if (!result.stop_reason) throw new Error("STOP must have stop_reason");
+      if (!result.stop_reason.code) throw new Error("stop_reason must have code");
+      if (!result.stop_reason.message) throw new Error("stop_reason must have message");
+    }
+    if ((result.towerVerdict === "CHANGE_PLAN" || result.action === "retry") && result.towerVerdict !== "STOP") {
+      if (!Array.isArray(result.suggested_changes)) {
+        throw new Error("CHANGE_PLAN/retry must include suggested_changes array");
+      }
+    }
+  }
 });
 
 runTests();
