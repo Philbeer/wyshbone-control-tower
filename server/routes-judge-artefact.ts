@@ -2,8 +2,8 @@ import express from "express";
 import { db } from "../src/lib/db";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import { judgeLeadsList, normalizeConstraintHardness, normalizeStructuredConstraints } from "../src/evaluator/towerVerdict";
-import type { Lead, Constraint, DeliveredInfo, MetaInfo, StructuredConstraint, StopReason } from "../src/evaluator/towerVerdict";
+import { judgeLeadsList, normalizeConstraintHardness, normalizeStructuredConstraints, judgeAskLeadQuestion } from "../src/evaluator/towerVerdict";
+import type { Lead, Constraint, DeliveredInfo, MetaInfo, StructuredConstraint, StopReason, AskLeadQuestionInput } from "../src/evaluator/towerVerdict";
 import { judgePlasticsInjection } from "../src/evaluator/plasticsInjectionRubric";
 import type { PlasticsRubricInput } from "../src/evaluator/plasticsInjectionRubric";
 import { towerVerdicts } from "../shared/schema";
@@ -606,6 +606,51 @@ router.post("/judge-artefact", async (req, res) => {
       canonicalVerdict = "STOP";
       reasons.push(`SEARCH_PLACES returned 0 places_found`);
       stopReason = { code: "ZERO_RESULTS", message: "SEARCH_PLACES returned 0 places_found", evidence: { step_type: stepType } };
+    } else if (stepType === "ASK_LEAD_QUESTION") {
+      const askInput: AskLeadQuestionInput = {
+        confidence: typeof metrics?.confidence === "number" ? metrics.confidence : 0,
+        evidence_items: Array.isArray(metrics?.evidence_items) ? metrics.evidence_items as AskLeadQuestionInput["evidence_items"] : [],
+        step_status: stepStatus,
+      };
+
+      const askResult = judgeAskLeadQuestion(askInput);
+      const { verdict: askVerdict, action: askAction } = (() => {
+        if (askResult.verdict === "ACCEPT") return { verdict: "pass" as const, action: askResult.action };
+        return { verdict: "fail" as const, action: askResult.action };
+      })();
+
+      const askResponse: JudgeArtefactResponse = {
+        verdict: askVerdict,
+        action: askAction,
+        towerVerdict: askResult.verdict,
+        stop_reason: askResult.stop_reason ?? null,
+        reasons: [askResult.reason, ...askResult.gaps.map((g) => `gap: ${g}`)],
+        metrics: {
+          artefactId,
+          runId,
+          artefactType,
+          goal,
+          confidence: askResult.confidence,
+          towerVerdict: askResult.verdict,
+          judgedAt: new Date().toISOString(),
+        },
+        suggested_changes: [],
+      };
+
+      await persistTowerVerdict({
+        run_id: runId,
+        artefact_id: artefactId,
+        artefact_type: artefactType,
+        verdict: askResult.verdict,
+        stop_reason: askResult.stop_reason,
+        gaps: askResult.gaps,
+        suggested_changes: [],
+        confidence: askResult.confidence,
+        rationale: askResult.reason,
+      });
+
+      res.json(askResponse);
+      return;
     } else if (
       stepType === "ENRICH_LEADS" &&
       metrics?.leads_enriched === 0

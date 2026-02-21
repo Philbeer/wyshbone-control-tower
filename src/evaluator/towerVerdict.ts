@@ -1096,6 +1096,83 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
   return result;
 }
 
+export interface AskLeadQuestionInput {
+  confidence: number;
+  evidence_items?: Array<{
+    source: string;
+    url?: string;
+    is_official?: boolean;
+    [key: string]: unknown;
+  }>;
+  step_status?: string;
+  [key: string]: unknown;
+}
+
+export interface AskLeadQuestionVerdict {
+  verdict: "ACCEPT" | "CHANGE_PLAN" | "STOP";
+  action: "continue" | "stop" | "retry" | "change_plan";
+  reason: string;
+  confidence: number;
+  gaps: string[];
+  stop_reason?: StopReason;
+}
+
+export function judgeAskLeadQuestion(input: AskLeadQuestionInput): AskLeadQuestionVerdict {
+  const confidence = input.confidence;
+  const evidenceItems = Array.isArray(input.evidence_items) ? input.evidence_items : [];
+
+  if (confidence === 1.0) {
+    console.log(`[TOWER] ASK_LEAD_QUESTION verdict=STOP reason=invalid_confidence confidence=${confidence}`);
+    return {
+      verdict: "STOP",
+      action: "stop",
+      reason: "invalid_confidence",
+      confidence,
+      gaps: ["INVALID_CONFIDENCE"],
+      stop_reason: {
+        code: "INVALID_CONFIDENCE",
+        message: "Confidence of 1.0 is not permitted. No real-world answer can be perfectly certain.",
+        evidence: { confidence },
+      },
+    };
+  }
+
+  if (confidence > 0.85) {
+    const independentSources = new Set(evidenceItems.map((e) => e.source));
+    const independentCount = independentSources.size;
+    const hasOfficialSite = evidenceItems.some((e) => e.is_official === true);
+
+    if (independentCount < 2 || !hasOfficialSite) {
+      const missingParts: string[] = [];
+      if (independentCount < 2) missingParts.push(`only ${independentCount} independent source(s)`);
+      if (!hasOfficialSite) missingParts.push("no official site evidence");
+
+      console.log(`[TOWER] ASK_LEAD_QUESTION verdict=CHANGE_PLAN reason=overconfident_without_support confidence=${confidence} independent=${independentCount} official=${hasOfficialSite}`);
+      return {
+        verdict: "CHANGE_PLAN",
+        action: "retry",
+        reason: "overconfident_without_support",
+        confidence,
+        gaps: ["OVERCONFIDENT_WITHOUT_SUPPORT"],
+        stop_reason: {
+          code: "OVERCONFIDENT_WITHOUT_SUPPORT",
+          message: `Confidence ${confidence} exceeds 0.85 but evidence is insufficient: ${missingParts.join("; ")}. Need 2+ independent sources with at least one official site.`,
+          evidence: { confidence, independent_count: independentCount, has_official_site: hasOfficialSite },
+        },
+      };
+    }
+  }
+
+  console.log(`[TOWER] ASK_LEAD_QUESTION verdict=ACCEPT confidence=${confidence} evidence_count=${evidenceItems.length}`);
+  return {
+    verdict: "ACCEPT",
+    action: "continue",
+    reason: "evidence_sufficient",
+    confidence,
+    gaps: [],
+  };
+}
+
 const MAX_RADIUS_KM = 50;
 
 function isLocationExpandable(constraints: Constraint[], input: TowerVerdictInput): boolean {

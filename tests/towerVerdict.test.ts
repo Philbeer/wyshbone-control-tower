@@ -1,5 +1,6 @@
 import {
   judgeLeadsList,
+  judgeAskLeadQuestion,
   migrateLegacyConstraints,
   normalizeConstraintHardness,
   normalizeStructuredConstraint,
@@ -8,6 +9,7 @@ import {
   Lead,
   Constraint,
   StructuredConstraint,
+  AskLeadQuestionInput,
 } from "../src/evaluator/towerVerdict";
 
 let passed = 0;
@@ -1661,6 +1663,40 @@ test("CVL: ADD_VERIFICATION_STEP is a valid suggested_change type", () => {
       throw new Error(`Invalid suggested_change type: ${change.type}`);
     }
   }
+});
+
+// ── ASK_LEAD_QUESTION overconfidence flagging (2 example judgements) ──
+
+test("Example judgement 1: confidence=1.0 with full evidence → STOP invalid_confidence", () => {
+  const result = judgeAskLeadQuestion({
+    confidence: 1.0,
+    evidence_items: [
+      { source: "google_maps", url: "https://maps.google.com/place/123", is_official: false },
+      { source: "company_website", url: "https://example.com", is_official: true },
+      { source: "yelp", url: "https://yelp.com/biz/abc", is_official: false },
+    ],
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.action).toBe("stop");
+  expect(result.reason).toBe("invalid_confidence");
+  expect(result.gaps).toContain("INVALID_CONFIDENCE");
+  if (!result.stop_reason) throw new Error("Expected stop_reason");
+  expect(result.stop_reason.code).toBe("INVALID_CONFIDENCE");
+});
+
+test("Example judgement 2: confidence=0.92 with 1 non-official source → CHANGE_PLAN/retry overconfident_without_support", () => {
+  const result = judgeAskLeadQuestion({
+    confidence: 0.92,
+    evidence_items: [
+      { source: "google_maps", url: "https://maps.google.com/place/456", is_official: false },
+    ],
+  });
+  expect(result.verdict).toBe("CHANGE_PLAN");
+  expect(result.action).toBe("retry");
+  expect(result.reason).toBe("overconfident_without_support");
+  expect(result.gaps).toContain("OVERCONFIDENT_WITHOUT_SUPPORT");
+  if (!result.stop_reason) throw new Error("Expected stop_reason");
+  expect(result.stop_reason.code).toBe("OVERCONFIDENT_WITHOUT_SUPPORT");
 });
 
 runTests();
