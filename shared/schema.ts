@@ -465,3 +465,49 @@ export const judgementResponseSchema = z.object({
   evaluated_at: z.string(),
 });
 export type JudgementResponse = z.infer<typeof judgementResponseSchema>;
+
+export const policyNameEnum = z.enum(["radius_policy_v1", "enrichment_policy_v1", "stop_policy_v1"]);
+export type PolicyName = z.infer<typeof policyNameEnum>;
+
+export const policyVersions = pgTable("policy_versions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  scope_key: text("scope_key").notNull(),
+  policy_name: text("policy_name").notNull(),
+  version: integer("version").notNull(),
+  value: jsonb("value").$type<Record<string, any>>().notNull(),
+  source: text("source").notNull().default("learning_layer"),
+  evidence_pointer: text("evidence_pointer"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertPolicyVersionSchema = createInsertSchema(policyVersions).omit({
+  id: true,
+  created_at: true,
+});
+export type InsertPolicyVersion = z.infer<typeof insertPolicyVersionSchema>;
+export type PolicyVersion = typeof policyVersions.$inferSelect;
+
+export const learningArtefactTypeEnum = z.enum(["policy_update", "no_learn"]);
+export type LearningArtefactType = z.infer<typeof learningArtefactTypeEnum>;
+
+export const learningArtefacts = pgTable("learning_artefacts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  run_id: text("run_id"),
+  scope_key: text("scope_key").notNull(),
+  policy_name: text("policy_name").notNull(),
+  artefact_type: text("artefact_type").notNull(),
+  old_value: jsonb("old_value").$type<Record<string, any> | null>(),
+  new_value: jsonb("new_value").$type<Record<string, any> | null>(),
+  evidence_summary: jsonb("evidence_summary").$type<Record<string, any>>(),
+  confidence: integer("confidence"),
+  rollback_pointer: text("rollback_pointer"),
+  reason: text("reason"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertLearningArtefactSchema = createInsertSchema(learningArtefacts).omit({
+  id: true,
+  created_at: true,
+});
+export type InsertLearningArtefact = z.infer<typeof insertLearningArtefactSchema>;
+export type LearningArtefact = typeof learningArtefacts.$inferSelect;

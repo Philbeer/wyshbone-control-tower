@@ -1678,6 +1678,11 @@ async function start() {
     app.use('/debug', runTraceRoutesModule.default);
     console.log('✓ Run Trace Report loaded (GET /debug/run-trace)');
     
+    // Learning Layer v1 - policy update judgement
+    const learningLayerRoutesModule = await import('./server/routes-learning-layer.ts');
+    app.use('/api/tower', learningLayerRoutesModule.default);
+    console.log('✓ Learning Layer v1 loaded (POST /api/tower/learn)');
+    
     // Ensure behaviour test definitions are seeded
     await ensureBehaviourTestsSeeded();
     
