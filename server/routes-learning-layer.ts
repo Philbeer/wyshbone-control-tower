@@ -5,6 +5,8 @@ import { policyVersions, learningArtefacts, policyNameEnum } from "../shared/sch
 import { desc, eq, and, sql } from "drizzle-orm";
 import { evaluateLearningLayer } from "../src/evaluator/learningLayerRubric";
 import type { LearningLayerInput, PolicySnapshot } from "../src/evaluator/learningLayerRubric";
+import { evaluateMaxReplansLearning } from "../src/evaluator/maxReplansLearning";
+import type { MaxReplansLearningInput, RunOutcome } from "../src/evaluator/maxReplansLearning";
 
 const router = express.Router();
 
@@ -216,6 +218,156 @@ router.get("/learning-artefacts/:scopeKey/:policyName", async (req, res) => {
     res.json({ artefacts: rows });
   } catch (err) {
     console.error("[LEARNING_LAYER] Failed to fetch learning artefacts:", err instanceof Error ? err.message : err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+const runOutcomeSchema = z.object({
+  run_id: z.string(),
+  outcome: z.enum(["success", "failure", "partial"]),
+  replans_used: z.number().int().min(0),
+  max_replans: z.number().int().min(0),
+  replan_helped: z.boolean(),
+  delivery_summary: z.enum(["PASS", "PARTIAL", "STOP", "FAIL"]),
+  timestamp: z.string().optional(),
+});
+
+const maxReplansLearningRequestSchema = z.object({
+  scope_key: z.string().min(1),
+  run_outcomes: z.array(runOutcomeSchema).min(1),
+  current_policy: z.object({
+    scope_key: z.string().min(1),
+    policy_name: z.literal("stop_policy_v1"),
+    version: z.number().int().min(0),
+    value: z.record(z.any()),
+  }),
+});
+
+router.post("/learn-max-replans", async (req, res) => {
+  try {
+    const parsed = maxReplansLearningRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      const issues = parsed.error.issues.map(i => ({
+        path: i.path.join("."),
+        message: i.message,
+      }));
+      res.status(400).json({ error: "Validation failed", details: issues });
+      return;
+    }
+
+    const input: MaxReplansLearningInput = parsed.data;
+    const result = evaluateMaxReplansLearning(input);
+
+    if (result.decision !== "NO_LEARN" && result.proposed_value) {
+      let latestVersion = input.current_policy.version;
+      try {
+        const existing = await db
+          .select({ version: policyVersions.version })
+          .from(policyVersions)
+          .where(
+            and(
+              eq(policyVersions.scope_key, input.scope_key),
+              eq(policyVersions.policy_name, "stop_policy_v1")
+            )
+          )
+          .orderBy(desc(policyVersions.version))
+          .limit(1);
+
+        if (existing.length > 0 && existing[0].version >= latestVersion) {
+          latestVersion = existing[0].version;
+        }
+      } catch (err) {
+        console.error("[LEARNING_LAYER] learn-max-replans: Failed to check latest version:", err instanceof Error ? err.message : err);
+      }
+
+      const newVersion = latestVersion + 1;
+      let policyVersionId: string | null = null;
+
+      try {
+        const inserted = await db.insert(policyVersions).values({
+          scope_key: input.scope_key,
+          policy_name: "stop_policy_v1",
+          version: newVersion,
+          value: result.proposed_value,
+          source: "learning_layer_max_replans",
+          evidence_pointer: input.run_outcomes.map(o => o.run_id).join(","),
+        }).returning({ id: policyVersions.id });
+
+        policyVersionId = inserted[0]?.id ?? null;
+        console.log(`[LEARNING_LAYER] learn-max-replans: Created policy_version: scope=${input.scope_key} v${newVersion} max_replans=${result.new_max_replans} id=${policyVersionId}`);
+      } catch (err) {
+        console.error("[LEARNING_LAYER] learn-max-replans: Failed to insert policy_version:", err instanceof Error ? err.message : err);
+      }
+
+      try {
+        await db.insert(learningArtefacts).values({
+          run_id: input.run_outcomes[input.run_outcomes.length - 1]?.run_id ?? null,
+          scope_key: input.scope_key,
+          policy_name: "stop_policy_v1",
+          artefact_type: "policy_update",
+          old_value: input.current_policy.value,
+          new_value: result.proposed_value,
+          evidence_summary: result.evidence_summary,
+          confidence: result.confidence,
+          rollback_pointer: `policy_versions:${input.scope_key}:stop_policy_v1:v${input.current_policy.version}`,
+          reason: result.reason,
+        });
+        console.log(`[LEARNING_LAYER] learn-max-replans: Emitted policy_update artefact: scope=${input.scope_key} decision=${result.decision}`);
+      } catch (err) {
+        console.error("[LEARNING_LAYER] learn-max-replans: Failed to persist learning artefact:", err instanceof Error ? err.message : err);
+      }
+
+      res.json({
+        decision: result.decision,
+        policy_name: "stop_policy_v1",
+        scope_key: input.scope_key,
+        old_version: input.current_policy.version,
+        new_version: newVersion,
+        old_max_replans: result.old_max_replans,
+        new_max_replans: result.new_max_replans,
+        old_value: input.current_policy.value,
+        new_value: result.proposed_value,
+        confidence: result.confidence,
+        reason: result.reason,
+        reason_codes: result.reason_codes,
+        evidence_summary: result.evidence_summary,
+        rollback_pointer: `policy_versions:${input.scope_key}:stop_policy_v1:v${input.current_policy.version}`,
+        policy_version_id: policyVersionId,
+      });
+      return;
+    }
+
+    try {
+      await db.insert(learningArtefacts).values({
+        run_id: input.run_outcomes[input.run_outcomes.length - 1]?.run_id ?? null,
+        scope_key: input.scope_key,
+        policy_name: "stop_policy_v1",
+        artefact_type: "no_learn",
+        old_value: input.current_policy.value,
+        new_value: null,
+        evidence_summary: result.evidence_summary,
+        confidence: result.confidence,
+        rollback_pointer: null,
+        reason: result.reason,
+      });
+      console.log(`[LEARNING_LAYER] learn-max-replans: Emitted no_learn artefact: scope=${input.scope_key} reason_codes=${result.reason_codes.join(",")}`);
+    } catch (err) {
+      console.error("[LEARNING_LAYER] learn-max-replans: Failed to persist no_learn artefact:", err instanceof Error ? err.message : err);
+    }
+
+    res.json({
+      decision: "NO_LEARN",
+      policy_name: "stop_policy_v1",
+      scope_key: input.scope_key,
+      old_max_replans: result.old_max_replans,
+      new_max_replans: result.new_max_replans,
+      reason: result.reason,
+      reason_codes: result.reason_codes,
+      confidence: result.confidence,
+      evidence_summary: result.evidence_summary,
+    });
+  } catch (err) {
+    console.error("[LEARNING_LAYER] learn-max-replans: Unexpected error:", err instanceof Error ? err.message : err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
