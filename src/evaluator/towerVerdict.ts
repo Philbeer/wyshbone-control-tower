@@ -6,7 +6,8 @@ export type ConstraintType =
   | "NAME_CONTAINS"
   | "NAME_STARTS_WITH"
   | "LOCATION"
-  | "COUNT_MIN";
+  | "COUNT_MIN"
+  | "HAS_ATTRIBUTE";
 
 export interface Constraint {
   type: ConstraintType;
@@ -51,6 +52,11 @@ export interface ConstraintResult {
   matched_count: number;
   total_leads: number;
   passed: boolean;
+  status?: CvlConstraintStatus;
+  evidence_id?: string;
+  source_url?: string;
+  quote?: string;
+  attribute_evidence_details?: Array<{ lead: string; evidence_id?: string; source_url?: string; quote?: string }>;
 }
 
 export interface StopReason {
@@ -97,6 +103,20 @@ export interface CvlConstraintResult {
   value?: string | number;
   status: CvlConstraintStatus;
   reason?: string;
+  confidence?: number;
+  evidence_id?: string;
+  source_url?: string;
+  quote?: string;
+}
+
+export interface AttributeEvidenceArtefact {
+  lead_name: string;
+  attribute: string;
+  verdict: CvlConstraintStatus;
+  confidence: number;
+  evidence_id?: string;
+  source_url?: string;
+  quote?: string;
 }
 
 export interface CvlVerificationSummary {
@@ -150,6 +170,8 @@ export interface TowerVerdictInput {
 
   verification_summary?: CvlVerificationSummary;
   constraints_extracted?: CvlConstraintsExtracted;
+
+  attribute_evidence?: AttributeEvidenceArtefact[];
 
   delivery_summary?: "PASS" | "PARTIAL" | "STOP" | string;
 }
@@ -239,15 +261,107 @@ function findCvlStatusForConstraint(
   return cvlResults.find((cr) => cr.type === constraint.type && cr.field === constraint.field) ?? null;
 }
 
+function findAttributeEvidence(
+  leadName: string,
+  attribute: string,
+  evidence?: AttributeEvidenceArtefact[]
+): AttributeEvidenceArtefact | null {
+  if (!evidence || evidence.length === 0) return null;
+  const normAttr = attribute.toLowerCase().replace(/^c_attr_/, "");
+  return evidence.find((e) => {
+    const nameMatch = e.lead_name.toLowerCase() === leadName.toLowerCase();
+    const attrMatch =
+      e.attribute.toLowerCase() === attribute.toLowerCase() ||
+      e.attribute.toLowerCase() === normAttr ||
+      e.attribute.toLowerCase().replace(/^c_attr_/, "") === normAttr;
+    return nameMatch && attrMatch;
+  }) ?? null;
+}
+
 function evaluateConstraint(
   constraint: Constraint,
   leads: Lead[],
-  cvlResults?: CvlConstraintResult[]
+  cvlResults?: CvlConstraintResult[],
+  attributeEvidence?: AttributeEvidenceArtefact[]
 ): ConstraintResult {
   const total = leads.length;
   const cvlMatch = findCvlStatusForConstraint(constraint, cvlResults);
 
   switch (constraint.type) {
+    case "HAS_ATTRIBUTE": {
+      if (cvlMatch && cvlMatch.status !== "unknown") {
+        return {
+          constraint,
+          matched_count: cvlMatch.status === "yes" ? total : 0,
+          total_leads: total,
+          passed: cvlMatch.status === "yes",
+          status: cvlMatch.status,
+          evidence_id: cvlMatch.evidence_id,
+          source_url: cvlMatch.source_url,
+          quote: cvlMatch.quote,
+        };
+      }
+
+      if (attributeEvidence && attributeEvidence.length > 0) {
+        const attrName = String(constraint.value);
+        const evidencePointers: Array<{ lead: string; evidence_id?: string; source_url?: string; quote?: string }> = [];
+        let hasYes = false;
+        let hasNo = false;
+        let hasUnknown = false;
+
+        for (const lead of leads) {
+          const ev = findAttributeEvidence(lead.name, attrName, attributeEvidence);
+          if (ev) {
+            if (ev.verdict === "yes") {
+              hasYes = true;
+              evidencePointers.push({
+                lead: lead.name,
+                evidence_id: ev.evidence_id,
+                source_url: ev.source_url,
+                quote: ev.quote,
+              });
+            } else if (ev.verdict === "no") {
+              hasNo = true;
+            } else {
+              hasUnknown = true;
+            }
+          } else {
+            hasUnknown = true;
+          }
+        }
+
+        let resolvedStatus: CvlConstraintStatus;
+        if (hasYes && !hasNo) {
+          resolvedStatus = "yes";
+        } else if (hasNo) {
+          resolvedStatus = "no";
+        } else {
+          resolvedStatus = "unknown";
+        }
+
+        const firstEvidence = evidencePointers[0];
+        return {
+          constraint,
+          matched_count: evidencePointers.length,
+          total_leads: total,
+          passed: resolvedStatus === "yes",
+          status: resolvedStatus,
+          evidence_id: firstEvidence?.evidence_id,
+          source_url: firstEvidence?.source_url,
+          quote: firstEvidence?.quote,
+          attribute_evidence_details: evidencePointers.length > 0 ? evidencePointers : undefined,
+        };
+      }
+
+      return {
+        constraint,
+        matched_count: 0,
+        total_leads: total,
+        passed: false,
+        status: "unknown",
+      };
+    }
+
     case "NAME_CONTAINS": {
       if (cvlMatch) {
         return {
@@ -431,11 +545,13 @@ function inferFieldFromType(type: string): string {
   if (type === "NAME_CONTAINS" || type === "NAME_STARTS_WITH") return "name";
   if (type === "LOCATION") return "location";
   if (type === "COUNT_MIN") return "count";
+  if (type === "HAS_ATTRIBUTE") return "attribute";
   return "unknown";
 }
 
 function defaultHardnessForType(type: string): "hard" | "soft" {
   if (type === "NAME_CONTAINS" || type === "NAME_STARTS_WITH" || type === "LOCATION") return "hard";
+  if (type === "HAS_ATTRIBUTE") return "hard";
   return "soft";
 }
 
@@ -446,7 +562,7 @@ function parseLegacyConstraintString(raw: string, hardness: "hard" | "soft"): Co
   const typePart = raw.substring(0, colonIdx).trim().toUpperCase();
   const valuePart = raw.substring(colonIdx + 1).trim();
 
-  const validTypes: ConstraintType[] = ["NAME_CONTAINS", "NAME_STARTS_WITH", "LOCATION", "COUNT_MIN"];
+  const validTypes: ConstraintType[] = ["NAME_CONTAINS", "NAME_STARTS_WITH", "LOCATION", "COUNT_MIN", "HAS_ATTRIBUTE"];
   if (!validTypes.includes(typePart as ConstraintType)) return null;
 
   const type = typePart as ConstraintType;
@@ -487,7 +603,7 @@ export function migrateLegacyConstraints(
 export function normalizeConstraintHardness(obj: Record<string, any>): Constraint | null {
   if (!obj || !obj.type || !obj.field || obj.value === undefined) return null;
 
-  const validTypes: ConstraintType[] = ["NAME_CONTAINS", "NAME_STARTS_WITH", "LOCATION", "COUNT_MIN"];
+  const validTypes: ConstraintType[] = ["NAME_CONTAINS", "NAME_STARTS_WITH", "LOCATION", "COUNT_MIN", "HAS_ATTRIBUTE"];
   if (!validTypes.includes(obj.type as ConstraintType)) return null;
 
   return {
@@ -506,6 +622,7 @@ const SUPERVISOR_TYPE_MAP: Record<string, ConstraintType> = {
   NAME_CONTAINS: "NAME_CONTAINS",
   NAME_STARTS_WITH: "NAME_STARTS_WITH",
   COUNT_MIN: "COUNT_MIN",
+  HAS_ATTRIBUTE: "HAS_ATTRIBUTE",
 };
 
 export function normalizeStructuredConstraint(sc: StructuredConstraint): Constraint | null {
@@ -690,6 +807,11 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
 
   const cvlPresent = hasCvl(input);
   const cvlConstraintResults = input.verification_summary?.constraint_results;
+  const attrEvidence = input.attribute_evidence;
+
+  if (attrEvidence && attrEvidence.length > 0) {
+    console.log(`[TOWER] attribute_evidence found: ${attrEvidence.length} artefact(s)`);
+  }
 
   const matchedLeadCount =
     leads.length > 0 ? getMatchedLeadCount(constraints, leads) : null;
@@ -705,10 +827,10 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         passed: deliveredCount >= minCount,
       } as ConstraintResult;
     }
-    return evaluateConstraint(c, leads, cvlConstraintResults);
+    return evaluateConstraint(c, leads, cvlConstraintResults, attrEvidence);
   });
 
-  const hardUnknowns = cvlPresent
+  const hardUnknownsCvl = cvlPresent
     ? constraints
         .filter((c) => c.hardness === "hard")
         .filter((c) => {
@@ -716,6 +838,18 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
           return cvlMatch != null && cvlMatch.status === "unknown";
         })
     : [];
+
+  const hardUnknownsAttr = constraints
+    .filter((c) => c.hardness === "hard" && c.type === "HAS_ATTRIBUTE")
+    .filter((c) => {
+      if (hardUnknownsCvl.some((u) => u.type === c.type && u.field === c.field && u.value === c.value)) return false;
+      const cr = constraintResults.find(
+        (r) => r.constraint.type === c.type && r.constraint.field === c.field && r.constraint.value === c.value
+      );
+      return cr != null && cr.status === "unknown";
+    });
+
+  const hardUnknowns = [...hardUnknownsCvl, ...hardUnknownsAttr];
 
   const hardUnknownKeys = new Set(hardUnknowns.map((c) => `${c.type}:${c.field}:${c.value}`));
 

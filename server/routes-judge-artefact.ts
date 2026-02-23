@@ -3,7 +3,7 @@ import { db } from "../src/lib/db";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { judgeLeadsList, normalizeConstraintHardness, normalizeStructuredConstraints, judgeAskLeadQuestion } from "../src/evaluator/towerVerdict";
-import type { Lead, Constraint, DeliveredInfo, MetaInfo, StructuredConstraint, StopReason, AskLeadQuestionInput } from "../src/evaluator/towerVerdict";
+import type { Lead, Constraint, DeliveredInfo, MetaInfo, StructuredConstraint, StopReason, AskLeadQuestionInput, AttributeEvidenceArtefact } from "../src/evaluator/towerVerdict";
 import { judgePlasticsInjection } from "../src/evaluator/plasticsInjectionRubric";
 import type { PlasticsRubricInput } from "../src/evaluator/plasticsInjectionRubric";
 import { towerVerdicts } from "../shared/schema";
@@ -101,7 +101,8 @@ function judgeLeadsListArtefact(
   successCriteria: any,
   goal: string,
   artefactTitle?: string,
-  artefactSummary?: string
+  artefactSummary?: string,
+  attributeEvidence?: AttributeEvidenceArtefact[]
 ): JudgeArtefactResponse {
   const leads: Lead[] = Array.isArray(payloadJson?.leads)
     ? payloadJson.leads.filter((l: any) => l && typeof l.name === "string")
@@ -218,6 +219,7 @@ function judgeLeadsListArtefact(
     artefact_summary: artefactSummary,
     verification_summary: payloadJson?.verification_summary,
     constraints_extracted: payloadJson?.constraints_extracted,
+    attribute_evidence: attributeEvidence,
   });
 
   if (DEBUG) {
@@ -453,12 +455,52 @@ router.post("/judge-artefact", async (req, res) => {
         }
       }
 
+      let attributeEvidenceItems: AttributeEvidenceArtefact[] = [];
+      try {
+        const attrEvResult = await db.execute(
+          sql`SELECT payload_json FROM artefacts
+              WHERE run_id = ${runId}
+                AND artefact_type = 'attribute_evidence'
+              ORDER BY created_at DESC`
+        );
+        if (attrEvResult.rows && attrEvResult.rows.length > 0) {
+          for (const row of attrEvResult.rows) {
+            let p: any = null;
+            try {
+              p = typeof row.payload_json === "string"
+                ? JSON.parse(row.payload_json)
+                : row.payload_json;
+            } catch {}
+            if (p && p.lead_name && p.attribute && p.verdict) {
+              attributeEvidenceItems.push({
+                lead_name: p.lead_name,
+                attribute: p.attribute,
+                verdict: p.verdict,
+                confidence: p.confidence ?? 0,
+                evidence_id: p.evidence_id,
+                source_url: p.source_url,
+                quote: p.quote,
+              });
+            }
+          }
+          console.log(
+            `[Tower][judge-artefact] Found ${attributeEvidenceItems.length} attribute_evidence artefact(s) for run_id=${runId}`
+          );
+        }
+      } catch (attrEvErr) {
+        console.error(
+          `[Tower][judge-artefact] attribute_evidence lookup failed for run_id=${runId}:`,
+          attrEvErr instanceof Error ? attrEvErr.message : attrEvErr
+        );
+      }
+
       const leadsResult = judgeLeadsListArtefact(
         payloadJson,
         successCriteria,
         goal,
         artefactRow.title ?? undefined,
-        artefactRow.summary ?? undefined
+        artefactRow.summary ?? undefined,
+        attributeEvidenceItems.length > 0 ? attributeEvidenceItems : undefined
       );
       leadsResult.metrics = {
         ...leadsResult.metrics,
