@@ -1,10 +1,11 @@
 import express from "express";
 import { z } from "zod";
 import { judgeLeadsList } from "../src/evaluator/towerVerdict";
-import type { Constraint, StopReason } from "../src/evaluator/towerVerdict";
+import type { Constraint, StopReason, AttributeEvidenceArtefact } from "../src/evaluator/towerVerdict";
 import { judgePlasticsInjection } from "../src/evaluator/plasticsInjectionRubric";
 import type { PlasticsRubricInput, PlasticsStepSnapshot } from "../src/evaluator/plasticsInjectionRubric";
 import { db } from "../src/lib/db";
+import { sql } from "drizzle-orm";
 import { towerVerdicts } from "../shared/schema";
 
 const router = express.Router();
@@ -16,7 +17,7 @@ router.get("/health", (_req, res) => {
 });
 
 const constraintSchema = z.object({
-  type: z.enum(["NAME_CONTAINS", "NAME_STARTS_WITH", "LOCATION", "COUNT_MIN"]),
+  type: z.enum(["NAME_CONTAINS", "NAME_STARTS_WITH", "LOCATION", "COUNT_MIN", "HAS_ATTRIBUTE"]),
   field: z.string(),
   value: z.union([z.string(), z.number()]),
   hardness: z.enum(["hard", "soft"]).optional(),
@@ -375,6 +376,56 @@ router.post("/tower-verdict", async (req, res) => {
       }
     }
 
+    let attributeEvidenceItems: AttributeEvidenceArtefact[] = [];
+    if (runId && runId !== "none") {
+      try {
+        const attrEvResult = await db.execute(
+          sql`SELECT payload_json FROM artefacts
+              WHERE run_id = ${runId}
+                AND artefact_type = 'attribute_evidence'
+              ORDER BY created_at DESC`
+        );
+        if (attrEvResult.rows && attrEvResult.rows.length > 0) {
+          for (const row of attrEvResult.rows) {
+            let p: any = null;
+            try {
+              p = typeof row.payload_json === "string"
+                ? JSON.parse(row.payload_json)
+                : row.payload_json;
+            } catch {}
+            if (p && p.lead_name && (p.attribute || p.attribute_key) && p.verdict) {
+              attributeEvidenceItems.push({
+                lead_name: p.lead_name,
+                lead_place_id: p.lead_place_id ?? p.placeId ?? p.place_id,
+                attribute: p.attribute ?? p.attribute_key,
+                attribute_key: p.attribute_key,
+                verdict: p.verdict,
+                confidence: p.confidence ?? 0,
+                evidence_id: p.evidence_id,
+                source_url: p.source_url,
+                quote: p.quote,
+              });
+            }
+          }
+          console.log(
+            `[Tower][tower-verdict] Found ${attributeEvidenceItems.length} attribute_evidence artefact(s) for run_id=${runId}`
+          );
+          if (process.env.DEBUG_TOWER_ATTR_TRACE === "true") {
+            console.log(`[TOWER][ATTR_TRACE] === attribute_evidence artefacts from DB (tower-verdict) ===`);
+            console.log(`[TOWER][ATTR_TRACE] raw rows returned: ${attrEvResult.rows.length}`);
+            for (const item of attributeEvidenceItems) {
+              console.log(`[TOWER][ATTR_TRACE] db_artefact: lead_name="${item.lead_name}" lead_place_id="${item.lead_place_id ?? "none"}" attribute="${item.attribute}" attribute_key="${item.attribute_key ?? "none"}" verdict=${item.verdict} confidence=${item.confidence} evidence_id=${item.evidence_id ?? "none"} source_url=${item.source_url ?? "none"} quote="${(item.quote ?? "none").substring(0, 100)}"`);
+            }
+          }
+        }
+      } catch (attrEvErr) {
+        console.error(
+          `[Tower][tower-verdict] attribute_evidence lookup failed for run_id=${runId}:`,
+          attrEvErr instanceof Error ? attrEvErr.message : attrEvErr
+        );
+      }
+    }
+
     const result = judgeLeadsList({
       leads: data.leads,
       constraints: data.constraints as Constraint[] | undefined,
@@ -400,6 +451,7 @@ router.post("/tower-verdict", async (req, res) => {
       verification_summary: data.verification_summary,
       constraints_extracted: data.constraints_extracted as any,
       delivery_summary: data.delivery_summary,
+      attribute_evidence: attributeEvidenceItems.length > 0 ? attributeEvidenceItems : undefined,
     });
 
     if (DEBUG) {
