@@ -486,6 +486,13 @@ router.post("/judge-artefact", async (req, res) => {
           console.log(
             `[Tower][judge-artefact] Found ${attributeEvidenceItems.length} attribute_evidence artefact(s) for run_id=${runId}`
           );
+          if (process.env.DEBUG_TOWER_ATTR_TRACE === "true") {
+            console.log(`[TOWER][ATTR_TRACE] === attribute_evidence artefacts from DB ===`);
+            console.log(`[TOWER][ATTR_TRACE] raw rows returned: ${attrEvResult.rows.length}`);
+            for (const item of attributeEvidenceItems) {
+              console.log(`[TOWER][ATTR_TRACE] db_artefact: lead_name="${item.lead_name}" attribute="${item.attribute}" verdict=${item.verdict} confidence=${item.confidence} evidence_id=${item.evidence_id ?? "none"} source_url=${item.source_url ?? "none"} quote="${(item.quote ?? "none").substring(0, 100)}"`);
+            }
+          }
         }
       } catch (attrEvErr) {
         console.error(

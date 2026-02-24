@@ -289,7 +289,24 @@ function evaluateConstraint(
 
   switch (constraint.type) {
     case "HAS_ATTRIBUTE": {
+      const ATTR_TRACE = process.env.DEBUG_TOWER_ATTR_TRACE === "true";
+      const attrName = String(constraint.value);
+
+      if (ATTR_TRACE) {
+        console.log(`[TOWER][ATTR_TRACE] === HAS_ATTRIBUTE evaluation ===`);
+        console.log(`[TOWER][ATTR_TRACE] constraint: type=${constraint.type} field=${constraint.field} value=${constraint.value} hardness=${constraint.hardness}`);
+        console.log(`[TOWER][ATTR_TRACE] leads_count=${leads.length} lead_names=[${leads.map(l => l.name).join(", ")}]`);
+        console.log(`[TOWER][ATTR_TRACE] cvlMatch found=${!!cvlMatch} status=${cvlMatch?.status ?? "N/A"} reason=${cvlMatch?.reason ?? "N/A"}`);
+        console.log(`[TOWER][ATTR_TRACE] attributeEvidence provided=${!!attributeEvidence} count=${attributeEvidence?.length ?? 0}`);
+        if (attributeEvidence && attributeEvidence.length > 0) {
+          console.log(`[TOWER][ATTR_TRACE] attributeEvidence items: ${JSON.stringify(attributeEvidence.map(e => ({ lead_name: e.lead_name, attribute: e.attribute, verdict: e.verdict, confidence: e.confidence })))}`);
+        }
+      }
+
       if (cvlMatch && cvlMatch.status !== "unknown") {
+        if (ATTR_TRACE) {
+          console.log(`[TOWER][ATTR_TRACE] DECISION: using cvlMatch directly → status=${cvlMatch.status} passed=${cvlMatch.status === "yes"}`);
+        }
         return {
           constraint,
           matched_count: cvlMatch.status === "yes" ? total : 0,
@@ -303,7 +320,6 @@ function evaluateConstraint(
       }
 
       if (attributeEvidence && attributeEvidence.length > 0) {
-        const attrName = String(constraint.value);
         const evidencePointers: Array<{ lead: string; evidence_id?: string; source_url?: string; quote?: string }> = [];
         let hasYes = false;
         let hasNo = false;
@@ -311,6 +327,9 @@ function evaluateConstraint(
 
         for (const lead of leads) {
           const ev = findAttributeEvidence(lead.name, attrName, attributeEvidence);
+          if (ATTR_TRACE) {
+            console.log(`[TOWER][ATTR_TRACE] findAttributeEvidence(lead="${lead.name}", attr="${attrName}") → ${ev ? `found: verdict=${ev.verdict} evidence_id=${ev.evidence_id ?? "none"} quote=${(ev.quote ?? "none").substring(0, 80)}` : "NOT FOUND"}`);
+          }
           if (ev) {
             if (ev.verdict === "yes") {
               hasYes = true;
@@ -340,6 +359,11 @@ function evaluateConstraint(
         }
 
         const firstEvidence = evidencePointers[0];
+        if (ATTR_TRACE) {
+          console.log(`[TOWER][ATTR_TRACE] DECISION: from attributeEvidence → status=${resolvedStatus} hasYes=${hasYes} hasNo=${hasNo} hasUnknown=${hasUnknown} evidencePointers=${evidencePointers.length}`);
+          const topExcerpts = evidencePointers.slice(0, 2).map(ep => `lead="${ep.lead}" quote="${(ep.quote ?? "none").substring(0, 100)}"`);
+          console.log(`[TOWER][ATTR_TRACE] top_evidence: ${topExcerpts.length > 0 ? topExcerpts.join(" | ") : "none found"}`);
+        }
         return {
           constraint,
           matched_count: evidencePointers.length,
@@ -353,6 +377,10 @@ function evaluateConstraint(
         };
       }
 
+      if (ATTR_TRACE) {
+        console.log(`[TOWER][ATTR_TRACE] DECISION: no cvlMatch, no attributeEvidence → status=unknown passed=false`);
+        console.log(`[TOWER][ATTR_TRACE] field_paths_checked: input.verification_summary.constraint_results (for cvlMatch), input.attribute_evidence (for per-lead evidence)`);
+      }
       return {
         constraint,
         matched_count: 0,
@@ -860,6 +888,24 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       !hardUnknownKeys.has(`${r.constraint.type}:${r.constraint.field}:${r.constraint.value}`)
   );
 
+  if (process.env.DEBUG_TOWER_ATTR_TRACE === "true") {
+    const attrResults = constraintResults.filter(r => r.constraint.type === "HAS_ATTRIBUTE");
+    if (attrResults.length > 0) {
+      console.log(`[TOWER][ATTR_TRACE] === Verdict-level HAS_ATTRIBUTE summary ===`);
+      for (const ar of attrResults) {
+        console.log(`[TOWER][ATTR_TRACE] constraint=${ar.constraint.field}=${ar.constraint.value} hardness=${ar.constraint.hardness} passed=${ar.passed} status=${ar.status ?? "not_set"} matched=${ar.matched_count}/${ar.total_leads}`);
+        if (ar.attribute_evidence_details && ar.attribute_evidence_details.length > 0) {
+          const topExcerpts = ar.attribute_evidence_details.slice(0, 2).map(d => `lead="${d.lead}" quote="${(d.quote ?? "none").substring(0, 100)}"`);
+          console.log(`[TOWER][ATTR_TRACE] evidence_details: ${topExcerpts.join(" | ")}`);
+        }
+      }
+      const attrHardUnknowns = hardUnknowns.filter(c => c.type === "HAS_ATTRIBUTE");
+      const attrHardViolations = hardViolations.filter(r => r.constraint.type === "HAS_ATTRIBUTE");
+      console.log(`[TOWER][ATTR_TRACE] hardUnknowns(HAS_ATTRIBUTE)=${attrHardUnknowns.length} hardViolations(HAS_ATTRIBUTE)=${attrHardViolations.length}`);
+      console.log(`[TOWER][ATTR_TRACE] total hardUnknowns=${hardUnknowns.length} total hardViolations=${hardViolations.length}`);
+    }
+  }
+
   const locationUnverifiedGaps: string[] = [];
   if (!cvlPresent) {
     const locationConstraints = constraints.filter((c) => c.type === "LOCATION");
@@ -907,6 +953,15 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         const cvlMatch = findCvlStatusForConstraint(c, cvlConstraintResults);
         return cvlMatch?.reason?.toLowerCase().includes("unverifiable");
       });
+
+      if (process.env.DEBUG_TOWER_ATTR_TRACE === "true") {
+        console.log(`[TOWER][ATTR_TRACE] === Verdict path for hardUnknowns ===`);
+        console.log(`[TOWER][ATTR_TRACE] anyUnverifiable=${anyUnverifiable} canReplan=${canReplan(input)} hardUnknowns=${hardUnknowns.length}`);
+        for (const c of hardUnknowns) {
+          const match = findCvlStatusForConstraint(c, cvlConstraintResults);
+          console.log(`[TOWER][ATTR_TRACE] unknownConstraint: type=${c.type} field=${c.field} value=${c.value} cvlMatch=${!!match} cvlReason=${match?.reason ?? "N/A"} unverifiable_flag=${match?.reason?.toLowerCase().includes("unverifiable") ?? false}`);
+        }
+      }
 
       if (anyUnverifiable && !canReplan(input)) {
         const result: TowerVerdict = {

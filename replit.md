@@ -36,6 +36,14 @@ Tower uses user intent (`requested_count_user`) and accumulated matching results
 **HAS_ATTRIBUTE Constraint & attribute_evidence (CVL):**
 CVL evaluation for `HAS_ATTRIBUTE` constraints (e.g., `c_attr_live_music`) consumes `attribute_evidence` artefacts from Supervisor. When evaluating a lead for HAS_ATTRIBUTE: if an `attribute_evidence` artefact exists for that lead+attribute, the constraint status is set to the artefact's verdict (yes/no/unknown) with confidence and evidence pointers (evidence_id, source_url, quote). If no artefact exists, status defaults to `unknown` with low confidence. Unknown is never treated as false — it excludes the constraint from hard violations and prevents `verified_exact` from being true until all hard constraints are resolved to `yes`. The `ConstraintResult` exposes `status`, `evidence_id`, `source_url`, `quote`, and `attribute_evidence_details` for UI consumption. The `routes-judge-artefact.ts` fetches `attribute_evidence` artefacts from the `artefacts` table (type=`attribute_evidence`) for the same `run_id` and passes them into `judgeLeadsListArtefact`.
 
+**HAS_ATTRIBUTE diagnostic trace:** Set env `DEBUG_TOWER_ATTR_TRACE=true` to enable detailed decision tracing for HAS_ATTRIBUTE constraints. Trace logs (prefixed `[TOWER][ATTR_TRACE]`) cover: constraint input, cvlMatch lookup, per-lead evidence matching, verdict-level summary (hardUnknowns/hardViolations counts), and STOP/CHANGE_PLAN path decision (anyUnverifiable, canReplan). Trace does not change behavior.
+
+**HAS_ATTRIBUTE verdict paths (when count is met but hard unknowns exist):**
+1. If CVL reason contains "unverifiable" AND can't replan → STOP with code HARD_CONSTRAINT_UNVERIFIABLE
+2. If can replan → CHANGE_PLAN
+3. If can't replan and no unverifiable flag → STOP with code HARD_CONSTRAINT_UNKNOWN (hard_unknown_no_replans)
+Key: if no `attribute_evidence` artefacts exist in DB AND no CVL constraint_results entry matches, the constraint evaluates to status=unknown, goes into hardUnknowns, and triggers path 2 or 3.
+
 **UI/UX Decisions:**
 The dashboard is simplified, featuring plain language and three core sections: **Recent Runs** (user conversations with events, status, timelines, flagging), **Auto-Flagged Runs** (automatically detected quality issues), and **Manual Flags**. An **Advanced Tools** section provides access to Tower Status, Automated Tests, Patch Failures, and Complete Run History. A **Conversation Timeline View** offers detailed chronological message views, and a **Simplified Investigation Workflow** displays run input/output, AI diagnosis, and suggested patches with approval/rejection options. Technical jargon is minimized.
 
