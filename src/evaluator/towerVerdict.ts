@@ -111,7 +111,9 @@ export interface CvlConstraintResult {
 
 export interface AttributeEvidenceArtefact {
   lead_name: string;
+  lead_place_id?: string;
   attribute: string;
+  attribute_key?: string;
   verdict: CvlConstraintStatus;
   confidence: number;
   evidence_id?: string;
@@ -261,21 +263,58 @@ function findCvlStatusForConstraint(
   return cvlResults.find((cr) => cr.type === constraint.type && cr.field === constraint.field) ?? null;
 }
 
+function normalizeAttributeKey(raw: string): string {
+  return raw
+    .toLowerCase()
+    .trim()
+    .replace(/^c_attr_/, "")
+    .replace(/[\s\-]+/g, "_")
+    .replace(/_{2,}/g, "_");
+}
+
 function findAttributeEvidence(
   leadName: string,
   attribute: string,
-  evidence?: AttributeEvidenceArtefact[]
-): AttributeEvidenceArtefact | null {
+  evidence?: AttributeEvidenceArtefact[],
+  leadPlaceId?: string
+): { match: AttributeEvidenceArtefact; matchedBy: "placeId" | "name" } | null {
   if (!evidence || evidence.length === 0) return null;
-  const normAttr = attribute.toLowerCase().replace(/^c_attr_/, "");
-  return evidence.find((e) => {
+  const normAttr = normalizeAttributeKey(attribute);
+  const ATTR_TRACE = process.env.DEBUG_TOWER_ATTR_TRACE === "true";
+
+  if (leadPlaceId) {
+    const byPlaceId = evidence.find((e) => {
+      if (!e.lead_place_id) return false;
+      const placeIdMatch = e.lead_place_id === leadPlaceId;
+      const evNormAttr = normalizeAttributeKey(e.attribute_key ?? e.attribute);
+      const attrMatch = evNormAttr === normAttr;
+      return placeIdMatch && attrMatch;
+    });
+    if (byPlaceId) {
+      if (ATTR_TRACE) {
+        console.log(`[TOWER][ATTR_TRACE] findAttributeEvidence: matched by placeId="${leadPlaceId}" attr_norm="${normAttr}" ev_attr_norm="${normalizeAttributeKey(byPlaceId.attribute_key ?? byPlaceId.attribute)}"`);
+      }
+      return { match: byPlaceId, matchedBy: "placeId" };
+    }
+  }
+
+  const byName = evidence.find((e) => {
     const nameMatch = e.lead_name.toLowerCase() === leadName.toLowerCase();
-    const attrMatch =
-      e.attribute.toLowerCase() === attribute.toLowerCase() ||
-      e.attribute.toLowerCase() === normAttr ||
-      e.attribute.toLowerCase().replace(/^c_attr_/, "") === normAttr;
+    const evNormAttr = normalizeAttributeKey(e.attribute_key ?? e.attribute);
+    const attrMatch = evNormAttr === normAttr;
     return nameMatch && attrMatch;
-  }) ?? null;
+  });
+  if (byName) {
+    if (ATTR_TRACE) {
+      console.log(`[TOWER][ATTR_TRACE] findAttributeEvidence: matched by name="${leadName}" attr_norm="${normAttr}" ev_attr_norm="${normalizeAttributeKey(byName.attribute_key ?? byName.attribute)}"`);
+    }
+    return { match: byName, matchedBy: "name" };
+  }
+
+  if (ATTR_TRACE) {
+    console.log(`[TOWER][ATTR_TRACE] findAttributeEvidence: NO MATCH for lead="${leadName}" placeId="${leadPlaceId ?? "none"}" attr_norm="${normAttr}" evidence_attrs=[${evidence.map(e => `"${normalizeAttributeKey(e.attribute_key ?? e.attribute)}"`).join(",")}] evidence_names=[${evidence.map(e => `"${e.lead_name}"`).join(",")}] evidence_placeIds=[${evidence.map(e => `"${e.lead_place_id ?? "none"}"`).join(",")}]`);
+  }
+  return null;
 }
 
 function evaluateConstraint(
@@ -299,7 +338,7 @@ function evaluateConstraint(
         console.log(`[TOWER][ATTR_TRACE] cvlMatch found=${!!cvlMatch} status=${cvlMatch?.status ?? "N/A"} reason=${cvlMatch?.reason ?? "N/A"}`);
         console.log(`[TOWER][ATTR_TRACE] attributeEvidence provided=${!!attributeEvidence} count=${attributeEvidence?.length ?? 0}`);
         if (attributeEvidence && attributeEvidence.length > 0) {
-          console.log(`[TOWER][ATTR_TRACE] attributeEvidence items: ${JSON.stringify(attributeEvidence.map(e => ({ lead_name: e.lead_name, attribute: e.attribute, verdict: e.verdict, confidence: e.confidence })))}`);
+          console.log(`[TOWER][ATTR_TRACE] attributeEvidence items: ${JSON.stringify(attributeEvidence.map(e => ({ lead_name: e.lead_name, lead_place_id: e.lead_place_id ?? "none", attribute: e.attribute, attribute_key: e.attribute_key ?? "none", attribute_norm: normalizeAttributeKey(e.attribute_key ?? e.attribute), verdict: e.verdict, confidence: e.confidence })))}`);
         }
       }
 
@@ -326,11 +365,14 @@ function evaluateConstraint(
         let hasUnknown = false;
 
         for (const lead of leads) {
-          const ev = findAttributeEvidence(lead.name, attrName, attributeEvidence);
+          const leadPlaceId = (lead as any).place_id ?? (lead as any).placeId;
+          const result = findAttributeEvidence(lead.name, attrName, attributeEvidence, leadPlaceId);
           if (ATTR_TRACE) {
-            console.log(`[TOWER][ATTR_TRACE] findAttributeEvidence(lead="${lead.name}", attr="${attrName}") → ${ev ? `found: verdict=${ev.verdict} evidence_id=${ev.evidence_id ?? "none"} quote=${(ev.quote ?? "none").substring(0, 80)}` : "NOT FOUND"}`);
+            const ev = result?.match;
+            console.log(`[TOWER][ATTR_TRACE] findAttributeEvidence(lead="${lead.name}", placeId="${leadPlaceId ?? "none"}", attr="${attrName}", attr_norm="${normalizeAttributeKey(attrName)}") → ${result ? `found via ${result.matchedBy}: verdict=${ev!.verdict} evidence_id=${ev!.evidence_id ?? "none"} quote=${(ev!.quote ?? "none").substring(0, 80)}` : "NOT FOUND"}`);
           }
-          if (ev) {
+          if (result) {
+            const ev = result.match;
             if (ev.verdict === "yes") {
               hasYes = true;
               evidencePointers.push({

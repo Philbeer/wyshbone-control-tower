@@ -471,10 +471,12 @@ router.post("/judge-artefact", async (req, res) => {
                 ? JSON.parse(row.payload_json)
                 : row.payload_json;
             } catch {}
-            if (p && p.lead_name && p.attribute && p.verdict) {
+            if (p && p.lead_name && (p.attribute || p.attribute_key) && p.verdict) {
               attributeEvidenceItems.push({
                 lead_name: p.lead_name,
-                attribute: p.attribute,
+                lead_place_id: p.lead_place_id ?? p.placeId ?? p.place_id,
+                attribute: p.attribute ?? p.attribute_key,
+                attribute_key: p.attribute_key,
                 verdict: p.verdict,
                 confidence: p.confidence ?? 0,
                 evidence_id: p.evidence_id,
@@ -490,7 +492,7 @@ router.post("/judge-artefact", async (req, res) => {
             console.log(`[TOWER][ATTR_TRACE] === attribute_evidence artefacts from DB ===`);
             console.log(`[TOWER][ATTR_TRACE] raw rows returned: ${attrEvResult.rows.length}`);
             for (const item of attributeEvidenceItems) {
-              console.log(`[TOWER][ATTR_TRACE] db_artefact: lead_name="${item.lead_name}" attribute="${item.attribute}" verdict=${item.verdict} confidence=${item.confidence} evidence_id=${item.evidence_id ?? "none"} source_url=${item.source_url ?? "none"} quote="${(item.quote ?? "none").substring(0, 100)}"`);
+              console.log(`[TOWER][ATTR_TRACE] db_artefact: lead_name="${item.lead_name}" lead_place_id="${item.lead_place_id ?? "none"}" attribute="${item.attribute}" attribute_key="${item.attribute_key ?? "none"}" verdict=${item.verdict} confidence=${item.confidence} evidence_id=${item.evidence_id ?? "none"} source_url=${item.source_url ?? "none"} quote="${(item.quote ?? "none").substring(0, 100)}"`);
             }
           }
         }

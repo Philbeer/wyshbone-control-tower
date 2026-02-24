@@ -1,0 +1,51 @@
+We still get STOP / HARD_CONSTRAINT_UNKNOWN for “live music” even when Supervisor can find website evidence.
+Tower report shows likely mismatch issues:
+- lead_name exact matching is brittle
+- attribute mismatch: "live music" vs "live_music"
+- Tower fetches attribute_evidence rows by artefact_type='attribute_evidence' and expects matching fields
+
+I need you to implement the following minimum fixes (surgical, no redesign), and keep judgement behaviour identical except where it currently fails to match existing evidence.
+
+A) Match evidence to leads by placeId, not by lead_name
+1) Update findAttributeEvidence (or equivalent) so it prefers matching on:
+   - lead_place_id / placeId (stable identifier)
+2) This requires Tower to read place id from attribute_evidence payload.
+   - If the payload currently only has lead_name, keep fallback matching by name.
+3) Matching order:
+   - First try placeId exact match
+   - If missing, fallback to existing case-insensitive name match
+
+B) Normalize attribute comparison for “live music” vs “live_music”
+Implement a normalization function used for matching constraint value to evidence.attribute:
+- lowercase
+- trim
+- replace spaces and hyphens with underscores
+- collapse multiple underscores
+Then compare normalized strings.
+So these match:
+- "live music"
+- "live_music"
+- "Live-Music"
+
+C) Ensure Tower reads the right fields from attribute_evidence payload
+Tower currently expects payload_json.{lead_name, attribute, verdict, ...}
+Update to also accept:
+- lead_place_id (or placeId)
+- attribute_key (if Supervisor adds it)
+But do NOT break existing payloads; just support both.
+
+D) Keep STOP logic unchanged
+Do not change the STOP / HARD_CONSTRAINT_UNKNOWN rule.
+We only want Tower to STOP less often because it can now actually see evidence that already exists.
+
+E) Keep DEBUG_TOWER_ATTR_TRACE intact
+Leave the tracing behind DEBUG_TOWER_ATTR_TRACE=true.
+After your changes, the trace must clearly show:
+- how many attribute_evidence rows were fetched
+- for each lead whether match used placeId or name
+- how attribute strings were normalized on both sides
+
+Deliverables:
+1) Implement A–C.
+2) Confirm compilation.
+3) Provide a short summary of what changed and the exact matching rules now.
