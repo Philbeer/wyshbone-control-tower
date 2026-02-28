@@ -5,11 +5,14 @@ import {
   normalizeConstraintHardness,
   normalizeStructuredConstraint,
   normalizeStructuredConstraints,
+  detectTimePredicate,
+  evaluateTimePredicates,
   TowerVerdictInput,
   Lead,
   Constraint,
   StructuredConstraint,
   AskLeadQuestionInput,
+  TimePredicateInput,
 } from "../src/evaluator/towerVerdict";
 
 let passed = 0;
@@ -1846,6 +1849,279 @@ test("ASK_LEAD_QUESTION: response always includes towerVerdict, action, stop_rea
         throw new Error("CHANGE_PLAN/retry must include suggested_changes array");
       }
     }
+  }
+});
+
+// ── Time Predicate Detection ──
+
+test("detectTimePredicate: detects 'opened in last 6 months'", () => {
+  const result = detectTimePredicate("Find restaurants opened in last 6 months in Bristol");
+  expect(result.detected).toBe(true);
+  expect(result.predicate).toBe("opened in last N");
+});
+
+test("detectTimePredicate: detects 'recently opened'", () => {
+  const result = detectTimePredicate("Find recently opened coffee shops");
+  expect(result.detected).toBe(true);
+  expect(result.predicate).toBe("recently opened");
+});
+
+test("detectTimePredicate: detects 'newly opened'", () => {
+  const result = detectTimePredicate("Find newly opened restaurants in London");
+  expect(result.detected).toBe(true);
+  expect(result.predicate).toBe("newly opened");
+});
+
+test("detectTimePredicate: detects 'opened after 2024'", () => {
+  const result = detectTimePredicate("Find gyms opened after 2024");
+  expect(result.detected).toBe(true);
+  expect(result.predicate).toBe("opened after year");
+});
+
+test("detectTimePredicate: detects 'launched in last 12 months'", () => {
+  const result = detectTimePredicate("Find startups launched in last 12 months");
+  expect(result.detected).toBe(true);
+  expect(result.predicate).toBe("launched in last N");
+});
+
+test("detectTimePredicate: no detection for normal goal", () => {
+  const result = detectTimePredicate("Find 4 pubs in Arundel");
+  expect(result.detected).toBe(false);
+});
+
+test("detectTimePredicate: no detection for null goal", () => {
+  const result = detectTimePredicate(null);
+  expect(result.detected).toBe(false);
+});
+
+// ── Time Predicate Gate: Hard blocked => STOP ──
+
+test("Time predicate: hard unverifiable with no proxy → STOP", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: withEvidence([
+      { name: "New Place A" },
+      { name: "New Place B" },
+      { name: "New Place C" },
+    ]),
+    constraints: [],
+    original_goal: "Find 3 restaurants opened in last 6 months in Bristol",
+    time_predicates: [{ predicate: "opened in last 6 months", hardness: "hard" }],
+    time_predicates_mode: "unverifiable",
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.gaps).toContain("TIME_PREDICATE_BLOCKED");
+  if (!result.stop_reason) throw new Error("Must have stop_reason");
+  expect(result.stop_reason.code).toBe("TIME_PREDICATE_BLOCKED");
+  if (!result.rationale.includes("Time predicate")) throw new Error("Rationale must mention time predicate");
+});
+
+test("Time predicate: auto-detected hard + unverifiable → STOP", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Fresh Cafe" },
+      { name: "New Bistro" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 cafes opened in last 3 months",
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.gaps).toContain("TIME_PREDICATE_BLOCKED");
+  expect(result.stop_reason!.code).toBe("TIME_PREDICATE_BLOCKED");
+});
+
+test("Time predicate: explicit hard with mode=proxy but proxy not run (null) → STOP", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Cafe Alpha" },
+      { name: "Cafe Beta" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 cafes opened in last 6 months",
+    time_predicates: [{ predicate: "opened in last 6 months", hardness: "hard" }],
+    time_predicates_mode: "proxy",
+    time_predicates_proxy_used: null,
+    time_predicates_satisfied_count: 0,
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.gaps).toContain("TIME_PREDICATE_BLOCKED");
+});
+
+// ── Time Predicate Gate: Proxy used with evidence => ACCEPT with proxy wording ──
+
+test("Time predicate: proxy used with evidence + PARTIAL delivery_summary → ACCEPT with proxy info", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: withEvidence([
+      { name: "Recent Place A" },
+      { name: "Recent Place B" },
+      { name: "Recent Place C" },
+    ]),
+    constraints: [],
+    original_goal: "Find 3 restaurants opened in last 6 months",
+    time_predicates: [{ predicate: "opened in last 6 months", hardness: "hard" }],
+    time_predicates_mode: "proxy",
+    time_predicates_proxy_used: "news_mention",
+    time_predicates_satisfied_count: 3,
+    time_predicates_unknown_count: 0,
+    delivery_summary: "PARTIAL",
+  });
+  expect(result.verdict).toBe("ACCEPT");
+});
+
+test("Time predicate: proxy used with evidence but delivery_summary=PASS (not acknowledging proxy) → STOP", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "New Spot A" },
+      { name: "New Spot B" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 shops opened in last 12 months",
+    time_predicates: [{ predicate: "opened in last 12 months", hardness: "hard" }],
+    time_predicates_mode: "proxy",
+    time_predicates_proxy_used: "recent_reviews",
+    time_predicates_satisfied_count: 2,
+    time_predicates_unknown_count: 0,
+    delivery_summary: "PASS",
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.gaps).toContain("TIME_PREDICATE_PROXY_LANGUAGE_MISMATCH");
+  expect(result.stop_reason!.code).toBe("TIME_PREDICATE_PROXY_LANGUAGE_MISMATCH");
+});
+
+// ── Time Predicate Gate: Proxy requested but not run ──
+
+test("Time predicate: proxy mode but 0 satisfied → STOP (proxy evidence not found)", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Place A" },
+      { name: "Place B" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 restaurants opened in last 3 months",
+    time_predicates: [{ predicate: "opened in last 3 months", hardness: "hard" }],
+    time_predicates_mode: "proxy",
+    time_predicates_proxy_used: "news_mention",
+    time_predicates_satisfied_count: 0,
+    time_predicates_unknown_count: 2,
+    delivery_summary: "PARTIAL",
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.gaps).toContain("TIME_PREDICATE_BLOCKED");
+});
+
+// ── Time Predicate Gate: Soft predicate does not block ──
+
+test("Time predicate: soft unverifiable does not block ACCEPT", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Any Place A" },
+      { name: "Any Place B" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 restaurants, preferably recently opened",
+    time_predicates: [{ predicate: "recently opened", hardness: "soft" }],
+    time_predicates_mode: "unverifiable",
+  });
+  expect(result.verdict).toBe("ACCEPT");
+});
+
+// ── Time Predicate Gate: Verifiable mode with satisfied count ──
+
+test("Time predicate: verifiable mode with all satisfied → ACCEPT", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Verified Place A" },
+      { name: "Verified Place B" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 restaurants opened in last 6 months",
+    time_predicates: [{ predicate: "opened in last 6 months", hardness: "hard" }],
+    time_predicates_mode: "verifiable",
+    time_predicates_satisfied_count: 2,
+    time_predicates_unknown_count: 0,
+  });
+  expect(result.verdict).toBe("ACCEPT");
+});
+
+test("Time predicate: verifiable mode with 0 satisfied → STOP", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Unknown Place A" },
+      { name: "Unknown Place B" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 restaurants opened in last 6 months",
+    time_predicates: [{ predicate: "opened in last 6 months", hardness: "hard" }],
+    time_predicates_mode: "verifiable",
+    time_predicates_satisfied_count: 0,
+    time_predicates_unknown_count: 2,
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.gaps).toContain("TIME_PREDICATE_BLOCKED");
+});
+
+// ── Time Predicate: user_summary output ──
+
+test("evaluateTimePredicates: user_summary for unverifiable hard", () => {
+  const result = evaluateTimePredicates({
+    time_predicates: [{ predicate: "opened in last 6 months", hardness: "hard" }],
+    time_predicates_mode: "unverifiable",
+  } as TowerVerdictInput, "Find restaurants opened in last 6 months");
+  if (!result.user_summary.includes("cannot be verified")) {
+    throw new Error(`Expected user_summary to mention cannot be verified, got: "${result.user_summary}"`);
+  }
+  expect(result.hard_constraints_blocked.length).toBeGreaterThan(0);
+});
+
+test("evaluateTimePredicates: user_summary for proxy with evidence", () => {
+  const result = evaluateTimePredicates({
+    time_predicates: [{ predicate: "opened in last 6 months", hardness: "hard" }],
+    time_predicates_mode: "proxy",
+    time_predicates_proxy_used: "news_mention",
+    time_predicates_satisfied_count: 3,
+  } as TowerVerdictInput, null);
+  if (!result.user_summary.includes("proxy used")) {
+    throw new Error(`Expected user_summary to mention proxy used, got: "${result.user_summary}"`);
+  }
+  expect(result.hard_constraints_blocked.length).toBe(0);
+});
+
+test("evaluateTimePredicates: user_summary for proxy with no evidence", () => {
+  const result = evaluateTimePredicates({
+    time_predicates: [{ predicate: "opened in last 6 months", hardness: "hard" }],
+    time_predicates_mode: "proxy",
+    time_predicates_proxy_used: "recent_reviews",
+    time_predicates_satisfied_count: 0,
+  } as TowerVerdictInput, null);
+  if (!result.user_summary.includes("no supporting evidence")) {
+    throw new Error(`Expected user_summary to mention no supporting evidence, got: "${result.user_summary}"`);
+  }
+  expect(result.hard_constraints_blocked.length).toBeGreaterThan(0);
+});
+
+// ── Time Predicate: no time predicates = transparent pass-through ──
+
+test("Time predicate: no predicates, no auto-detection → normal ACCEPT", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Normal Place A" },
+      { name: "Normal Place B" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 pubs in Arundel",
+  });
+  expect(result.verdict).toBe("ACCEPT");
+  if (result.gaps.some((g: string) => g.includes("TIME_PREDICATE"))) {
+    throw new Error("Should have no time predicate gaps for normal goal");
   }
 });
 

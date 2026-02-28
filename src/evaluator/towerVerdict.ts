@@ -22,6 +22,24 @@ export interface Lead {
   [key: string]: unknown;
 }
 
+export type TimePredicateMode = "verifiable" | "proxy" | "unverifiable";
+export type TimePredicateProxy = "news_mention" | "recent_reviews" | "new_listing" | "social_media_post" | "press_release";
+
+export interface TimePredicateInput {
+  predicate: string;
+  hardness: "hard" | "soft";
+}
+
+export interface TimePredicateResult {
+  time_predicates_required: TimePredicateInput[];
+  time_predicates_mode: TimePredicateMode;
+  time_predicates_proxy_used: TimePredicateProxy | null;
+  time_predicates_satisfied_count: number;
+  time_predicates_unknown_count: number;
+  hard_constraints_blocked: string[];
+  user_summary: string;
+}
+
 export type SuggestedChangeType =
   | "RELAX_CONSTRAINT"
   | "EXPAND_AREA"
@@ -179,6 +197,12 @@ export interface TowerVerdictInput {
 
   requires_relationship_evidence?: boolean;
   verified_relationship_count?: number;
+
+  time_predicates?: TimePredicateInput[];
+  time_predicates_mode?: TimePredicateMode;
+  time_predicates_proxy_used?: TimePredicateProxy | null;
+  time_predicates_satisfied_count?: number;
+  time_predicates_unknown_count?: number;
 }
 
 export interface StructuredConstraint {
@@ -659,7 +683,7 @@ export function detectConcatenationArtifacts(
     for (const concatMatch of concatPatterns) {
       if (!concatMatch) continue;
       const full = concatMatch[0];
-      const knownSafe = /^(american|african|mexican|dominican|franciscan|republican|anglican|candidate|candid|candy|candle|canal|canada|canadian|canary|cancel|cancer|canvas|canyon|scandal|volcano|significant|particular|popular|regular|circular|nuclear|angular|understand|thousand|standard|command|demand|expand|tuscan|artisan|partisan|guardian|median|suburban|veteran|spartan|christian|norwegian|hawaiian|european|indian|persian|russian|orphan|ocean|organ|urban|sedan|sultan|jordan|morgan|duncan|colorado|orlando|avocado|desperado|commando|tornado|crescendo|innuendo|nintendo|pseudo|overdo|bushido|bravado|eldorado|scholar|dollar|muscular|secular|spectacular|molecular|singular|cellular|modular|toucan|pelican|pecan|caravan|afghan|catalan|marzipan|husband|island|islands|began|scan|uncan|outdo|outis|outdid|outdoes|overis|overdid|overdoes|overwas|alcan|texan|vatican|vulcan|parmesan|artesian|diocesan|dentist|dentists|consist|consists|consistent|persist|persists|insist|insists|resist|resists|exist|exists|assist|assists|enlist|enlists|consist|desist|artist|artists|florist|florists|tourist|tourists|publicist|publicists|specialist|specialists|journalist|journalists)$/;
+      const knownSafe = /^(american|african|mexican|dominican|franciscan|republican|anglican|candidate|candid|candy|candle|canal|canada|canadian|canary|cancel|cancer|canvas|canyon|scandal|volcano|significant|particular|popular|regular|circular|nuclear|angular|understand|thousand|standard|command|demand|expand|tuscan|artisan|partisan|guardian|median|suburban|veteran|spartan|christian|norwegian|hawaiian|european|indian|persian|russian|orphan|ocean|organ|urban|sedan|sultan|jordan|morgan|duncan|colorado|orlando|avocado|desperado|commando|tornado|crescendo|innuendo|nintendo|pseudo|overdo|bushido|bravado|eldorado|scholar|dollar|muscular|secular|spectacular|molecular|singular|cellular|modular|toucan|pelican|pecan|caravan|afghan|catalan|marzipan|husband|island|islands|began|scan|uncan|outdo|outis|outdid|outdoes|overis|overdid|overdoes|overwas|alcan|texan|vatican|vulcan|parmesan|artesian|diocesan|dentist|dentists|consist|consists|consistent|persist|persists|insist|insists|resist|resists|exist|exists|assist|assists|enlist|enlists|consist|desist|artist|artists|florist|florists|tourist|tourists|publicist|publicists|specialist|specialists|journalist|journalists|bristol|pistol|crystal|epistle|whistle|thistle|misty|history|historical|historic|listen|listed|listing|listings|discover|distort|distill|distant|distinguish|district|distribute|dismiss|dispute|dissolve|display|disturb|disclaim|discard|disgust|disdain|disabled|disappear|disagree|disappoint)$/;
       if (!knownSafe.test(full)) {
         return {
           corrupted: true,
@@ -849,6 +873,114 @@ const RELATIONSHIP_PREDICATE_PATTERNS: Array<{ regex: RegExp; label: string }> =
   { regex: /\bcontracted\s+(?:by|to)\b/, label: "contracted by/to" },
 ];
 
+const TIME_PREDICATE_PATTERNS: Array<{ regex: RegExp; label: string }> = [
+  { regex: /\bopened\s+(?:in\s+(?:the\s+)?)?(?:last|past)\s+\d+\s+(?:month|year|week)s?\b/, label: "opened in last N" },
+  { regex: /\bopened\s+(?:with)?in\s+(?:the\s+)?(?:last|past)\s+\d+\s+(?:month|year|week)s?\b/, label: "opened within last N" },
+  { regex: /\bopened\s+(?:after|since)\s+\d{4}\b/, label: "opened after year" },
+  { regex: /\bopened\s+(?:after|since)\s+\w+\s+\d{4}\b/, label: "opened after date" },
+  { regex: /\bnew(?:ly)?\s+opened\b/, label: "newly opened" },
+  { regex: /\brecently\s+opened\b/, label: "recently opened" },
+  { regex: /\bopened\s+recently\b/, label: "opened recently" },
+  { regex: /\bopened\s+this\s+(?:year|month|quarter)\b/, label: "opened this period" },
+  { regex: /\bopening\s+date\b/, label: "opening date" },
+  { regex: /\blaunch(?:ed)?\s+(?:in\s+(?:the\s+)?)?(?:last|past)\s+\d+/, label: "launched in last N" },
+  { regex: /\bestablished\s+(?:in\s+(?:the\s+)?)?(?:last|past|after|since)\s+/, label: "established after" },
+];
+
+export function detectTimePredicate(
+  goal: string | null | undefined
+): { detected: boolean; predicate: string | null } {
+  if (!goal) return { detected: false, predicate: null };
+  const lower = goal.toLowerCase();
+  for (const { regex, label } of TIME_PREDICATE_PATTERNS) {
+    if (regex.test(lower)) {
+      return { detected: true, predicate: label };
+    }
+  }
+  return { detected: false, predicate: null };
+}
+
+export function evaluateTimePredicates(input: TowerVerdictInput, goal: string | null): TimePredicateResult {
+  const predicates = input.time_predicates ?? [];
+  const autoDetection = detectTimePredicate(goal);
+
+  const required: TimePredicateInput[] = [...predicates];
+  if (autoDetection.detected) {
+    const alreadyPresent = predicates.some(
+      (p) => p.predicate.toLowerCase() === autoDetection.predicate!.toLowerCase()
+    );
+    if (!alreadyPresent) {
+      required.push({ predicate: autoDetection.predicate!, hardness: "hard" });
+    }
+  }
+
+  if (required.length === 0) {
+    return {
+      time_predicates_required: [],
+      time_predicates_mode: "verifiable",
+      time_predicates_proxy_used: null,
+      time_predicates_satisfied_count: 0,
+      time_predicates_unknown_count: 0,
+      hard_constraints_blocked: [],
+      user_summary: "",
+    };
+  }
+
+  const mode: TimePredicateMode = input.time_predicates_mode ?? "unverifiable";
+  const proxyUsed: TimePredicateProxy | null = input.time_predicates_proxy_used ?? null;
+  const satisfiedCount = input.time_predicates_satisfied_count ?? 0;
+  const unknownCount = input.time_predicates_unknown_count ?? Math.max(required.length - satisfiedCount, 0);
+
+  const hardBlocked: string[] = [];
+
+  for (const tp of required) {
+    if (tp.hardness !== "hard") continue;
+
+    if (mode === "unverifiable" && proxyUsed == null) {
+      hardBlocked.push(`time_predicate_${tp.predicate.replace(/\s+/g, "_").toLowerCase()}`);
+    } else if (mode === "proxy" && proxyUsed == null) {
+      hardBlocked.push(`time_predicate_${tp.predicate.replace(/\s+/g, "_").toLowerCase()}`);
+    } else if (mode === "proxy" && proxyUsed != null) {
+      if (satisfiedCount === 0) {
+        hardBlocked.push(`time_predicate_${tp.predicate.replace(/\s+/g, "_").toLowerCase()}`);
+      }
+    } else if (mode === "verifiable") {
+      if (satisfiedCount === 0) {
+        hardBlocked.push(`time_predicate_${tp.predicate.replace(/\s+/g, "_").toLowerCase()}`);
+      }
+    }
+  }
+
+  let userSummary: string;
+  if (mode === "unverifiable" && proxyUsed == null) {
+    const predicateLabel = required[0]?.predicate ?? "opening date";
+    userSummary = `Stopped: required '${predicateLabel}' cannot be verified and no proxy was accepted.`;
+  } else if (mode === "proxy" && proxyUsed == null) {
+    const predicateLabel = required[0]?.predicate ?? "opening date";
+    userSummary = `Stopped: proxy verification for '${predicateLabel}' was requested but not executed.`;
+  } else if (mode === "proxy" && proxyUsed != null) {
+    if (satisfiedCount > 0) {
+      userSummary = `Opening dates cannot be guaranteed; proxy used: ${proxyUsed.replace(/_/g, " ")}.`;
+    } else {
+      userSummary = `Proxy '${proxyUsed.replace(/_/g, " ")}' was used but found no supporting evidence.`;
+    }
+  } else if (mode === "verifiable" && satisfiedCount > 0) {
+    userSummary = `Time predicate verified: ${satisfiedCount} of ${required.length} satisfied.`;
+  } else {
+    userSummary = `Time predicate could not be verified.`;
+  }
+
+  return {
+    time_predicates_required: required,
+    time_predicates_mode: mode,
+    time_predicates_proxy_used: proxyUsed,
+    time_predicates_satisfied_count: satisfiedCount,
+    time_predicates_unknown_count: unknownCount,
+    hard_constraints_blocked: hardBlocked,
+    user_summary: userSummary,
+  };
+}
+
 export function detectRelationshipPredicate(
   goal: string | null | undefined
 ): { detected: boolean; predicate: string | null } {
@@ -976,6 +1108,81 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
         },
         rationale: `${coreResult.rationale} [Relationship predicate: ${relReason}]`,
       };
+    }
+  }
+
+  const tpResult = evaluateTimePredicates(input, goal);
+  if (tpResult.time_predicates_required.length > 0) {
+    const hasHardBlocked = tpResult.hard_constraints_blocked.length > 0;
+
+    if (hasHardBlocked && coreResult.verdict === "ACCEPT") {
+      const tpCode = "TIME_PREDICATE_BLOCKED";
+      console.log(
+        `[TOWER] time_predicate_gate: verdict=ACCEPT→STOP code=${tpCode} ` +
+        `mode=${tpResult.time_predicates_mode} proxy=${tpResult.time_predicates_proxy_used} ` +
+        `satisfied=${tpResult.time_predicates_satisfied_count} blocked=${tpResult.hard_constraints_blocked.join(",")}`
+      );
+      return {
+        ...coreResult,
+        verdict: "STOP" as TowerVerdictAction,
+        action: "stop" as const,
+        gaps: [...coreResult.gaps, tpCode, ...tpResult.hard_constraints_blocked],
+        stop_reason: {
+          code: tpCode,
+          message: tpResult.user_summary,
+          evidence: {
+            time_predicates_required: tpResult.time_predicates_required,
+            time_predicates_mode: tpResult.time_predicates_mode,
+            time_predicates_proxy_used: tpResult.time_predicates_proxy_used,
+            time_predicates_satisfied_count: tpResult.time_predicates_satisfied_count,
+            time_predicates_unknown_count: tpResult.time_predicates_unknown_count,
+            hard_constraints_blocked: tpResult.hard_constraints_blocked,
+          },
+        },
+        rationale: `${coreResult.rationale} [Time predicate: ${tpResult.user_summary}]`,
+      };
+    }
+
+    if (tpResult.time_predicates_mode === "proxy" && tpResult.time_predicates_proxy_used != null && tpResult.time_predicates_satisfied_count > 0 && coreResult.verdict === "ACCEPT") {
+      const deliverySummary = input.delivery_summary ?? "";
+      const acceptableProxy = deliverySummary === "PARTIAL" || deliverySummary === "STOP" || /\bproxy\b/i.test(deliverySummary);
+      if (!acceptableProxy) {
+        const tpCode = "TIME_PREDICATE_PROXY_LANGUAGE_MISMATCH";
+        console.log(
+          `[TOWER] time_predicate_gate: delivery_summary does not acknowledge proxy. ` +
+          `delivery_summary="${deliverySummary}" proxy=${tpResult.time_predicates_proxy_used}`
+        );
+        return {
+          ...coreResult,
+          verdict: "STOP" as TowerVerdictAction,
+          action: "stop" as const,
+          gaps: [...coreResult.gaps, tpCode],
+          stop_reason: {
+            code: tpCode,
+            message: `Delivery summary says "${deliverySummary}" but proxy was used for time predicate. Summary must acknowledge proxy, not claim verified.`,
+            evidence: {
+              delivery_summary: deliverySummary,
+              time_predicates_proxy_used: tpResult.time_predicates_proxy_used,
+              time_predicates_satisfied_count: tpResult.time_predicates_satisfied_count,
+            },
+          },
+          rationale: `${coreResult.rationale} [Time predicate: ${tpResult.user_summary}]`,
+        };
+      }
+    }
+
+    if (coreResult.verdict === "ACCEPT" || coreResult.verdict === "CHANGE_PLAN") {
+      const hasTimeGaps = tpResult.hard_constraints_blocked.length > 0 || tpResult.time_predicates_unknown_count > 0;
+      if (hasTimeGaps) {
+        const extraGaps = tpResult.hard_constraints_blocked.filter(g => !coreResult.gaps.includes(g));
+        if (extraGaps.length > 0) {
+          return {
+            ...coreResult,
+            gaps: [...coreResult.gaps, ...extraGaps],
+            rationale: `${coreResult.rationale} [Time predicate: ${tpResult.user_summary}]`,
+          };
+        }
+      }
     }
   }
 

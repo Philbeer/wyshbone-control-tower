@@ -183,6 +183,15 @@ const towerVerdictRequestSchema = z.object({
 
   requires_relationship_evidence: z.boolean().optional(),
   verified_relationship_count: z.number().optional(),
+
+  time_predicates: z.array(z.object({
+    predicate: z.string(),
+    hardness: z.enum(["hard", "soft"]),
+  })).optional(),
+  time_predicates_mode: z.enum(["verifiable", "proxy", "unverifiable"]).optional(),
+  time_predicates_proxy_used: z.enum(["news_mention", "recent_reviews", "new_listing", "social_media_post", "press_release"]).nullable().optional(),
+  time_predicates_satisfied_count: z.number().int().optional(),
+  time_predicates_unknown_count: z.number().int().optional(),
 });
 
 async function persistTowerVerdict(row: {
@@ -457,6 +466,11 @@ router.post("/tower-verdict", async (req, res) => {
       attribute_evidence: attributeEvidenceItems.length > 0 ? attributeEvidenceItems : undefined,
       requires_relationship_evidence: data.requires_relationship_evidence,
       verified_relationship_count: data.verified_relationship_count,
+      time_predicates: data.time_predicates,
+      time_predicates_mode: data.time_predicates_mode,
+      time_predicates_proxy_used: data.time_predicates_proxy_used,
+      time_predicates_satisfied_count: data.time_predicates_satisfied_count,
+      time_predicates_unknown_count: data.time_predicates_unknown_count,
     });
 
     if (DEBUG) {
