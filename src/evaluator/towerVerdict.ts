@@ -608,6 +608,53 @@ function checkLabelHonesty(input: TowerVerdictInput): string[] {
   return gaps;
 }
 
+export function detectConcatenationArtifacts(
+  texts: string[]
+): { corrupted: boolean; reason: string | null } {
+  for (const raw of texts) {
+    if (!raw || raw.length < 3) continue;
+    const text = raw.trim();
+
+    if (/\([^)]{40,}\?\s*\)/.test(text)) {
+      return {
+        corrupted: true,
+        reason: "Input contains a full question embedded in parentheses.",
+      };
+    }
+
+    const words = text.split(/\s+/);
+    if (words.length >= 3) {
+      for (let i = 0; i < words.length - 2; i++) {
+        const w = words[i].toLowerCase().replace(/[^a-z]/g, "");
+        if (w.length >= 3 && w === words[i + 1]?.toLowerCase().replace(/[^a-z]/g, "") && w === words[i + 2]?.toLowerCase().replace(/[^a-z]/g, "")) {
+          return {
+            corrupted: true,
+            reason: `Input contains repeated word "${words[i]}" suggesting copy-paste corruption.`,
+          };
+        }
+      }
+    }
+
+    const lower = text.toLowerCase();
+    const concatPatterns = [
+      lower.match(/\b([a-z]{2,})(can|could|should|would|will|shall|does|did|is|are|was|were|have|has|had)([a-z]{2,})\b/),
+      lower.match(/\b([a-z]{3,})(can|could|should|would|will|shall|does|did|is|are|was|were|have|has|had)\b/),
+    ];
+    for (const concatMatch of concatPatterns) {
+      if (!concatMatch) continue;
+      const full = concatMatch[0];
+      const knownSafe = /^(american|african|mexican|dominican|franciscan|republican|anglican|candidate|candid|candy|candle|canal|canada|canadian|canary|cancel|cancer|canvas|canyon|scandal|volcano|significant|particular|popular|regular|circular|nuclear|angular|understand|thousand|standard|command|demand|expand|tuscan|artisan|partisan|guardian|median|suburban|veteran|spartan|christian|norwegian|hawaiian|european|indian|persian|russian|orphan|ocean|organ|urban|sedan|sultan|jordan|morgan|duncan|colorado|orlando|avocado|desperado|commando|tornado|crescendo|innuendo|nintendo|pseudo|overdo|bushido|bravado|eldorado|scholar|dollar|muscular|secular|spectacular|molecular|singular|cellular|modular|toucan|pelican|pecan|caravan|afghan|catalan|marzipan|husband|island|islands|began|scan|uncan|outdo|outis|outdid|outdoes|overis|overdid|overdoes|overwas|alcan|texan|vatican|vulcan|parmesan|artesian|diocesan)$/;
+      if (!knownSafe.test(full)) {
+        return {
+          corrupted: true,
+          reason: `Input appears concatenated: "${full}" looks like words merged without spaces.`,
+        };
+      }
+    }
+  }
+  return { corrupted: false, reason: null };
+}
+
 function verdictToAction(verdict: TowerVerdictAction): "continue" | "stop" | "change_plan" {
   if (verdict === "ACCEPT") return "continue";
   if (verdict === "CHANGE_PLAN") return "change_plan";
@@ -956,6 +1003,40 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       },
     };
     console.log(`[TOWER] verdict=STOP reason=NO_PROGRESS`);
+    return result;
+  }
+
+  const concatCheck = detectConcatenationArtifacts([
+    input.artefact_title ?? "",
+    input.artefact_summary ?? "",
+    goal ?? "",
+  ]);
+  if (concatCheck.corrupted) {
+    const matchedCount =
+      leads.length > 0 ? getMatchedLeadCount(constraints, leads) : 0;
+    const deliveredCount = resolveDeliveredCount(input, matchedCount);
+    const result: TowerVerdict = {
+      verdict: "CHANGE_PLAN",
+      action: "change_plan",
+      delivered: deliveredCount,
+      requested: requestedCount,
+      gaps: ["INPUT_CONCATENATED"],
+      confidence: 95,
+      rationale: `Input appears corrupted. ${concatCheck.reason} Ask the user to restate the request.`,
+      suggested_changes: [{
+        type: "CHANGE_QUERY" as SuggestedChangeType,
+        field: "query",
+        from: goal ?? input.artefact_title ?? "",
+        to: "Ask user to restate",
+        reason: concatCheck.reason ?? "Input appears concatenated.",
+      }],
+      stop_reason: {
+        code: "INPUT_CONCATENATED",
+        message: "Input appears concatenated. Ask the user to restate the request.",
+        evidence: { detected_reason: concatCheck.reason },
+      },
+    };
+    console.log(`[TOWER] verdict=CHANGE_PLAN reason=INPUT_CONCATENATED detail="${concatCheck.reason}"`);
     return result;
   }
 
