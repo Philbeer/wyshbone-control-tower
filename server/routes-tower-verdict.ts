@@ -199,6 +199,8 @@ const towerVerdictRequestSchema = z.object({
     verifiability: z.enum(["verifiable", "proxy", "unverifiable"]),
     proxy_selected: z.string().nullable().optional(),
   })).optional(),
+
+  best_effort_accepted: z.boolean().optional(),
 });
 
 async function persistTowerVerdict(row: {
@@ -242,7 +244,7 @@ function buildProofVerdict(
   runId: string,
   artefactId: string
 ) {
-  let verdict: "ACCEPT" | "CHANGE_PLAN" | "STOP";
+  let verdict: "ACCEPT" | "ACCEPT_WITH_UNVERIFIED" | "CHANGE_PLAN" | "STOP";
   let rationale: string;
   let stopReason: StopReason | undefined;
 
@@ -265,7 +267,7 @@ function buildProofVerdict(
 
   return {
     verdict,
-    action: verdict === "ACCEPT" ? "continue" as const : verdict === "CHANGE_PLAN" ? "change_plan" as const : "stop" as const,
+    action: (verdict === "ACCEPT" || verdict === "ACCEPT_WITH_UNVERIFIED") ? "continue" as const : verdict === "CHANGE_PLAN" ? "change_plan" as const : "stop" as const,
     rationale,
     confidence: 100,
     requested: 0,
@@ -479,6 +481,7 @@ router.post("/tower-verdict", async (req, res) => {
       time_predicates_satisfied_count: data.time_predicates_satisfied_count,
       time_predicates_unknown_count: data.time_predicates_unknown_count,
       unresolved_hard_constraints: data.unresolved_hard_constraints,
+      best_effort_accepted: data.best_effort_accepted,
     });
 
     if (DEBUG) {

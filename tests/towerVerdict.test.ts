@@ -14,6 +14,7 @@ import {
   AskLeadQuestionInput,
   TimePredicateInput,
   UnresolvedHardConstraint,
+  VERDICT_UI_MAP,
 } from "../src/evaluator/towerVerdict";
 
 let passed = 0;
@@ -2305,6 +2306,173 @@ test("Constraint gate: no unresolved constraints → normal ACCEPT", () => {
   expect(result.verdict).toBe("ACCEPT");
   if (result.gaps.some((g: string) => g === "CONSTRAINT_GATE_BLOCKED")) {
     throw new Error("Should not have constraint gate gaps when none provided");
+  }
+});
+
+// ── Truth Gate & ACCEPT_WITH_UNVERIFIED ──
+
+test("Compound time + live_music with no best_effort_accepted → STOP, not PASS", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "New Music Pub A" },
+      { name: "New Music Pub B" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 recently opened pubs with live music",
+    unresolved_hard_constraints: [
+      {
+        constraint_id: "c_opened_recently",
+        label: "recently opened",
+        verifiability: "proxy",
+        proxy_selected: null,
+      },
+      {
+        constraint_id: "c_live_music",
+        label: "live music",
+        verifiability: "unverifiable",
+      },
+    ],
+  });
+  expect(result.verdict).toBe("STOP");
+  if (result.verdict === "ACCEPT" || result.verdict === "ACCEPT_WITH_UNVERIFIED") {
+    throw new Error("Must not PASS or ACCEPT_WITH_UNVERIFIED without best_effort_accepted");
+  }
+  expect(result.gaps).toContain("CONSTRAINT_GATE_BLOCKED");
+});
+
+test("Best-effort accepted with unresolved constraints → ACCEPT_WITH_UNVERIFIED", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "New Music Pub A" },
+      { name: "New Music Pub B" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 recently opened pubs with live music",
+    best_effort_accepted: true,
+    unresolved_hard_constraints: [
+      {
+        constraint_id: "c_opened_recently",
+        label: "recently opened",
+        verifiability: "proxy",
+        proxy_selected: null,
+      },
+      {
+        constraint_id: "c_live_music",
+        label: "live music",
+        verifiability: "unverifiable",
+      },
+    ],
+  });
+  expect(result.verdict).toBe("ACCEPT_WITH_UNVERIFIED");
+  expect(result.action).toBe("continue");
+  expect(result.gaps).toContain("CONSTRAINT_GATE_BEST_EFFORT");
+  expect(result.gaps).toContain("c_opened_recently");
+  expect(result.gaps).toContain("c_live_music");
+  if (!result.stop_reason) throw new Error("Must have stop_reason");
+  expect(result.stop_reason.code).toBe("CONSTRAINT_GATE_BEST_EFFORT");
+  if (!result.stop_reason.message.includes("best-effort accepted")) {
+    throw new Error(`stop_reason.message must mention best-effort, got: "${result.stop_reason.message}"`);
+  }
+  if (!result.rationale.includes("best-effort")) {
+    throw new Error(`Rationale must mention best-effort, got: "${result.rationale}"`);
+  }
+});
+
+test("ACCEPT_WITH_UNVERIFIED action is 'continue' (execution proceeds)", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 1,
+    leads: withEvidence([{ name: "Cafe X" }]),
+    constraints: [],
+    original_goal: "Find a recently opened cafe",
+    best_effort_accepted: true,
+    unresolved_hard_constraints: [{
+      constraint_id: "c_recent",
+      label: "recently opened",
+      verifiability: "unverifiable",
+    }],
+  });
+  expect(result.verdict).toBe("ACCEPT_WITH_UNVERIFIED");
+  expect(result.action).toBe("continue");
+});
+
+test("VERDICT_UI_MAP has correct entries for all verdict types", () => {
+  expect(VERDICT_UI_MAP.ACCEPT.intent).toBe("success");
+  expect(VERDICT_UI_MAP.ACCEPT.label).toBe("Verified satisfied");
+  expect(VERDICT_UI_MAP.ACCEPT_WITH_UNVERIFIED.intent).toBe("warning");
+  if (!VERDICT_UI_MAP.ACCEPT_WITH_UNVERIFIED.label.includes("not verified")) {
+    throw new Error(`ACCEPT_WITH_UNVERIFIED label must mention 'not verified', got: "${VERDICT_UI_MAP.ACCEPT_WITH_UNVERIFIED.label}"`);
+  }
+  expect(VERDICT_UI_MAP.STOP.intent).toBe("error");
+  expect(VERDICT_UI_MAP.CHANGE_PLAN.intent).toBe("warning");
+});
+
+test("Truth gate: hard constraint with met=false in constraint_results and no best_effort → STOP", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Pub A" },
+      { name: "Pub B" },
+    ]),
+    constraints: [
+      { type: "HAS_ATTRIBUTE" as any, field: "attribute", value: "live_music", hardness: "hard" as const },
+    ],
+    original_goal: "Find 2 pubs with live music",
+  });
+  if (result.verdict === "ACCEPT") {
+    throw new Error("Must not ACCEPT when hard HAS_ATTRIBUTE constraint has no CVL evidence and no best_effort");
+  }
+});
+
+test("Truth gate: hard HAS_ATTRIBUTE not passed + best_effort_accepted → ACCEPT_WITH_UNVERIFIED via truth gate", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Pub A" },
+      { name: "Pub B" },
+    ]),
+    constraints: [
+      { type: "HAS_ATTRIBUTE" as any, field: "attribute", value: "live_music", hardness: "hard" as const },
+    ],
+    original_goal: "Find 2 pubs with live music",
+    best_effort_accepted: true,
+  });
+  if (result.verdict === "ACCEPT") {
+    throw new Error("Must not plain ACCEPT when hard constraint is unverified, even with best_effort");
+  }
+});
+
+test("Truth gate: hard HAS_ATTRIBUTE not passed + no best_effort → STOP via truth gate", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Pub A" },
+      { name: "Pub B" },
+    ]),
+    constraints: [
+      { type: "HAS_ATTRIBUTE" as any, field: "attribute", value: "live_music", hardness: "hard" as const },
+    ],
+    original_goal: "Find 2 pubs with live music",
+  });
+  if (result.verdict === "ACCEPT") {
+    throw new Error("Must not ACCEPT when hard HAS_ATTRIBUTE constraint has no evidence and no best_effort");
+  }
+});
+
+test("No unresolved constraints and no best_effort → plain ACCEPT", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Pub A" },
+      { name: "Pub B" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 pubs in Arundel",
+  });
+  expect(result.verdict).toBe("ACCEPT");
+  if (result.gaps.some((g: string) => g === "CONSTRAINT_GATE_BEST_EFFORT" || g === "TRUTH_GATE_BEST_EFFORT")) {
+    throw new Error("No best-effort gaps when no unresolved constraints exist");
   }
 });
 

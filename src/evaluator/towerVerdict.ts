@@ -1,6 +1,13 @@
 import { judgeEvidenceQuality } from "./evidenceQualityJudge";
 
-export type TowerVerdictAction = "ACCEPT" | "CHANGE_PLAN" | "STOP";
+export type TowerVerdictAction = "ACCEPT" | "ACCEPT_WITH_UNVERIFIED" | "CHANGE_PLAN" | "STOP";
+
+export const VERDICT_UI_MAP: Record<TowerVerdictAction, { label: string; intent: "success" | "warning" | "error" }> = {
+  ACCEPT: { label: "Verified satisfied", intent: "success" },
+  ACCEPT_WITH_UNVERIFIED: { label: "Ran, but not verified — best-effort accepted", intent: "warning" },
+  CHANGE_PLAN: { label: "Replanning", intent: "warning" },
+  STOP: { label: "Cannot meet requirements honestly", intent: "error" },
+};
 
 export type ConstraintType =
   | "NAME_CONTAINS"
@@ -205,6 +212,8 @@ export interface TowerVerdictInput {
   time_predicates_unknown_count?: number;
 
   unresolved_hard_constraints?: UnresolvedHardConstraint[];
+
+  best_effort_accepted?: boolean;
 }
 
 export interface UnresolvedHardConstraint {
@@ -705,7 +714,7 @@ export function detectConcatenationArtifacts(
 }
 
 function verdictToAction(verdict: TowerVerdictAction): "continue" | "stop" | "change_plan" {
-  if (verdict === "ACCEPT") return "continue";
+  if (verdict === "ACCEPT" || verdict === "ACCEPT_WITH_UNVERIFIED") return "continue";
   if (verdict === "CHANGE_PLAN") return "change_plan";
   return "stop";
 }
@@ -1150,8 +1159,33 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
     }
 
     if (blocked.length > 0) {
-      const gateCode = "CONSTRAINT_GATE_BLOCKED";
       const blockedIds = blocked.map((b) => b.id);
+      const blockedLabels = blocked.map((b) => b.label);
+
+      if (input.best_effort_accepted === true) {
+        const gateCode = "CONSTRAINT_GATE_BEST_EFFORT";
+        const userReason = blockedLabels.map((l) => `${l} (unverified, best-effort accepted)`).join("; ");
+        console.log(
+          `[TOWER] constraint_gate_check: verdict=ACCEPT→ACCEPT_WITH_UNVERIFIED best_effort=true blocked=${blockedIds.join(",")}`
+        );
+        return {
+          ...coreResult,
+          verdict: "ACCEPT_WITH_UNVERIFIED" as TowerVerdictAction,
+          action: "continue" as const,
+          gaps: [...coreResult.gaps, gateCode, ...blockedIds],
+          stop_reason: {
+            code: gateCode,
+            message: userReason,
+            evidence: {
+              unresolved_hard_constraints: blocked,
+              best_effort_accepted: true,
+            },
+          },
+          rationale: `${coreResult.rationale} [Constraint gate: unverified constraints accepted as best-effort: ${blockedLabels.join(", ")}]`,
+        };
+      }
+
+      const gateCode = "CONSTRAINT_GATE_BLOCKED";
       const userReason = blocked.map((b) => b.reason).join(" ");
       console.log(
         `[TOWER] constraint_gate_check: verdict=ACCEPT→STOP blocked=${blockedIds.join(",")}`
@@ -1245,6 +1279,62 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
           };
         }
       }
+    }
+  }
+
+  if (coreResult.verdict === "ACCEPT" && coreResult.constraint_results) {
+    const hardUnverified = coreResult.constraint_results.filter((cr: ConstraintResult) => {
+      if (cr.constraint.hardness !== "hard") return false;
+      if (cr.passed) return false;
+      const st = cr.status;
+      return st === "unknown" || st === "not_attempted" || !cr.passed;
+    });
+
+    if (hardUnverified.length > 0) {
+      const unverifiedLabels = hardUnverified.map((cr: ConstraintResult) =>
+        `${cr.constraint.type}(${cr.constraint.field}=${cr.constraint.value})`
+      );
+
+      if (input.best_effort_accepted === true) {
+        const gateCode = "TRUTH_GATE_BEST_EFFORT";
+        console.log(
+          `[TOWER] truth_gate: verdict=ACCEPT→ACCEPT_WITH_UNVERIFIED best_effort=true unverified=${unverifiedLabels.join(",")}`
+        );
+        return {
+          ...coreResult,
+          verdict: "ACCEPT_WITH_UNVERIFIED" as TowerVerdictAction,
+          action: "continue" as const,
+          gaps: [...coreResult.gaps, gateCode],
+          stop_reason: {
+            code: gateCode,
+            message: `Hard constraints not verified: ${unverifiedLabels.join(", ")}. User accepted best-effort.`,
+            evidence: {
+              unverified_constraints: unverifiedLabels,
+              best_effort_accepted: true,
+            },
+          },
+          rationale: `${coreResult.rationale} [Truth gate: hard constraints unverified but best-effort accepted: ${unverifiedLabels.join(", ")}]`,
+        };
+      }
+
+      const gateCode = "TRUTH_GATE_BLOCKED";
+      console.log(
+        `[TOWER] truth_gate: verdict=ACCEPT→STOP unverified=${unverifiedLabels.join(",")}`
+      );
+      return {
+        ...coreResult,
+        verdict: "STOP" as TowerVerdictAction,
+        action: "stop" as const,
+        gaps: [...coreResult.gaps, gateCode],
+        stop_reason: {
+          code: gateCode,
+          message: `Hard constraints not verified: ${unverifiedLabels.join(", ")}. Cannot PASS with unverified hard constraints.`,
+          evidence: {
+            unverified_constraints: unverifiedLabels,
+          },
+        },
+        rationale: `${coreResult.rationale} [Truth gate: hard constraints unverified — ${unverifiedLabels.join(", ")}]`,
+      };
     }
   }
 
