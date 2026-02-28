@@ -900,21 +900,10 @@ export function detectTimePredicate(
   return { detected: false, predicate: null };
 }
 
-export function evaluateTimePredicates(input: TowerVerdictInput, goal: string | null): TimePredicateResult {
+export function evaluateTimePredicates(input: TowerVerdictInput, _goal: string | null): TimePredicateResult {
   const predicates = input.time_predicates ?? [];
-  const autoDetection = detectTimePredicate(goal);
 
-  const required: TimePredicateInput[] = [...predicates];
-  if (autoDetection.detected) {
-    const alreadyPresent = predicates.some(
-      (p) => p.predicate.toLowerCase() === autoDetection.predicate!.toLowerCase()
-    );
-    if (!alreadyPresent) {
-      required.push({ predicate: autoDetection.predicate!, hardness: "hard" });
-    }
-  }
-
-  if (required.length === 0) {
+  if (predicates.length === 0) {
     return {
       time_predicates_required: [],
       time_predicates_mode: "verifiable",
@@ -926,7 +915,23 @@ export function evaluateTimePredicates(input: TowerVerdictInput, goal: string | 
     };
   }
 
-  const mode: TimePredicateMode = input.time_predicates_mode ?? "unverifiable";
+  const required: TimePredicateInput[] = [...predicates];
+
+  if (input.time_predicates_mode == null) {
+    return {
+      time_predicates_required: required,
+      time_predicates_mode: "unverifiable",
+      time_predicates_proxy_used: null,
+      time_predicates_satisfied_count: 0,
+      time_predicates_unknown_count: required.length,
+      hard_constraints_blocked: required
+        .filter((tp) => tp.hardness === "hard")
+        .map((tp) => `time_predicate_${tp.predicate.replace(/\s+/g, "_").toLowerCase()}`),
+      user_summary: `Stopped: Supervisor did not declare verifiability for time predicate '${required[0].predicate}'. Cannot assume satisfied.`,
+    };
+  }
+
+  const mode: TimePredicateMode = input.time_predicates_mode;
   const proxyUsed: TimePredicateProxy | null = input.time_predicates_proxy_used ?? null;
   const satisfiedCount = input.time_predicates_satisfied_count ?? 0;
   const unknownCount = input.time_predicates_unknown_count ?? Math.max(required.length - satisfiedCount, 0);
@@ -965,9 +970,9 @@ export function evaluateTimePredicates(input: TowerVerdictInput, goal: string | 
       userSummary = `Proxy '${proxyUsed.replace(/_/g, " ")}' was used but found no supporting evidence.`;
     }
   } else if (mode === "verifiable" && satisfiedCount > 0) {
-    userSummary = `Time predicate verified: ${satisfiedCount} of ${required.length} satisfied.`;
+    userSummary = `Time predicate satisfied per Supervisor: ${satisfiedCount} of ${required.length} met.`;
   } else {
-    userSummary = `Time predicate could not be verified.`;
+    userSummary = `Time predicate could not be satisfied.`;
   }
 
   return {

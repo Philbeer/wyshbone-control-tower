@@ -1916,7 +1916,7 @@ test("Time predicate: hard unverifiable with no proxy → STOP", () => {
   if (!result.rationale.includes("Time predicate")) throw new Error("Rationale must mention time predicate");
 });
 
-test("Time predicate: auto-detected hard + unverifiable → STOP", () => {
+test("Time predicate: Supervisor-declared hard + unverifiable → STOP", () => {
   const result = judgeLeadsList({
     requested_count_user: 2,
     leads: withEvidence([
@@ -1925,10 +1925,15 @@ test("Time predicate: auto-detected hard + unverifiable → STOP", () => {
     ]),
     constraints: [],
     original_goal: "Find 2 cafes opened in last 3 months",
+    time_predicates: [{ predicate: "opened in last 3 months", hardness: "hard" }],
+    time_predicates_mode: "unverifiable",
   });
   expect(result.verdict).toBe("STOP");
   expect(result.gaps).toContain("TIME_PREDICATE_BLOCKED");
   expect(result.stop_reason!.code).toBe("TIME_PREDICATE_BLOCKED");
+  if (!result.rationale.includes("cannot be verified")) {
+    throw new Error(`Rationale must mention inability to verify, got: "${result.rationale}"`);
+  }
 });
 
 test("Time predicate: explicit hard with mode=proxy but proxy not run (null) → STOP", () => {
@@ -2109,7 +2114,7 @@ test("evaluateTimePredicates: user_summary for proxy with no evidence", () => {
 
 // ── Time Predicate: no time predicates = transparent pass-through ──
 
-test("Time predicate: no predicates, no auto-detection → normal ACCEPT", () => {
+test("Time predicate: no predicates from Supervisor → normal ACCEPT (Tower does not infer)", () => {
   const result = judgeLeadsList({
     requested_count_user: 2,
     leads: withEvidence([
@@ -2122,6 +2127,40 @@ test("Time predicate: no predicates, no auto-detection → normal ACCEPT", () =>
   expect(result.verdict).toBe("ACCEPT");
   if (result.gaps.some((g: string) => g.includes("TIME_PREDICATE"))) {
     throw new Error("Should have no time predicate gaps for normal goal");
+  }
+});
+
+test("Time predicate: goal mentions 'opened recently' but Supervisor sent no time_predicates → ACCEPT (Tower does not reinterpret)", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "New Cafe" },
+      { name: "Fresh Bistro" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 cafes opened recently in Bristol",
+  });
+  expect(result.verdict).toBe("ACCEPT");
+  if (result.gaps.some((g: string) => g.includes("TIME_PREDICATE"))) {
+    throw new Error("Tower must not infer time predicates from goal text — only Supervisor declares them");
+  }
+});
+
+test("Time predicate: Supervisor sends hard predicate without mode → STOP (cannot assume satisfied)", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Place A" },
+      { name: "Place B" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 restaurants opened in last 6 months",
+    time_predicates: [{ predicate: "opened in last 6 months", hardness: "hard" }],
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.gaps).toContain("TIME_PREDICATE_BLOCKED");
+  if (!result.rationale.includes("Supervisor did not declare verifiability")) {
+    throw new Error(`Rationale must explain missing mode declaration, got: "${result.rationale}"`);
   }
 });
 
