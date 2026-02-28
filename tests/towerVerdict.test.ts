@@ -13,6 +13,7 @@ import {
   StructuredConstraint,
   AskLeadQuestionInput,
   TimePredicateInput,
+  UnresolvedHardConstraint,
 } from "../src/evaluator/towerVerdict";
 
 let passed = 0;
@@ -2161,6 +2162,149 @@ test("Time predicate: Supervisor sends hard predicate without mode → STOP (can
   expect(result.gaps).toContain("TIME_PREDICATE_BLOCKED");
   if (!result.rationale.includes("Supervisor did not declare verifiability")) {
     throw new Error(`Rationale must explain missing mode declaration, got: "${result.rationale}"`);
+  }
+});
+
+// ── Constraint Gate Check: QA failure mirrors ──
+
+test("Constraint gate: hard time_predicate with no proxy_selected → STOP", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: withEvidence([
+      { name: "New Cafe A" },
+      { name: "New Cafe B" },
+      { name: "New Cafe C" },
+    ]),
+    constraints: [],
+    original_goal: "Find 3 cafes opened in last 6 months",
+    unresolved_hard_constraints: [{
+      constraint_id: "c_opened_6m",
+      label: "opened in last 6 months",
+      verifiability: "proxy",
+      proxy_selected: null,
+    }],
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.gaps).toContain("CONSTRAINT_GATE_BLOCKED");
+  expect(result.gaps).toContain("c_opened_6m");
+  if (!result.stop_reason) throw new Error("Must have stop_reason");
+  expect(result.stop_reason.code).toBe("CONSTRAINT_GATE_BLOCKED");
+  if (!result.stop_reason.message.includes("without an accepted proxy")) {
+    throw new Error(`Reason must mention missing proxy, got: "${result.stop_reason.message}"`);
+  }
+});
+
+test("Constraint gate: hard live_music unverifiable → STOP", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "The Jazz Bar" },
+      { name: "Blues Lounge" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 pubs with live music in Brighton",
+    unresolved_hard_constraints: [{
+      constraint_id: "c_live_music",
+      label: "live music",
+      verifiability: "unverifiable",
+    }],
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.gaps).toContain("CONSTRAINT_GATE_BLOCKED");
+  expect(result.gaps).toContain("c_live_music");
+  if (!result.stop_reason!.message.includes("can't be verified with current sources")) {
+    throw new Error(`Reason must mention unverifiable, got: "${result.stop_reason!.message}"`);
+  }
+});
+
+test("Constraint gate: compound hard time + live_music unresolved → STOP with both blocked", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "New Music Venue A" },
+      { name: "New Music Venue B" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 recently opened pubs with live music",
+    unresolved_hard_constraints: [
+      {
+        constraint_id: "c_opened_recently",
+        label: "recently opened",
+        verifiability: "proxy",
+        proxy_selected: null,
+      },
+      {
+        constraint_id: "c_live_music",
+        label: "live music requirement",
+        verifiability: "unverifiable",
+      },
+    ],
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.gaps).toContain("CONSTRAINT_GATE_BLOCKED");
+  expect(result.gaps).toContain("c_opened_recently");
+  expect(result.gaps).toContain("c_live_music");
+  if (!result.stop_reason!.message.includes("without an accepted proxy")) {
+    throw new Error("Must mention missing proxy for time constraint");
+  }
+  if (!result.stop_reason!.message.includes("can't be verified with current sources")) {
+    throw new Error("Must mention unverifiable for live music constraint");
+  }
+});
+
+test("Constraint gate: soft time_predicate unresolved → ACCEPT but does NOT claim constraint satisfied", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Place A" },
+      { name: "Place B" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 cafes, preferably recently opened",
+    time_predicates: [{ predicate: "recently opened", hardness: "soft" }],
+    time_predicates_mode: "unverifiable",
+  });
+  expect(result.verdict).toBe("ACCEPT");
+  if (result.rationale.includes("verified") && result.rationale.includes("opening")) {
+    throw new Error("Rationale must not claim time constraint was verified when it is unverifiable");
+  }
+});
+
+test("Constraint gate: proxy_selected present with evidence → no block", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Cafe X" },
+      { name: "Cafe Y" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 cafes opened in last 6 months",
+    unresolved_hard_constraints: [{
+      constraint_id: "c_opened_6m",
+      label: "opened in last 6 months",
+      verifiability: "proxy",
+      proxy_selected: "recent_reviews",
+    }],
+  });
+  expect(result.verdict).toBe("ACCEPT");
+  if (result.gaps.some((g: string) => g === "CONSTRAINT_GATE_BLOCKED")) {
+    throw new Error("Should not block when proxy is selected");
+  }
+});
+
+test("Constraint gate: no unresolved constraints → normal ACCEPT", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Normal A" },
+      { name: "Normal B" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 pubs in Arundel",
+  });
+  expect(result.verdict).toBe("ACCEPT");
+  if (result.gaps.some((g: string) => g === "CONSTRAINT_GATE_BLOCKED")) {
+    throw new Error("Should not have constraint gate gaps when none provided");
   }
 });
 

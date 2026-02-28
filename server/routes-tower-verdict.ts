@@ -192,6 +192,13 @@ const towerVerdictRequestSchema = z.object({
   time_predicates_proxy_used: z.enum(["news_mention", "recent_reviews", "new_listing", "social_media_post", "press_release"]).nullable().optional(),
   time_predicates_satisfied_count: z.number().int().optional(),
   time_predicates_unknown_count: z.number().int().optional(),
+
+  unresolved_hard_constraints: z.array(z.object({
+    constraint_id: z.string(),
+    label: z.string(),
+    verifiability: z.enum(["verifiable", "proxy", "unverifiable"]),
+    proxy_selected: z.string().nullable().optional(),
+  })).optional(),
 });
 
 async function persistTowerVerdict(row: {
@@ -471,6 +478,7 @@ router.post("/tower-verdict", async (req, res) => {
       time_predicates_proxy_used: data.time_predicates_proxy_used,
       time_predicates_satisfied_count: data.time_predicates_satisfied_count,
       time_predicates_unknown_count: data.time_predicates_unknown_count,
+      unresolved_hard_constraints: data.unresolved_hard_constraints,
     });
 
     if (DEBUG) {

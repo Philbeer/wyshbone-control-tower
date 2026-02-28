@@ -203,6 +203,15 @@ export interface TowerVerdictInput {
   time_predicates_proxy_used?: TimePredicateProxy | null;
   time_predicates_satisfied_count?: number;
   time_predicates_unknown_count?: number;
+
+  unresolved_hard_constraints?: UnresolvedHardConstraint[];
+}
+
+export interface UnresolvedHardConstraint {
+  constraint_id: string;
+  label: string;
+  verifiability: "verifiable" | "proxy" | "unverifiable";
+  proxy_selected?: string | null;
 }
 
 export interface StructuredConstraint {
@@ -1112,6 +1121,54 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
           },
         },
         rationale: `${coreResult.rationale} [Relationship predicate: ${relReason}]`,
+      };
+    }
+  }
+
+  if (input.unresolved_hard_constraints && input.unresolved_hard_constraints.length > 0 && coreResult.verdict === "ACCEPT") {
+    const blocked: Array<{ id: string; label: string; reason: string }> = [];
+    for (const uhc of input.unresolved_hard_constraints) {
+      if (uhc.verifiability === "unverifiable") {
+        blocked.push({
+          id: uhc.constraint_id,
+          label: uhc.label,
+          reason: `Stopped: ${uhc.label} can't be verified with current sources.`,
+        });
+      } else if (uhc.verifiability === "proxy" && (uhc.proxy_selected == null || uhc.proxy_selected === "")) {
+        blocked.push({
+          id: uhc.constraint_id,
+          label: uhc.label,
+          reason: `Stopped: required ${uhc.label} can't be verified without an accepted proxy.`,
+        });
+      } else if (uhc.verifiability === "verifiable") {
+        blocked.push({
+          id: uhc.constraint_id,
+          label: uhc.label,
+          reason: `Stopped: ${uhc.label} is verifiable but was not resolved before execution completed.`,
+        });
+      }
+    }
+
+    if (blocked.length > 0) {
+      const gateCode = "CONSTRAINT_GATE_BLOCKED";
+      const blockedIds = blocked.map((b) => b.id);
+      const userReason = blocked.map((b) => b.reason).join(" ");
+      console.log(
+        `[TOWER] constraint_gate_check: verdict=ACCEPT→STOP blocked=${blockedIds.join(",")}`
+      );
+      return {
+        ...coreResult,
+        verdict: "STOP" as TowerVerdictAction,
+        action: "stop" as const,
+        gaps: [...coreResult.gaps, gateCode, ...blockedIds],
+        stop_reason: {
+          code: gateCode,
+          message: userReason,
+          evidence: {
+            unresolved_hard_constraints: blocked,
+          },
+        },
+        rationale: `${coreResult.rationale} [Constraint gate: ${userReason}]`,
       };
     }
   }
