@@ -176,6 +176,9 @@ export interface TowerVerdictInput {
   attribute_evidence?: AttributeEvidenceArtefact[];
 
   delivery_summary?: "PASS" | "PARTIAL" | "STOP" | string;
+
+  requires_relationship_evidence?: boolean;
+  verified_relationship_count?: number;
 }
 
 export interface StructuredConstraint {
@@ -812,6 +815,45 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
           rationale: `${coreResult.rationale} [Evidence quality: ${eqResult.detail}]`,
         };
       }
+    }
+  }
+
+  if (
+    input.requires_relationship_evidence === true &&
+    (input.verified_relationship_count === undefined || input.verified_relationship_count === 0)
+  ) {
+    if (coreResult.verdict === "ACCEPT") {
+      const hasDelivered = coreResult.delivered > 0;
+      const relVerdict: TowerVerdictAction = hasDelivered ? "STOP" : "STOP";
+      const relAction: "stop" | "continue" | "change_plan" = "stop";
+      const relReason = hasDelivered
+        ? "Candidates found, but relationship evidence missing."
+        : "Required relationship could not be verified.";
+      const relCode = hasDelivered
+        ? "RELATIONSHIP_EVIDENCE_MISSING"
+        : "RELATIONSHIP_UNVERIFIED";
+
+      console.log(
+        `[TOWER] relationship_predicate_gate: verdict=${coreResult.verdict}→STOP code=${relCode} ` +
+        `requires_relationship_evidence=true verified_relationship_count=${input.verified_relationship_count ?? 0} ` +
+        `delivered=${coreResult.delivered}`
+      );
+
+      return {
+        ...coreResult,
+        verdict: relVerdict,
+        action: relAction,
+        gaps: [...coreResult.gaps, relCode],
+        stop_reason: {
+          code: relCode,
+          message: relReason,
+          evidence: {
+            requires_relationship_evidence: true,
+            verified_relationship_count: input.verified_relationship_count ?? 0,
+          },
+        },
+        rationale: `${coreResult.rationale} [Relationship predicate: ${relReason}]`,
+      };
     }
   }
 

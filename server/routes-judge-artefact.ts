@@ -220,6 +220,8 @@ function judgeLeadsListArtefact(
     verification_summary: payloadJson?.verification_summary,
     constraints_extracted: payloadJson?.constraints_extracted,
     attribute_evidence: attributeEvidence,
+    requires_relationship_evidence: payloadJson?.requires_relationship_evidence,
+    verified_relationship_count: payloadJson?.verified_relationship_count,
   });
 
   if (DEBUG) {

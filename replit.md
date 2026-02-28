@@ -44,6 +44,9 @@ CVL evaluation for `HAS_ATTRIBUTE` constraints (e.g., `c_attr_live_music`) consu
 3. If can't replan and no unverifiable flag → STOP with code HARD_CONSTRAINT_UNKNOWN (hard_unknown_no_replans)
 Key: if no `attribute_evidence` artefacts exist in DB AND no CVL constraint_results entry matches, the constraint evaluates to status=unknown, goes into hardUnknowns, and triggers path 2 or 3.
 
+**Relationship Predicate Enforcement:**
+Tower enforces relationship evidence gating as a post-check in `judgeLeadsList`. If `requires_relationship_evidence === true` AND `verified_relationship_count === 0` (or undefined), ACCEPT/PASS is illegal. Tower overrides to STOP with code `RELATIONSHIP_EVIDENCE_MISSING` (if candidates delivered) or `RELATIONSHIP_UNVERIFIED` (if none delivered). Both routes (`/tower-verdict` and `/judge-artefact`) pass these fields through from the request/payload. The gate runs after evidence quality checks but before final return, ensuring it is the last honesty check. Input fields: `requires_relationship_evidence` (boolean), `verified_relationship_count` (number) — both optional, backward compatible.
+
 **UI/UX Decisions:**
 The dashboard is simplified, featuring plain language and three core sections: **Recent Runs** (user conversations with events, status, timelines, flagging), **Auto-Flagged Runs** (automatically detected quality issues), and **Manual Flags**. An **Advanced Tools** section provides access to Tower Status, Automated Tests, Patch Failures, and Complete Run History. A **Conversation Timeline View** offers detailed chronological message views, and a **Simplified Investigation Workflow** displays run input/output, AI diagnosis, and suggested patches with approval/rejection options. Technical jargon is minimized.
 

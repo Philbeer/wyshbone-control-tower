@@ -180,6 +180,9 @@ const towerVerdictRequestSchema = z.object({
   verification_summary: verificationSummarySchema.optional(),
   constraints_extracted: constraintsExtractedSchema.optional(),
   delivery_summary: z.string().optional(),
+
+  requires_relationship_evidence: z.boolean().optional(),
+  verified_relationship_count: z.number().optional(),
 });
 
 async function persistTowerVerdict(row: {
@@ -452,6 +455,8 @@ router.post("/tower-verdict", async (req, res) => {
       constraints_extracted: data.constraints_extracted as any,
       delivery_summary: data.delivery_summary,
       attribute_evidence: attributeEvidenceItems.length > 0 ? attributeEvidenceItems : undefined,
+      requires_relationship_evidence: data.requires_relationship_evidence,
+      verified_relationship_count: data.verified_relationship_count,
     });
 
     if (DEBUG) {
