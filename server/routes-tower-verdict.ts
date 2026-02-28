@@ -179,7 +179,7 @@ const towerVerdictRequestSchema = z.object({
 
   verification_summary: verificationSummarySchema.optional(),
   constraints_extracted: constraintsExtractedSchema.optional(),
-  delivery_summary: z.string().optional(),
+  delivery_summary: z.enum(["PASS", "PARTIAL", "STOP"]).optional(),
 
   requires_relationship_evidence: z.boolean().optional(),
   verified_relationship_count: z.number().optional(),

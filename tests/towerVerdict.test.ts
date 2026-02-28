@@ -88,15 +88,25 @@ function runTests() {
   }
 }
 
-const sampleLeads: Lead[] = [
+function withEvidence(leads: Lead[]): Lead[] {
+  return leads.map((l) => ({
+    ...l,
+    verified: true,
+    evidence: "Google Maps verified",
+    source_url: "https://maps.google.com",
+  }));
+}
+
+const sampleLeadsRaw: Lead[] = [
   { name: "The Plough Inn", address: "High Street, Arundel" },
   { name: "Pear Tree Pub", address: "Mill Road, Arundel" },
   { name: "The Swan", address: "River Road, Arundel" },
   { name: "The Red Lion", address: "Castle Square, Arundel" },
   { name: "The Black Rabbit", address: "Mill Road, Offham" },
 ];
+const sampleLeads: Lead[] = withEvidence(sampleLeadsRaw);
 
-const dentistLeads: Lead[] = [
+const dentistLeadsRaw: Lead[] = [
   { name: "Arundel Dental Practice", address: "High Street, Arundel" },
   { name: "Castle Dental Care", address: "Tarrant Street, Arundel" },
   { name: "Arun Dental Surgery", address: "Mill Road, Littlehampton" },
@@ -120,6 +130,7 @@ const dentistLeads: Lead[] = [
   { name: "Findon Dental Surgery", address: "Findon Road, Findon" },
   { name: "Bramber Dental Clinic", address: "Castle Road, Bramber" },
 ];
+const dentistLeads: Lead[] = withEvidence(dentistLeadsRaw);
 
 // ── Core contract tests ──
 
@@ -215,8 +226,9 @@ test("Falls back to target_count then requested_count", () => {
 test("delivered_matching_accumulated preferred over leads.length", () => {
   const result = judgeLeadsList({
     requested_count_user: 4,
-    leads: [{ name: "A" }, { name: "B" }],
+    leads: withEvidence([{ name: "A" }, { name: "B" }]),
     delivered: { delivered_matching_accumulated: 6 },
+    verification_summary: { verified_exact_count: 6 },
     constraints: [],
     original_goal: "Find 4 things",
   });
@@ -239,6 +251,7 @@ test("delivered_matching_this_plan used as fallback", () => {
     requested_count_user: 4,
     leads: [],
     delivered: { delivered_matching_this_plan: 5 },
+    verification_summary: { verified_exact_count: 5 },
     constraints: [],
     original_goal: "Find 4 things",
   });
@@ -796,6 +809,7 @@ test("Acceptance A.2: dentist requested=4, delivered_matching_accumulated=4 → 
         hardness: "soft",
       },
     ],
+    verification_summary: { verified_exact_count: 4 },
     meta: { replans_used: 1, max_replans: 3, radius_km: 10 },
     original_goal: "Find 4 dentists in Arundel using google places search",
   });
@@ -1069,12 +1083,12 @@ test("Swan case: 4 of 4 delivered produces ACCEPT", () => {
     { type: "NAME_CONTAINS", field: "name", value: "swan", hardness: "hard" },
     { type: "LOCATION", field: "location", value: "arundel", hardness: "hard" },
   ];
-  const leads: Lead[] = [
+  const leads: Lead[] = withEvidence([
     { name: "The Swan Inn" },
     { name: "Swan Hotel" },
     { name: "Black Swan Pub" },
     { name: "Old Swan Brewery" },
-  ];
+  ]);
   const result = judgeLeadsList({
     requested_count_user: 4,
     leads,

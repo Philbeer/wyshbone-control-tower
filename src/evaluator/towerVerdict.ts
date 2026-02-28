@@ -94,7 +94,7 @@ export interface MetaInfo {
   relaxed_constraints?: string[];
 }
 
-export type CvlConstraintStatus = "yes" | "no" | "unknown";
+export type CvlConstraintStatus = "yes" | "no" | "unknown" | "not_attempted";
 
 export interface CvlConstraintResult {
   constraint_id?: string;
@@ -423,7 +423,7 @@ function evaluateConstraint(
       }
 
       if (ATTR_TRACE) {
-        console.log(`[TOWER][ATTR_TRACE] DECISION: no cvlMatch, no attributeEvidence → status=unknown passed=false`);
+        console.log(`[TOWER][ATTR_TRACE] DECISION: no cvlMatch, no attributeEvidence → status=not_attempted passed=false`);
         console.log(`[TOWER][ATTR_TRACE] field_paths_checked: input.verification_summary.constraint_results (for cvlMatch), input.attribute_evidence (for per-lead evidence)`);
       }
       return {
@@ -431,7 +431,7 @@ function evaluateConstraint(
         matched_count: 0,
         total_leads: total,
         passed: false,
-        status: "unknown",
+        status: "not_attempted",
       };
     }
 
@@ -579,29 +579,45 @@ function allowRelaxSoft(input: TowerVerdictInput): boolean {
   return input.success_criteria?.allow_relax_soft_constraints !== false;
 }
 
-function checkLabelHonesty(input: TowerVerdictInput): string[] {
+function checkLabelHonesty(input: TowerVerdictInput, constraintResults?: ConstraintResult[]): string[] {
   const gaps: string[] = [];
   const meta = getMeta(input);
   const relaxed = meta.relaxed_constraints;
-
-  if (!relaxed || relaxed.length === 0) return gaps;
 
   const title = input.artefact_title ?? "";
   const summary = input.artefact_summary ?? "";
   const combined = `${title} ${summary}`.toLowerCase();
 
-  for (const rc of relaxed) {
-    const words = rc
-      .replace(/dropped|expanded|relaxed|removed|to\s+\d+\w*/gi, "")
-      .trim()
-      .toLowerCase()
-      .split(/[\s_]+/)
-      .filter((w) => w.length > 2);
-    for (const word of words) {
-      if (combined.includes(word)) {
-        gaps.push("LABEL_MISLEADING");
-        return gaps;
+  if (relaxed && relaxed.length > 0) {
+    for (const rc of relaxed) {
+      const words = rc
+        .replace(/dropped|expanded|relaxed|removed|to\s+\d+\w*/gi, "")
+        .trim()
+        .toLowerCase()
+        .split(/[\s_]+/)
+        .filter((w) => w.length > 2);
+      for (const word of words) {
+        if (combined.includes(word)) {
+          gaps.push("LABEL_MISLEADING");
+          break;
+        }
       }
+      if (gaps.includes("LABEL_MISLEADING")) break;
+    }
+  }
+
+  const matchPattern = /\b(match(?:es|ed|ing)?|verified\s+match(?:es)?|exact\s+match(?:es)?)\b/;
+  if (matchPattern.test(combined)) {
+    const hasUnbackedMatchClaim = !constraintResults ||
+      constraintResults.length === 0 ||
+      constraintResults.some(
+        (cr) => cr.status === "unknown" || cr.status === "not_attempted"
+      );
+    if (hasUnbackedMatchClaim) {
+      if (!gaps.includes("LABEL_MISLEADING")) {
+        gaps.push("LABEL_MISLEADING");
+      }
+      gaps.push("MATCH_CLAIM_WITHOUT_EVIDENCE");
     }
   }
 
@@ -643,7 +659,7 @@ export function detectConcatenationArtifacts(
     for (const concatMatch of concatPatterns) {
       if (!concatMatch) continue;
       const full = concatMatch[0];
-      const knownSafe = /^(american|african|mexican|dominican|franciscan|republican|anglican|candidate|candid|candy|candle|canal|canada|canadian|canary|cancel|cancer|canvas|canyon|scandal|volcano|significant|particular|popular|regular|circular|nuclear|angular|understand|thousand|standard|command|demand|expand|tuscan|artisan|partisan|guardian|median|suburban|veteran|spartan|christian|norwegian|hawaiian|european|indian|persian|russian|orphan|ocean|organ|urban|sedan|sultan|jordan|morgan|duncan|colorado|orlando|avocado|desperado|commando|tornado|crescendo|innuendo|nintendo|pseudo|overdo|bushido|bravado|eldorado|scholar|dollar|muscular|secular|spectacular|molecular|singular|cellular|modular|toucan|pelican|pecan|caravan|afghan|catalan|marzipan|husband|island|islands|began|scan|uncan|outdo|outis|outdid|outdoes|overis|overdid|overdoes|overwas|alcan|texan|vatican|vulcan|parmesan|artesian|diocesan)$/;
+      const knownSafe = /^(american|african|mexican|dominican|franciscan|republican|anglican|candidate|candid|candy|candle|canal|canada|canadian|canary|cancel|cancer|canvas|canyon|scandal|volcano|significant|particular|popular|regular|circular|nuclear|angular|understand|thousand|standard|command|demand|expand|tuscan|artisan|partisan|guardian|median|suburban|veteran|spartan|christian|norwegian|hawaiian|european|indian|persian|russian|orphan|ocean|organ|urban|sedan|sultan|jordan|morgan|duncan|colorado|orlando|avocado|desperado|commando|tornado|crescendo|innuendo|nintendo|pseudo|overdo|bushido|bravado|eldorado|scholar|dollar|muscular|secular|spectacular|molecular|singular|cellular|modular|toucan|pelican|pecan|caravan|afghan|catalan|marzipan|husband|island|islands|began|scan|uncan|outdo|outis|outdid|outdoes|overis|overdid|overdoes|overwas|alcan|texan|vatican|vulcan|parmesan|artesian|diocesan|dentist|dentists|consist|consists|consistent|persist|persists|insist|insists|resist|resists|exist|exists|assist|assists|enlist|enlists|consist|desist|artist|artists|florist|florists|tourist|tourists|publicist|publicists|specialist|specialists|journalist|journalists)$/;
       if (!knownSafe.test(full)) {
         return {
           corrupted: true,
@@ -857,41 +873,46 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
     source_url: l.source_url as string | null | undefined,
   }));
 
-  const hasAnyEvidenceField = evidenceLeads.some(
-    (l) => l.verified !== undefined || l.evidence !== undefined || l.source_url !== undefined
-  );
+  const eqResult = judgeEvidenceQuality({
+    leads: evidenceLeads,
+    verified_exact_count: input.verification_summary?.verified_exact_count,
+    requested_count: coreResult.requested,
+    delivery_summary: input.delivery_summary,
+    tower_verdict: coreResult.verdict,
+  });
 
-  if (hasAnyEvidenceField || input.delivery_summary) {
-    const eqResult = judgeEvidenceQuality({
-      leads: evidenceLeads,
-      verified_exact_count: input.verification_summary?.verified_exact_count,
-      requested_count: coreResult.requested,
-      delivery_summary: input.delivery_summary,
-      tower_verdict: coreResult.verdict,
-    });
+  if (!eqResult.pass && coreResult.verdict === "ACCEPT") {
+    console.log(`[TOWER] evidence_quality_override verdict=ACCEPT→STOP gaps=${eqResult.gaps.join(",")}`);
+    return {
+      ...coreResult,
+      verdict: "STOP",
+      action: "stop",
+      gaps: [...coreResult.gaps, ...eqResult.gaps],
+      stop_reason: eqResult.stop_reason,
+      rationale: `${coreResult.rationale} [Evidence quality: ${eqResult.detail}]`,
+    };
+  }
 
-    if (!eqResult.pass && coreResult.verdict !== "STOP") {
-      console.log(`[TOWER] evidence_quality_override verdict=${coreResult.verdict}→STOP gaps=${eqResult.gaps.join(",")}`);
+  if (!eqResult.pass && coreResult.verdict === "CHANGE_PLAN") {
+    const extraGaps = eqResult.gaps.filter((g: string) => !coreResult.gaps.includes(g));
+    if (extraGaps.length > 0) {
       return {
         ...coreResult,
-        verdict: "STOP",
-        action: "stop",
-        gaps: [...coreResult.gaps, ...eqResult.gaps],
-        stop_reason: eqResult.stop_reason,
+        gaps: [...coreResult.gaps, ...extraGaps],
         rationale: `${coreResult.rationale} [Evidence quality: ${eqResult.detail}]`,
       };
     }
+  }
 
-    if (!eqResult.pass && coreResult.verdict === "STOP") {
-      const extraGaps = eqResult.gaps.filter((g: string) => !coreResult.gaps.includes(g));
-      if (extraGaps.length > 0) {
-        return {
-          ...coreResult,
-          gaps: [...coreResult.gaps, ...extraGaps],
-          stop_reason: eqResult.stop_reason ?? coreResult.stop_reason,
-          rationale: `${coreResult.rationale} [Evidence quality: ${eqResult.detail}]`,
-        };
-      }
+  if (!eqResult.pass && coreResult.verdict === "STOP") {
+    const extraGaps = eqResult.gaps.filter((g: string) => !coreResult.gaps.includes(g));
+    if (extraGaps.length > 0) {
+      return {
+        ...coreResult,
+        gaps: [...coreResult.gaps, ...extraGaps],
+        stop_reason: eqResult.stop_reason ?? coreResult.stop_reason,
+        rationale: `${coreResult.rationale} [Evidence quality: ${eqResult.detail}]`,
+      };
     }
   }
 
@@ -909,12 +930,23 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
   if (requiresRelEvidence && verifiedRelCount === 0) {
     if (coreResult.verdict === "ACCEPT") {
       const hasDelivered = coreResult.delivered > 0;
-      const relReason = hasDelivered
-        ? "Candidates found, but relationship evidence is missing. Results are candidates only — no verified relationship match exists."
-        : "Required relationship could not be verified. No results with confirmed relationship evidence.";
-      const relCode = hasDelivered
-        ? "RELATIONSHIP_EVIDENCE_MISSING"
-        : "RELATIONSHIP_UNVERIFIED";
+      const verificationAttempted = input.verified_relationship_count !== undefined;
+
+      let relCode: string;
+      let relReason: string;
+
+      if (!verificationAttempted) {
+        relCode = "RELATIONSHIP_VERIFICATION_NOT_ATTEMPTED";
+        relReason = hasDelivered
+          ? "Candidates found, but relationship verification was never attempted. Cannot confirm any lead satisfies the relationship requirement."
+          : "No relationship verification was attempted. Cannot confirm any lead satisfies the relationship requirement.";
+      } else if (hasDelivered) {
+        relCode = "RELATIONSHIP_EVIDENCE_MISSING";
+        relReason = "Candidates found and relationship verification was attempted, but no verified relationship match exists. Results are candidates only.";
+      } else {
+        relCode = "RELATIONSHIP_CHECKED_NO_MATCH";
+        relReason = "Relationship verification was attempted but found no results with confirmed relationship evidence.";
+      }
 
       const detectionSource = input.requires_relationship_evidence === true
         ? "explicit (requires_relationship_evidence=true)"
@@ -923,7 +955,7 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
       console.log(
         `[TOWER] relationship_predicate_gate: verdict=${coreResult.verdict}→STOP code=${relCode} ` +
         `source=${detectionSource} verified_relationship_count=${verifiedRelCount} ` +
-        `delivered=${coreResult.delivered}`
+        `verification_attempted=${verificationAttempted} delivered=${coreResult.delivered}`
       );
 
       return {
@@ -937,6 +969,7 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
           evidence: {
             requires_relationship_evidence: true,
             verified_relationship_count: verifiedRelCount,
+            verification_attempted: verificationAttempted,
             detected_predicate: relDetection.predicate ?? undefined,
             detection_source: detectionSource,
           },
@@ -1070,7 +1103,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         .filter((c) => c.hardness === "hard")
         .filter((c) => {
           const cvlMatch = findCvlStatusForConstraint(c, cvlConstraintResults);
-          return cvlMatch != null && cvlMatch.status === "unknown";
+          return cvlMatch != null && (cvlMatch.status === "unknown" || cvlMatch.status === "not_attempted");
         })
     : [];
 
@@ -1081,7 +1114,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       const cr = constraintResults.find(
         (r) => r.constraint.type === c.type && r.constraint.field === c.field && r.constraint.value === c.value
       );
-      return cr != null && cr.status === "unknown";
+      return cr != null && (cr.status === "unknown" || cr.status === "not_attempted");
     });
 
   const hardUnknowns = [...hardUnknownsCvl, ...hardUnknownsAttr];
@@ -1121,7 +1154,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
     }
   }
 
-  const labelGaps = checkLabelHonesty(input);
+  const labelGaps = checkLabelHonesty(input, constraintResults);
 
   if (deliveredCount >= requestedCount && requestedCount > 0) {
     if (hardViolations.length > 0) {

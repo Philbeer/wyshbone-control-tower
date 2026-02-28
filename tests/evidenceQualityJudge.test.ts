@@ -192,11 +192,12 @@ describe("Evidence Quality Judge — integration with judgeLeadsList", () => {
       requested_count_user: 2,
       leads: [
         { name: "Alpha Corp", verified: true, evidence: "company registry" },
-        { name: "Beta Ltd", verified: true },
+        { name: "Beta Corp", verified: true },
       ],
       constraints: [
         { type: "NAME_CONTAINS", field: "name", value: "corp", hardness: "soft" },
       ],
+      original_goal: "Find 2 companies with corp in name",
     };
 
     const result = judgeLeadsList(input);
@@ -209,19 +210,20 @@ describe("Evidence Quality Judge — integration with judgeLeadsList", () => {
     assert.equal(result.stop_reason!.code, "VERIFIED_WITHOUT_EVIDENCE");
   });
 
-  it("does not override when no evidence fields present on leads (legacy behaviour)", () => {
+  it("overrides ACCEPT to STOP when no evidence fields present on leads", () => {
     const input: TowerVerdictInput = {
       requested_count_user: 2,
       leads: [
         { name: "Alpha Corp" },
         { name: "Beta Ltd" },
       ],
+      original_goal: "Find 2 companies",
     };
 
     const result = judgeLeadsList(input);
 
-    assert.equal(result.verdict, "ACCEPT", "Should remain ACCEPT — no evidence fields = legacy mode");
-    assert.ok(!result.gaps.includes("VERIFIED_WITHOUT_EVIDENCE"));
+    assert.equal(result.verdict, "STOP", "Should be overridden to STOP — no evidence = cannot accept");
+    assert.ok(result.gaps.includes("NO_EVIDENCE_PRESENT"), "Should include NO_EVIDENCE_PRESENT gap");
   });
 
   it("STOP if delivery_summary=PASS but core verdict is STOP", () => {

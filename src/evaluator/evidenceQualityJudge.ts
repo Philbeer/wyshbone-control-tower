@@ -43,6 +43,10 @@ function leadIsVerified(lead: EvidenceLeadInfo): boolean | null {
   return null;
 }
 
+function leadHasAnyEvidenceField(lead: EvidenceLeadInfo): boolean {
+  return lead.verified !== undefined || lead.evidence !== undefined || lead.source_url !== undefined;
+}
+
 export function judgeEvidenceQuality(input: EvidenceQualityInput): EvidenceQualityVerdict {
   const { leads, verified_exact_count, requested_count, delivery_summary, tower_verdict } = input;
 
@@ -51,6 +55,8 @@ export function judgeEvidenceQuality(input: EvidenceQualityInput): EvidenceQuali
   let verifiedWithoutEvidence = 0;
   let unknownCount = 0;
   const missingEvidenceLeadNames: string[] = [];
+
+  const anyLeadHasEvidenceField = leads.some(leadHasAnyEvidenceField);
 
   for (const lead of leads) {
     const verifiedStatus = leadIsVerified(lead);
@@ -74,36 +80,60 @@ export function judgeEvidenceQuality(input: EvidenceQualityInput): EvidenceQuali
     gaps.push("VERIFIED_WITHOUT_EVIDENCE");
   }
 
+  if (leads.length > 0 && !anyLeadHasEvidenceField && verified_exact_count == null) {
+    gaps.push("NO_EVIDENCE_PRESENT");
+  }
+
   const effectiveVerified = verified_exact_count ?? verifiedWithEvidence;
 
   if (effectiveVerified < requested_count && requested_count > 0) {
     gaps.push("VERIFIED_EXACT_BELOW_REQUESTED");
   }
 
+  if (delivery_summary === "PASS" && tower_verdict === "STOP") {
+    gaps.push("DELIVERY_SUMMARY_MISMATCH");
+  }
+
   if (
     delivery_summary === "PASS" &&
-    tower_verdict === "STOP"
+    leads.length > 0 &&
+    !anyLeadHasEvidenceField &&
+    verified_exact_count == null
   ) {
-    gaps.push("DELIVERY_SUMMARY_MISMATCH");
+    if (!gaps.includes("DELIVERY_SUMMARY_MISMATCH")) {
+      gaps.push("DELIVERY_SUMMARY_MISMATCH");
+    }
+    if (!gaps.includes("PASS_WITHOUT_VERIFICATION")) {
+      gaps.push("PASS_WITHOUT_VERIFICATION");
+    }
   }
 
   const hasBlockingGap =
     gaps.includes("VERIFIED_WITHOUT_EVIDENCE") ||
-    gaps.includes("DELIVERY_SUMMARY_MISMATCH");
+    gaps.includes("DELIVERY_SUMMARY_MISMATCH") ||
+    gaps.includes("PASS_WITHOUT_VERIFICATION");
+
+  const noEvidenceGap =
+    gaps.includes("NO_EVIDENCE_PRESENT") &&
+    !hasBlockingGap;
 
   const countShortfall =
     gaps.includes("VERIFIED_EXACT_BELOW_REQUESTED") &&
-    !gaps.includes("VERIFIED_WITHOUT_EVIDENCE") &&
-    !gaps.includes("DELIVERY_SUMMARY_MISMATCH");
+    !hasBlockingGap &&
+    !noEvidenceGap;
 
   if (hasBlockingGap) {
     const primaryCode = gaps[0];
-    const message =
-      primaryCode === "VERIFIED_WITHOUT_EVIDENCE"
-        ? `${verifiedWithoutEvidence} lead(s) marked verified but have no supporting evidence.`
-        : primaryCode === "DELIVERY_SUMMARY_MISMATCH"
-          ? `delivery_summary is PASS but Tower verdict is STOP — inconsistency detected.`
-          : `Evidence quality check failed: ${primaryCode}`;
+    let message: string;
+    if (primaryCode === "VERIFIED_WITHOUT_EVIDENCE") {
+      message = `${verifiedWithoutEvidence} lead(s) marked verified but have no supporting evidence.`;
+    } else if (primaryCode === "DELIVERY_SUMMARY_MISMATCH") {
+      message = `delivery_summary is PASS but Tower verdict is STOP — inconsistency detected.`;
+    } else if (primaryCode === "PASS_WITHOUT_VERIFICATION") {
+      message = `delivery_summary is PASS but no leads carry verification data — PASS claim is unsubstantiated.`;
+    } else {
+      message = `Evidence quality check failed: ${primaryCode}`;
+    }
 
     return {
       pass: false,
@@ -125,6 +155,30 @@ export function judgeEvidenceQuality(input: EvidenceQualityInput): EvidenceQuali
       },
       verified_with_evidence: verifiedWithEvidence,
       verified_without_evidence: verifiedWithoutEvidence,
+      unknown_count: unknownCount,
+      detail: message,
+    };
+  }
+
+  if (noEvidenceGap) {
+    const message = `${leads.length} lead(s) delivered but none carry verification data — evidence check was not attempted.`;
+    return {
+      pass: false,
+      verdict: "STOP",
+      gaps,
+      stop_reason: {
+        code: "NO_EVIDENCE_PRESENT",
+        message,
+        evidence: {
+          leads_count: leads.length,
+          verified_with_evidence: 0,
+          verified_without_evidence: 0,
+          unknown_count: unknownCount,
+          requested_count: requested_count,
+        },
+      },
+      verified_with_evidence: 0,
+      verified_without_evidence: 0,
       unknown_count: unknownCount,
       detail: message,
     };
