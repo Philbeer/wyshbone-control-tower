@@ -769,6 +769,36 @@ function resolveConstraints(input: TowerVerdictInput): Constraint[] {
   return [];
 }
 
+const RELATIONSHIP_PREDICATE_PATTERNS: Array<{ regex: RegExp; label: string }> = [
+  { regex: /\bworks?\s+with\b/, label: "works with" },
+  { regex: /\bworking\s+with\b/, label: "working with" },
+  { regex: /\bsupplies\s+(?:to\s+)?(?!chain\b|list\b|store\b|room\b)/, label: "supplies" },
+  { regex: /\bsupply\s+(?:to\s+)?(?!chain\b|list\b|store\b|room\b)/, label: "supply" },
+  { regex: /\bsupplying\s+/, label: "supplying" },
+  { regex: /\bserves?\b(?!\s+(?:food|coffee|drinks|meals|alcohol|beer|wine|lunch|dinner|breakfast))/, label: "serves" },
+  { regex: /\bserving\b(?!\s+(?:food|coffee|drinks|meals|alcohol|beer|wine|lunch|dinner|breakfast))/, label: "serving" },
+  { regex: /\bsupports?\b(?!\s+(?:windows|mac|linux|ios|android|mobile|desktop|browsers?|devices?|formats?|languages?|teams?|staff))/, label: "supports" },
+  { regex: /\bsupporting\b(?!\s+(?:windows|mac|linux|ios|android|mobile|desktop|browsers?|devices?|formats?|languages?|teams?|staff))/, label: "supporting" },
+  { regex: /\bpartners?\s+with\b/, label: "partners with" },
+  { regex: /\bpartnering\s+with\b/, label: "partnering with" },
+  { regex: /\bprovides?\s+services?\s+to\b/, label: "provides services to" },
+  { regex: /\bproviding\s+services?\s+to\b/, label: "providing services to" },
+  { regex: /\bcontracted\s+(?:by|to)\b/, label: "contracted by/to" },
+];
+
+export function detectRelationshipPredicate(
+  goal: string | null | undefined
+): { detected: boolean; predicate: string | null } {
+  if (!goal) return { detected: false, predicate: null };
+  const lower = goal.toLowerCase();
+  for (const { regex, label } of RELATIONSHIP_PREDICATE_PATTERNS) {
+    if (regex.test(lower)) {
+      return { detected: true, predicate: label };
+    }
+  }
+  return { detected: false, predicate: null };
+}
+
 export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
   const coreResult = judgeLeadsListCore(input);
 
@@ -818,38 +848,50 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
     }
   }
 
-  if (
-    input.requires_relationship_evidence === true &&
-    (input.verified_relationship_count === undefined || input.verified_relationship_count === 0)
-  ) {
+  const goal =
+    input.original_goal ??
+    input.original_user_goal ??
+    input.normalized_goal ??
+    null;
+  const relDetection = detectRelationshipPredicate(goal);
+
+  const requiresRelEvidence =
+    input.requires_relationship_evidence === true || relDetection.detected;
+  const verifiedRelCount = input.verified_relationship_count ?? 0;
+
+  if (requiresRelEvidence && verifiedRelCount === 0) {
     if (coreResult.verdict === "ACCEPT") {
       const hasDelivered = coreResult.delivered > 0;
-      const relVerdict: TowerVerdictAction = hasDelivered ? "STOP" : "STOP";
-      const relAction: "stop" | "continue" | "change_plan" = "stop";
       const relReason = hasDelivered
-        ? "Candidates found, but relationship evidence missing."
-        : "Required relationship could not be verified.";
+        ? "Candidates found, but relationship evidence is missing. Results are candidates only — no verified relationship match exists."
+        : "Required relationship could not be verified. No results with confirmed relationship evidence.";
       const relCode = hasDelivered
         ? "RELATIONSHIP_EVIDENCE_MISSING"
         : "RELATIONSHIP_UNVERIFIED";
 
+      const detectionSource = input.requires_relationship_evidence === true
+        ? "explicit (requires_relationship_evidence=true)"
+        : `auto-detected predicate "${relDetection.predicate}" in goal`;
+
       console.log(
         `[TOWER] relationship_predicate_gate: verdict=${coreResult.verdict}→STOP code=${relCode} ` +
-        `requires_relationship_evidence=true verified_relationship_count=${input.verified_relationship_count ?? 0} ` +
+        `source=${detectionSource} verified_relationship_count=${verifiedRelCount} ` +
         `delivered=${coreResult.delivered}`
       );
 
       return {
         ...coreResult,
-        verdict: relVerdict,
-        action: relAction,
+        verdict: "STOP" as TowerVerdictAction,
+        action: "stop" as const,
         gaps: [...coreResult.gaps, relCode],
         stop_reason: {
           code: relCode,
           message: relReason,
           evidence: {
             requires_relationship_evidence: true,
-            verified_relationship_count: input.verified_relationship_count ?? 0,
+            verified_relationship_count: verifiedRelCount,
+            detected_predicate: relDetection.predicate ?? undefined,
+            detection_source: detectionSource,
           },
         },
         rationale: `${coreResult.rationale} [Relationship predicate: ${relReason}]`,
