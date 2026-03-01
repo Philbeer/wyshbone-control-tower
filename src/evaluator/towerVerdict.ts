@@ -221,6 +221,7 @@ export interface UnresolvedHardConstraint {
   label: string;
   verifiability: "verifiable" | "proxy" | "unverifiable";
   proxy_selected?: string | null;
+  must_be_certain?: boolean;
 }
 
 export interface StructuredConstraint {
@@ -1130,6 +1131,43 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
           },
         },
         rationale: `${coreResult.rationale} [Relationship predicate: ${relReason}]`,
+      };
+    }
+  }
+
+  if (input.unresolved_hard_constraints && input.unresolved_hard_constraints.length > 0) {
+    const certaintyViolations = input.unresolved_hard_constraints.filter(
+      (uhc) => uhc.must_be_certain === true && (uhc.verifiability === "proxy" || uhc.verifiability === "unverifiable")
+    );
+
+    if (certaintyViolations.length > 0 && (coreResult.verdict === "ACCEPT" || coreResult.verdict === "ACCEPT_WITH_UNVERIFIED")) {
+      const gateCode = "MUST_BE_CERTAIN_VIOLATED";
+      const violatedIds = certaintyViolations.map((c) => c.constraint_id);
+      const violatedLabels = certaintyViolations.map((c) => c.label);
+      const reasons = certaintyViolations.map((c) =>
+        `User required certainty for "${c.label}", but evidence is not strictly verifiable (verifiability: ${c.verifiability}).`
+      );
+      const userReason = reasons.join(" ");
+      console.log(
+        `[TOWER] must_be_certain_backstop: verdict=${coreResult.verdict}→STOP violated=${violatedIds.join(",")}`
+      );
+      return {
+        ...coreResult,
+        verdict: "STOP" as TowerVerdictAction,
+        action: "stop" as const,
+        gaps: [...coreResult.gaps, gateCode, ...violatedIds],
+        stop_reason: {
+          code: gateCode,
+          message: userReason,
+          evidence: {
+            must_be_certain_constraints: certaintyViolations.map((c) => ({
+              constraint_id: c.constraint_id,
+              label: c.label,
+              verifiability: c.verifiability,
+            })),
+          },
+        },
+        rationale: `${coreResult.rationale} [Certainty backstop: ${userReason}]`,
       };
     }
   }

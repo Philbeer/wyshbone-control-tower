@@ -198,6 +198,7 @@ const towerVerdictRequestSchema = z.object({
     label: z.string(),
     verifiability: z.enum(["verifiable", "proxy", "unverifiable"]),
     proxy_selected: z.string().nullable().optional(),
+    must_be_certain: z.boolean().optional(),
   })).optional(),
 
   best_effort_accepted: z.boolean().optional(),

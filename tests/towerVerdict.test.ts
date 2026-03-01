@@ -2476,4 +2476,139 @@ test("No unresolved constraints and no best_effort → plain ACCEPT", () => {
   }
 });
 
+// ── must_be_certain backstop ──
+
+test("must_be_certain + proxy verifiability → STOP even with best_effort_accepted", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Cafe A" },
+      { name: "Cafe B" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 cafes opened in last 6 months",
+    best_effort_accepted: true,
+    unresolved_hard_constraints: [{
+      constraint_id: "c_opened_6m",
+      label: "opened in last 6 months",
+      verifiability: "proxy",
+      proxy_selected: "recent_reviews",
+      must_be_certain: true,
+    }],
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.action).toBe("stop");
+  expect(result.gaps).toContain("MUST_BE_CERTAIN_VIOLATED");
+  expect(result.gaps).toContain("c_opened_6m");
+  if (!result.stop_reason) throw new Error("Must have stop_reason");
+  expect(result.stop_reason.code).toBe("MUST_BE_CERTAIN_VIOLATED");
+  if (!result.stop_reason.message.includes("User required certainty")) {
+    throw new Error(`Message must mention certainty requirement, got: "${result.stop_reason.message}"`);
+  }
+  if (!result.stop_reason.message.includes("not strictly verifiable")) {
+    throw new Error(`Message must say not strictly verifiable, got: "${result.stop_reason.message}"`);
+  }
+});
+
+test("must_be_certain + unverifiable → STOP", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Jazz Bar" },
+      { name: "Blues Pub" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 pubs with live music",
+    unresolved_hard_constraints: [{
+      constraint_id: "c_live_music",
+      label: "live music",
+      verifiability: "unverifiable",
+      must_be_certain: true,
+    }],
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.gaps).toContain("MUST_BE_CERTAIN_VIOLATED");
+  if (!result.stop_reason!.message.includes("User required certainty")) {
+    throw new Error(`Must mention certainty, got: "${result.stop_reason!.message}"`);
+  }
+});
+
+test("must_be_certain + verifiable constraint → passes through (no backstop block)", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Place A" },
+      { name: "Place B" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 places in Brighton",
+    unresolved_hard_constraints: [{
+      constraint_id: "c_location",
+      label: "in Brighton",
+      verifiability: "verifiable",
+      must_be_certain: true,
+    }],
+  });
+  if (result.gaps.some((g: string) => g === "MUST_BE_CERTAIN_VIOLATED")) {
+    throw new Error("must_be_certain backstop should not fire for verifiable constraints");
+  }
+});
+
+test("must_be_certain not set (default) + proxy → no backstop (falls through to normal constraint gate)", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Cafe X" },
+      { name: "Cafe Y" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 cafes opened recently",
+    best_effort_accepted: true,
+    unresolved_hard_constraints: [{
+      constraint_id: "c_recent",
+      label: "recently opened",
+      verifiability: "proxy",
+      proxy_selected: null,
+    }],
+  });
+  expect(result.verdict).toBe("ACCEPT_WITH_UNVERIFIED");
+  if (result.gaps.some((g: string) => g === "MUST_BE_CERTAIN_VIOLATED")) {
+    throw new Error("Backstop should not fire when must_be_certain is not set");
+  }
+});
+
+test("must_be_certain compound: one certain + one not → STOP for certain constraint", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: withEvidence([
+      { name: "Venue A" },
+      { name: "Venue B" },
+    ]),
+    constraints: [],
+    original_goal: "Find 2 recently opened pubs with live music",
+    best_effort_accepted: true,
+    unresolved_hard_constraints: [
+      {
+        constraint_id: "c_opened",
+        label: "recently opened",
+        verifiability: "proxy",
+        proxy_selected: null,
+        must_be_certain: true,
+      },
+      {
+        constraint_id: "c_live_music",
+        label: "live music",
+        verifiability: "unverifiable",
+        must_be_certain: false,
+      },
+    ],
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.gaps).toContain("MUST_BE_CERTAIN_VIOLATED");
+  expect(result.gaps).toContain("c_opened");
+  if (result.gaps.includes("c_live_music")) {
+    throw new Error("Only the must_be_certain constraint should be in the backstop gaps");
+  }
+});
+
 runTests();
