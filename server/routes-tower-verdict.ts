@@ -5,15 +5,16 @@ import type { Constraint, StopReason, AttributeEvidenceArtefact } from "../src/e
 import { judgePlasticsInjection } from "../src/evaluator/plasticsInjectionRubric";
 import type { PlasticsRubricInput, PlasticsStepSnapshot } from "../src/evaluator/plasticsInjectionRubric";
 import { db } from "../src/lib/db";
-import { sql } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import { towerVerdicts } from "../shared/schema";
 
 const router = express.Router();
 
-const TOWER_VERSION = "3.2.0";
+const TOWER_VERSION = "3.3.0";
+const TOWER_MODE = process.env.TOWER_STUB_MODE === "true" ? "stub" : "live";
 
 router.get("/health", (_req, res) => {
-  res.json({ ok: true, version: TOWER_VERSION, time: new Date().toISOString() });
+  res.json({ ok: true, version: TOWER_VERSION, time: new Date().toISOString(), tower_mode: TOWER_MODE });
 });
 
 const constraintSchema = z.object({
@@ -116,6 +117,7 @@ const plasticsVerdictRequestSchema = z.object({
   artefactId: z.string().optional(),
   goal: z.string().optional(),
   proof_mode: z.string().optional(),
+  idempotency_key: z.string().optional(),
   constraints: plasticsConstraintsSchema,
   factory_state: plasticsFactoryStateSchema,
   factory_decision: plasticsFactoryDecisionSchema.optional(),
@@ -147,6 +149,7 @@ const towerVerdictRequestSchema = z.object({
   artefactId: z.string().optional(),
   goal: z.string().optional(),
   proof_mode: z.string().optional(),
+  idempotency_key: z.string().optional(),
 
   original_goal: z.string().optional(),
   original_user_goal: z.string().optional(),
@@ -204,6 +207,12 @@ const towerVerdictRequestSchema = z.object({
   best_effort_accepted: z.boolean().optional(),
 });
 
+interface PersistResult {
+  persisted: boolean;
+  duplicate: boolean;
+  warning_code?: string;
+}
+
 async function persistTowerVerdict(row: {
   run_id: string;
   artefact_id?: string | null;
@@ -216,7 +225,28 @@ async function persistTowerVerdict(row: {
   suggested_changes: any[];
   confidence?: number | null;
   rationale?: string | null;
-}): Promise<void> {
+  idempotency_key?: string | null;
+}): Promise<PersistResult> {
+  if (row.idempotency_key) {
+    try {
+      const existing = await db
+        .select({ id: towerVerdicts.id })
+        .from(towerVerdicts)
+        .where(eq(towerVerdicts.idempotency_key, row.idempotency_key))
+        .limit(1);
+
+      if (existing.length > 0) {
+        console.log(`[TOWER_PERSIST] duplicate idempotency_key=${row.idempotency_key} run_id=${row.run_id} -- skipped`);
+        return { persisted: true, duplicate: true };
+      }
+    } catch (checkErr) {
+      console.warn(
+        "[TOWER_PERSIST] Idempotency check failed, proceeding with insert:",
+        checkErr instanceof Error ? checkErr.message : checkErr
+      );
+    }
+  }
+
   try {
     await db.insert(towerVerdicts).values({
       run_id: row.run_id,
@@ -230,13 +260,18 @@ async function persistTowerVerdict(row: {
       suggested_changes: row.suggested_changes,
       confidence: row.confidence ?? null,
       rationale: row.rationale ?? null,
+      idempotency_key: row.idempotency_key ?? null,
     });
     console.log(`[TOWER_PERSIST] verdict=${row.verdict} run_id=${row.run_id} artefact_type=${row.artefact_type}`);
+    return { persisted: true, duplicate: false };
   } catch (err) {
-    console.error(
-      "[TOWER_PERSIST] Failed to persist tower verdict:",
-      err instanceof Error ? err.message : err
-    );
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (errMsg.includes("idx_tower_verdicts_idempotency_key") || errMsg.includes("duplicate key")) {
+      console.log(`[TOWER_PERSIST] duplicate key on insert run_id=${row.run_id} -- skipped`);
+      return { persisted: true, duplicate: true };
+    }
+    console.error("[TOWER_PERSIST] Failed to persist tower verdict:", errMsg);
+    return { persisted: false, duplicate: false, warning_code: "PERSIST_FAILED" };
   }
 }
 
@@ -279,6 +314,16 @@ function buildProofVerdict(
   };
 }
 
+function addPersistMeta(response: Record<string, any>, pr: PersistResult): Record<string, any> {
+  return {
+    ...response,
+    persisted: pr.persisted,
+    duplicate: pr.duplicate,
+    ...(pr.warning_code ? { warning_code: pr.warning_code } : {}),
+    ...(TOWER_MODE === "stub" ? { tower_mode: "stub" } : {}),
+  };
+}
+
 router.post("/tower-verdict", async (req, res) => {
   try {
     const artefactType = req.body?.artefactType;
@@ -297,10 +342,11 @@ router.post("/tower-verdict", async (req, res) => {
       const data = parsed.data;
       const runId = data.run_id ?? "none";
       const artId = data.artefactId ?? "none";
+      const idempotencyKey = data.idempotency_key ?? null;
 
       if (data.goal === "Proof Tower Loop") {
         const result = buildProofVerdict(data.proof_mode, runId, artId);
-        await persistTowerVerdict({
+        const pr = await persistTowerVerdict({
           run_id: runId,
           artefact_id: artId,
           artefact_type: artefactType,
@@ -312,8 +358,9 @@ router.post("/tower-verdict", async (req, res) => {
           suggested_changes: result.suggested_changes,
           confidence: result.confidence,
           rationale: result.rationale,
+          idempotency_key: idempotencyKey,
         });
-        res.json(result);
+        res.json(addPersistMeta(result, pr));
         return;
       }
 
@@ -330,7 +377,7 @@ router.post("/tower-verdict", async (req, res) => {
         `[TOWER_IN] run_id=${runId} artefactType=${artefactType} verdict=${result.verdict} action=${result.action} scrap_rate=${result.scrap_rate_now} max_scrap=${result.max_scrap_percent} step=${result.step ?? "?"}`
       );
 
-      await persistTowerVerdict({
+      const pr = await persistTowerVerdict({
         run_id: runId,
         artefact_id: artId,
         artefact_type: artefactType,
@@ -342,13 +389,14 @@ router.post("/tower-verdict", async (req, res) => {
         suggested_changes: result.suggested_changes.map(s => ({ type: "CHANGE_QUERY", reason: s })),
         confidence: result.confidence,
         rationale: result.reason,
+        idempotency_key: idempotencyKey,
       });
 
-      res.json({
+      res.json(addPersistMeta({
         ...result,
         artefactType,
         run_id: data.run_id,
-      });
+      }, pr));
       return;
     }
 
@@ -366,10 +414,11 @@ router.post("/tower-verdict", async (req, res) => {
     const data = parsed.data;
     const runId = data.run_id ?? "none";
     const artId = data.artefactId ?? "none";
+    const idempotencyKey = data.idempotency_key ?? null;
 
     if (data.goal === "Proof Tower Loop") {
       const result = buildProofVerdict(data.proof_mode, runId, artId);
-      await persistTowerVerdict({
+      const pr = await persistTowerVerdict({
         run_id: runId,
         artefact_id: artId,
         artefact_type: "leads_list",
@@ -381,8 +430,9 @@ router.post("/tower-verdict", async (req, res) => {
         suggested_changes: result.suggested_changes,
         confidence: result.confidence,
         rationale: result.rationale,
+        idempotency_key: idempotencyKey,
       });
-      res.json(result);
+      res.json(addPersistMeta(result, pr));
       return;
     }
 
@@ -499,7 +549,7 @@ router.post("/tower-verdict", async (req, res) => {
       `[TOWER_IN] run_id=${runId} verdict=${result.verdict} action=${result.action} requested=${result.requested} delivered=${result.delivered} suggestions=${result.suggested_changes.length}`
     );
 
-    await persistTowerVerdict({
+    const pr = await persistTowerVerdict({
       run_id: runId,
       artefact_id: artId,
       artefact_type: "leads_list",
@@ -511,9 +561,10 @@ router.post("/tower-verdict", async (req, res) => {
       suggested_changes: result.suggested_changes,
       confidence: result.confidence,
       rationale: result.rationale,
+      idempotency_key: idempotencyKey,
     });
 
-    res.json(result);
+    res.json(addPersistMeta(result, pr));
   } catch (err) {
     console.error(
       "[TOWER] Unexpected error in tower-verdict:",
@@ -532,6 +583,9 @@ router.post("/tower-verdict", async (req, res) => {
         code: "INTERNAL_ERROR",
         message: "Internal server error during verdict evaluation.",
       },
+      persisted: false,
+      duplicate: false,
+      warning_code: "INTERNAL_ERROR",
     });
   }
 });

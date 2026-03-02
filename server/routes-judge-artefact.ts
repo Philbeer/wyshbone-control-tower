@@ -1,6 +1,6 @@
 import express from "express";
 import { db } from "../src/lib/db";
-import { sql } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import { z } from "zod";
 import { judgeLeadsList, normalizeConstraintHardness, normalizeStructuredConstraints, judgeAskLeadQuestion } from "../src/evaluator/towerVerdict";
 import type { Lead, Constraint, DeliveredInfo, MetaInfo, StructuredConstraint, StopReason, AskLeadQuestionInput, AttributeEvidenceArtefact } from "../src/evaluator/towerVerdict";
@@ -10,6 +10,8 @@ import { towerVerdicts } from "../shared/schema";
 
 const router = express.Router();
 
+const TOWER_MODE = process.env.TOWER_STUB_MODE === "true" ? "stub" : "live";
+
 const judgeArtefactRequestSchema = z.object({
   runId: z.string().min(1),
   artefactId: z.string().min(1),
@@ -17,6 +19,7 @@ const judgeArtefactRequestSchema = z.object({
   successCriteria: z.any().optional(),
   artefactType: z.string().min(1),
   proof_mode: z.string().optional(),
+  idempotency_key: z.string().optional(),
 });
 
 interface JudgeArtefactResponse {
@@ -35,6 +38,12 @@ interface JudgeArtefactResponse {
   }>;
 }
 
+interface PersistResult {
+  persisted: boolean;
+  duplicate: boolean;
+  warning_code?: string;
+}
+
 async function persistTowerVerdict(row: {
   run_id: string;
   artefact_id?: string | null;
@@ -47,7 +56,28 @@ async function persistTowerVerdict(row: {
   suggested_changes: any[];
   confidence?: number | null;
   rationale?: string | null;
-}): Promise<void> {
+  idempotency_key?: string | null;
+}): Promise<PersistResult> {
+  if (row.idempotency_key) {
+    try {
+      const existing = await db
+        .select({ id: towerVerdicts.id })
+        .from(towerVerdicts)
+        .where(eq(towerVerdicts.idempotency_key, row.idempotency_key))
+        .limit(1);
+
+      if (existing.length > 0) {
+        console.log(`[TOWER_PERSIST] duplicate idempotency_key=${row.idempotency_key} run_id=${row.run_id} via=judge-artefact -- skipped`);
+        return { persisted: true, duplicate: true };
+      }
+    } catch (checkErr) {
+      console.warn(
+        "[TOWER_PERSIST] Idempotency check failed (judge-artefact), proceeding with insert:",
+        checkErr instanceof Error ? checkErr.message : checkErr
+      );
+    }
+  }
+
   try {
     await db.insert(towerVerdicts).values({
       run_id: row.run_id,
@@ -61,14 +91,29 @@ async function persistTowerVerdict(row: {
       suggested_changes: row.suggested_changes,
       confidence: row.confidence ?? null,
       rationale: row.rationale ?? null,
+      idempotency_key: row.idempotency_key ?? null,
     });
     console.log(`[TOWER_PERSIST] verdict=${row.verdict} run_id=${row.run_id} artefact_type=${row.artefact_type} via=judge-artefact`);
+    return { persisted: true, duplicate: false };
   } catch (err) {
-    console.error(
-      "[TOWER_PERSIST] Failed to persist tower verdict (judge-artefact):",
-      err instanceof Error ? err.message : err
-    );
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (errMsg.includes("idx_tower_verdicts_idempotency_key") || errMsg.includes("duplicate key")) {
+      console.log(`[TOWER_PERSIST] duplicate key on insert run_id=${row.run_id} via=judge-artefact -- skipped`);
+      return { persisted: true, duplicate: true };
+    }
+    console.error("[TOWER_PERSIST] Failed to persist tower verdict (judge-artefact):", errMsg);
+    return { persisted: false, duplicate: false, warning_code: "PERSIST_FAILED" };
   }
+}
+
+function addPersistMeta(response: Record<string, any>, pr: PersistResult): Record<string, any> {
+  return {
+    ...response,
+    persisted: pr.persisted,
+    duplicate: pr.duplicate,
+    ...(pr.warning_code ? { warning_code: pr.warning_code } : {}),
+    ...(TOWER_MODE === "stub" ? { tower_mode: "stub" } : {}),
+  };
 }
 
 function buildProofVerdict(
@@ -270,8 +315,10 @@ router.post("/judge-artefact", async (req, res) => {
       return;
     }
 
-    const { runId, artefactId, goal, successCriteria, artefactType, proof_mode } =
+    const { runId, artefactId, goal, successCriteria, artefactType, proof_mode, idempotency_key } =
       parsed.data;
+
+    const idempotencyKey = idempotency_key ?? null;
 
     if (proof_mode) {
       const proof = buildProofVerdict(proof_mode);
@@ -295,7 +342,7 @@ router.post("/judge-artefact", async (req, res) => {
 
       console.log(`[TOWER_PROOF] run_id=${runId} artefactId=${artefactId} verdict=${proof.towerVerdict} via=judge-artefact`);
 
-      await persistTowerVerdict({
+      const pr = await persistTowerVerdict({
         run_id: runId,
         artefact_id: artefactId,
         artefact_type: artefactType,
@@ -307,9 +354,10 @@ router.post("/judge-artefact", async (req, res) => {
         suggested_changes: [],
         confidence: 100,
         rationale: proof.rationale,
+        idempotency_key: idempotencyKey,
       });
 
-      res.json(proofResponse);
+      res.json(addPersistMeta(proofResponse, pr));
       return;
     }
 
@@ -339,7 +387,7 @@ router.post("/judge-artefact", async (req, res) => {
         suggested_changes: [],
       };
 
-      await persistTowerVerdict({
+      const pr = await persistTowerVerdict({
         run_id: runId,
         artefact_id: artefactId,
         artefact_type: artefactType,
@@ -348,9 +396,10 @@ router.post("/judge-artefact", async (req, res) => {
         gaps: ["DB_ERROR"],
         suggested_changes: [],
         rationale: "Supabase query failed while fetching artefact",
+        idempotency_key: idempotencyKey,
       });
 
-      res.json(failResponse);
+      res.json(addPersistMeta(failResponse, pr));
       return;
     }
 
@@ -370,7 +419,7 @@ router.post("/judge-artefact", async (req, res) => {
         suggested_changes: [],
       };
 
-      await persistTowerVerdict({
+      const pr = await persistTowerVerdict({
         run_id: runId,
         artefact_id: artefactId,
         artefact_type: artefactType,
@@ -379,9 +428,10 @@ router.post("/judge-artefact", async (req, res) => {
         gaps: ["ARTEFACT_NOT_FOUND"],
         suggested_changes: [],
         rationale: `Artefact not found: ${artefactId}`,
+        idempotency_key: idempotencyKey,
       });
 
-      res.json(failResponse);
+      res.json(addPersistMeta(failResponse, pr));
       return;
     }
 
@@ -528,7 +578,7 @@ router.post("/judge-artefact", async (req, res) => {
         `[Tower][judge-artefact] leads_list run_id=${runId} verdict=${leadsResult.verdict} towerVerdict=${leadsResult.towerVerdict} action=${leadsResult.action} delivered=${leadsResult.metrics.delivered} requested=${leadsResult.metrics.requested}`
       );
 
-      await persistTowerVerdict({
+      const pr = await persistTowerVerdict({
         run_id: runId,
         artefact_id: artefactId,
         artefact_type: artefactType,
@@ -540,9 +590,10 @@ router.post("/judge-artefact", async (req, res) => {
         suggested_changes: leadsResult.suggested_changes,
         confidence: (leadsResult.metrics.confidence as number) ?? null,
         rationale: leadsResult.reasons[0] ?? null,
+        idempotency_key: idempotencyKey,
       });
 
-      res.json(leadsResult);
+      res.json(addPersistMeta(leadsResult, pr));
       return;
     }
 
@@ -561,7 +612,7 @@ router.post("/judge-artefact", async (req, res) => {
           suggested_changes: [],
         };
 
-        await persistTowerVerdict({
+        const pr = await persistTowerVerdict({
           run_id: runId,
           artefact_id: artefactId,
           artefact_type: artefactType,
@@ -570,9 +621,10 @@ router.post("/judge-artefact", async (req, res) => {
           gaps: ["MISSING_PLASTICS_FIELDS"],
           suggested_changes: [],
           rationale: failResponse.reasons[0],
+          idempotency_key: idempotencyKey,
         });
 
-        res.json(failResponse);
+        res.json(addPersistMeta(failResponse, pr));
         return;
       }
 
@@ -622,7 +674,7 @@ router.post("/judge-artefact", async (req, res) => {
         `[Tower][judge-artefact] ${artefactType} run_id=${runId} towerVerdict=${plasticsResult.verdict} action=${pAction} scrap=${plasticsResult.scrap_rate_now} max=${plasticsResult.max_scrap_percent}`
       );
 
-      await persistTowerVerdict({
+      const pr = await persistTowerVerdict({
         run_id: runId,
         artefact_id: artefactId,
         artefact_type: artefactType,
@@ -632,9 +684,10 @@ router.post("/judge-artefact", async (req, res) => {
         suggested_changes: plasticsResult.suggested_changes.map(s => ({ type: "CHANGE_QUERY", reason: s })),
         confidence: plasticsResult.confidence,
         rationale: plasticsResult.reason,
+        idempotency_key: idempotencyKey,
       });
 
-      res.json(plasticsResponse);
+      res.json(addPersistMeta(plasticsResponse, pr));
       return;
     }
 
@@ -690,7 +743,7 @@ router.post("/judge-artefact", async (req, res) => {
         suggested_changes: askResult.suggested_changes,
       };
 
-      await persistTowerVerdict({
+      const pr = await persistTowerVerdict({
         run_id: runId,
         artefact_id: artefactId,
         artefact_type: artefactType,
@@ -700,9 +753,10 @@ router.post("/judge-artefact", async (req, res) => {
         suggested_changes: askResult.suggested_changes,
         confidence: askResult.confidence,
         rationale: askResult.reason,
+        idempotency_key: idempotencyKey,
       });
 
-      res.json(askResponse);
+      res.json(addPersistMeta(askResponse, pr));
       return;
     } else if (
       stepType === "ENRICH_LEADS" &&
@@ -747,7 +801,7 @@ router.post("/judge-artefact", async (req, res) => {
       suggested_changes: [],
     };
 
-    await persistTowerVerdict({
+    const pr = await persistTowerVerdict({
       run_id: runId,
       artefact_id: artefactId,
       artefact_type: artefactType,
@@ -756,9 +810,10 @@ router.post("/judge-artefact", async (req, res) => {
       gaps: stopReason ? [stopReason.code] : [],
       suggested_changes: [],
       rationale: reasons[0] ?? null,
+      idempotency_key: idempotencyKey,
     });
 
-    res.json(response);
+    res.json(addPersistMeta(response, pr));
   } catch (err) {
     console.error(
       "[Tower][judge-artefact] Unexpected error:",
@@ -773,7 +828,12 @@ router.post("/judge-artefact", async (req, res) => {
       metrics: { error: "unexpected_error" },
       suggested_changes: [],
     };
-    res.status(500).json(failResponse);
+    res.status(500).json({
+      ...failResponse,
+      persisted: false,
+      duplicate: false,
+      warning_code: "INTERNAL_ERROR",
+    });
   }
 });
 

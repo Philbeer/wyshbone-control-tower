@@ -381,6 +381,7 @@ export const towerVerdicts = pgTable("tower_verdicts", {
   suggested_changes: jsonb("suggested_changes").$type<any[]>().notNull().default([]),
   confidence: integer("confidence"),
   rationale: text("rationale"),
+  idempotency_key: text("idempotency_key"),
   created_at: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -401,6 +402,7 @@ export const judgementEvaluations = pgTable("judgement_evaluations", {
   success_criteria: jsonb("success_criteria").notNull(),
   snapshot: jsonb("snapshot").notNull(),
   strategy: jsonb("strategy"),
+  idempotency_key: text("idempotency_key"),
   evaluated_at: timestamp("evaluated_at").notNull().defaultNow(),
 });
 
