@@ -2712,4 +2712,146 @@ test("final_delivery: no leads no counts => CONTRACT_ERROR (not 'No results foun
   console.log(`  rationale: ${result.rationale}`);
 });
 
+test("INTEGRATION: real Supervisor final_delivery payload (delivered=10 numeric at root, verified_exact=30) => ACCEPT with _debug", () => {
+  const supervisorPayload: TowerVerdictInput = {
+    leads: Array.from({ length: 10 }, (_, i) => ({
+      name: `Restaurant ${i + 1}`,
+      address: `${100 + i} Main St, Arundel`,
+      phone: `555-000${i}`,
+      website: `https://restaurant${i + 1}.com`,
+      source_url: `https://google.com/search?q=restaurant+${i + 1}`,
+    })),
+    delivered_leads: Array.from({ length: 10 }, (_, i) => ({
+      name: `Restaurant ${i + 1}`,
+      address: `${100 + i} Main St, Arundel`,
+      phone: `555-000${i}`,
+      website: `https://restaurant${i + 1}.com`,
+      source_url: `https://google.com/search?q=restaurant+${i + 1}`,
+    })),
+    constraints: [],
+    requested_count_user: 10,
+    requested_count: 10,
+    delivered_count: 10,
+    verified_exact: 30,
+    accumulated_count: 10,
+    delivered: 10,
+    original_goal: "Find 10 restaurants in Arundel with outdoor seating",
+    verification_summary: {
+      verified_exact_count: 10,
+      total_verified: 30,
+    },
+    meta: {
+      replans_used: 0,
+      max_replans: 3,
+      plan_version: 1,
+    },
+  };
+
+  const result = judgeLeadsList(supervisorPayload);
+
+  if (result.verdict === "STOP") {
+    throw new Error(
+      `INTEGRATION FAIL: Supervisor sent delivered=10, requested=10 but Tower returned STOP. ` +
+      `rationale="${result.rationale}" gaps=${JSON.stringify(result.gaps)} _debug=${JSON.stringify(result._debug)}`
+    );
+  }
+
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.delivered).toBe(10);
+  expect(result.requested).toBe(10);
+
+  if (!result._debug) {
+    throw new Error("Missing _debug block — patched code not running");
+  }
+  if (result._debug.extractedDeliveredCount !== 10) {
+    throw new Error(`_debug.extractedDeliveredCount should be 10, got ${result._debug.extractedDeliveredCount}`);
+  }
+  if (result._debug.extractedRequestedCount !== 10) {
+    throw new Error(`_debug.extractedRequestedCount should be 10, got ${result._debug.extractedRequestedCount}`);
+  }
+
+  console.log(`  INTEGRATION PASS: verdict=${result.verdict} delivered=${result.delivered} requested=${result.requested}`);
+  console.log(`  _debug: source=${result._debug.source} deliveredCount=${result._debug.extractedDeliveredCount} requestedCount=${result._debug.extractedRequestedCount}`);
+});
+
+test("INTEGRATION: Supervisor payload with NO leads array, only delivered_count=10 and numeric delivered=10 => ACCEPT", () => {
+  const supervisorPayloadNoLeads: TowerVerdictInput = {
+    constraints: [],
+    requested_count_user: 10,
+    requested_count: 10,
+    delivered_count: 10,
+    verified_exact: 30,
+    accumulated_count: 10,
+    delivered: 10,
+    original_goal: "Find 10 restaurants in Arundel",
+    verification_summary: {
+      verified_exact_count: 10,
+    },
+    meta: {
+      replans_used: 0,
+      max_replans: 3,
+    },
+  };
+
+  const result = judgeLeadsList(supervisorPayloadNoLeads);
+
+  if (result.verdict === "STOP" && result.rationale.includes("No results were found")) {
+    throw new Error(
+      `INTEGRATION FAIL: False FAIL with 'No results found' despite delivered_count=10. ` +
+      `_debug=${JSON.stringify(result._debug)}`
+    );
+  }
+
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.delivered).toBe(10);
+
+  if (!result._debug) {
+    throw new Error("Missing _debug block — patched code not running");
+  }
+  if (result._debug.source !== "delivered_count") {
+    console.log(`  NOTE: source=${result._debug.source} (expected delivered_count)`);
+  }
+
+  console.log(`  INTEGRATION PASS: verdict=${result.verdict} delivered=${result.delivered} source=${result._debug.source}`);
+});
+
+test("INTEGRATION: tower-verdict route shape — delivered_leads + verified_exact forwarded", () => {
+  const routeInput: TowerVerdictInput = {
+    leads: Array.from({ length: 5 }, (_, i) => ({
+      name: `Lead ${i + 1}`,
+      address: `${i + 1} Test St`,
+      source_url: `https://example.com/${i}`,
+    })),
+    delivered_leads: Array.from({ length: 8 }, (_, i) => ({
+      name: `Delivered Lead ${i + 1}`,
+      address: `${i + 1} Delivered St`,
+      source_url: `https://example.com/d/${i}`,
+    })),
+    constraints: [],
+    requested_count_user: 8,
+    delivered_count: 8,
+    verified_exact: 24,
+    original_goal: "Find 8 coffee shops",
+    verification_summary: { verified_exact_count: 8 },
+  };
+
+  const result = judgeLeadsList(routeInput);
+
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.delivered).toBe(8);
+  expect(result.requested).toBe(8);
+
+  if (!result._debug) {
+    throw new Error("Missing _debug block");
+  }
+  if (result._debug.source !== "delivered_leads.length") {
+    throw new Error(`Expected source=delivered_leads.length but got source=${result._debug.source}`);
+  }
+  if (result._debug.extractedDeliveredCount !== 8) {
+    throw new Error(`Expected extractedDeliveredCount=8 but got ${result._debug.extractedDeliveredCount}`);
+  }
+
+  console.log(`  INTEGRATION PASS: delivered_leads.length=8 used as source, verdict=${result.verdict}`);
+});
+
 runTests();

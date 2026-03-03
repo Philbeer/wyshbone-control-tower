@@ -509,13 +509,24 @@ router.post("/tower-verdict", async (req, res) => {
       }
     }
 
+    console.log(
+      `[TOWER_IN] final_delivery_payload: run_id=${runId} artefactType=${artefactType} ` +
+      `leads=${data.leads?.length ?? "none"} delivered_leads=${(data as any).delivered_leads?.length ?? "none"} ` +
+      `delivered_count=${data.delivered_count ?? "none"} verified_exact=${data.verified_exact ?? "none"} ` +
+      `accumulated_count=${data.accumulated_count ?? "none"} delivered=${JSON.stringify(data.delivered ?? "none")} ` +
+      `requested_count_user=${data.requested_count_user ?? "none"} requested_count=${data.requested_count ?? "none"} ` +
+      `verification_summary=${data.verification_summary ? `verified_exact_count=${data.verification_summary.verified_exact_count}` : "none"}`
+    );
+
     const result = judgeLeadsList({
       leads: data.leads,
+      delivered_leads: data.delivered_leads,
       constraints: data.constraints as Constraint[] | undefined,
       requested_count_user: data.requested_count_user,
       requested_count: data.requested_count,
       accumulated_count: data.accumulated_count,
       delivered_count: data.delivered_count,
+      verified_exact: data.verified_exact,
       delivered: data.delivered,
       original_goal: data.original_goal,
       original_user_goal: data.original_user_goal,
@@ -557,7 +568,7 @@ router.post("/tower-verdict", async (req, res) => {
     }
 
     console.log(
-      `[TOWER_IN] run_id=${runId} verdict=${result.verdict} action=${result.action} requested=${result.requested} delivered=${result.delivered} suggestions=${result.suggested_changes.length}`
+      `[TOWER_IN] run_id=${runId} verdict=${result.verdict} action=${result.action} requested=${result.requested} delivered=${result.delivered} suggestions=${result.suggested_changes.length} _debug=${JSON.stringify(result._debug ?? "MISSING")}`
     );
 
     const learningInput: LearningUpdateInput = {

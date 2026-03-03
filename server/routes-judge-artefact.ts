@@ -310,6 +310,7 @@ function judgeLeadsListArtefact(
       towerVerdict: towerResult.verdict,
       towerAction: towerResult.action,
       constraint_results: towerResult.constraint_results ?? [],
+      _debug: towerResult._debug,
     },
     suggested_changes: towerResult.suggested_changes,
   };
@@ -573,6 +574,17 @@ router.post("/judge-artefact", async (req, res) => {
         );
       }
 
+      console.log(
+        `[TOWER_IN] final_delivery_payload(judge-artefact): run_id=${runId} artefactType=${artefactType} ` +
+        `leads=${Array.isArray(payloadJson?.leads) ? payloadJson.leads.length : "none"} ` +
+        `delivered_leads=${Array.isArray(payloadJson?.delivered_leads) ? payloadJson.delivered_leads.length : "none"} ` +
+        `delivered_count=${payloadJson?.delivered_count ?? "none"} verified_exact=${payloadJson?.verified_exact ?? "none"} ` +
+        `accumulated_count=${payloadJson?.accumulated_count ?? "none"} delivered=${JSON.stringify(payloadJson?.delivered ?? "none")} ` +
+        `requested_count_user=${payloadJson?.requested_count_user ?? successCriteria?.requested_count_user ?? "none"} ` +
+        `requested_count=${payloadJson?.requested_count ?? successCriteria?.requested_count ?? "none"} ` +
+        `verification_summary=${payloadJson?.verification_summary ? `verified_exact_count=${payloadJson.verification_summary.verified_exact_count}` : "none"}`
+      );
+
       const leadsResult = judgeLeadsListArtefact(
         payloadJson,
         successCriteria,
@@ -593,7 +605,7 @@ router.post("/judge-artefact", async (req, res) => {
       };
 
       console.log(
-        `[Tower][judge-artefact] leads_list run_id=${runId} verdict=${leadsResult.verdict} towerVerdict=${leadsResult.towerVerdict} action=${leadsResult.action} delivered=${leadsResult.metrics.delivered} requested=${leadsResult.metrics.requested}`
+        `[Tower][judge-artefact] leads_list run_id=${runId} verdict=${leadsResult.verdict} towerVerdict=${leadsResult.towerVerdict} action=${leadsResult.action} delivered=${leadsResult.metrics.delivered} requested=${leadsResult.metrics.requested} _debug=${JSON.stringify(leadsResult.metrics._debug ?? "MISSING")}`
       );
 
       const learningInput: LearningUpdateInput = {
