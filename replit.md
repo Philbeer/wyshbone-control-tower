@@ -36,6 +36,15 @@ The application is built on Node.js and Express, utilizing server-side rendering
 **Constraint-Driven Evidence-Based Evaluation (v3):**
 Tower uses user intent (`requested_count_user`) and accumulated matching results (`delivered_matching_accumulated`). It defines a priority for resolving requested and delivered counts. Constraints are typed (NAME_CONTAINS, NAME_STARTS_WITH, LOCATION, COUNT_MIN, HAS_ATTRIBUTE) with `hardness` (hard/soft), and a clear resolution priority for different constraint formats. Logic includes replan-aware verdicting, typed `suggested_change` types, and detection of `label_misleading` gaps. Hard constraints are strictly enforced, never auto-relaxed. CVL-aware judgement uses `verification_summary` for evidence-based verification, prioritizing `verified_exact_count` and requiring CVL status for LOCATION constraints. Rationale wording is factual and aligned with `delivery_summary`.
 
+**Delivered Count Resolution (expanded):**
+`resolveDeliveredCount()` priority chain: (1) CVL `verified_exact_count`, (2) top-level `verified_exact` field, (3) `delivered.delivered_matching_accumulated`, (4) matched lead count from constraint evaluation, (5) `delivered.delivered_matching_this_plan`, (6) numeric `delivered`, (7) `accumulated_count`, (8) `delivered_count`, (9) `leads.length` fallback, (10) 0. The `verified_exact` field was added to `TowerVerdictInput` and the Zod schema to support Supervisors that report verification counts at the top level without a full CVL payload.
+
+**Contract Validation:**
+`judgeLeadsListCore` performs an early contract check: if no leads array AND no reliable delivered-count fields are present, it returns STOP with code `CONTRACT_ERROR` instead of the misleading "No results were found." The evidence object lists which fields were checked.
+
+**Count Met + Hard Violated:**
+When `deliveredCount >= requestedCount` but hard constraint violations exist, Tower returns STOP with code `COUNT_MET_HARD_VIOLATED` listing the violated fields. Previously this was an empty if block that fell through to incorrect logic paths.
+
 **HAS_ATTRIBUTE Constraint & attribute_evidence (CVL):**
 CVL evaluation for `HAS_ATTRIBUTE` constraints (e.g., `c_attr_live_music`) consumes `attribute_evidence` artefacts from Supervisor. When evaluating a lead for HAS_ATTRIBUTE: if an `attribute_evidence` artefact exists for that lead+attribute, the constraint status is set to the artefact's verdict (yes/no/unknown) with confidence and evidence pointers (evidence_id, source_url, quote). If no artefact exists, status defaults to `unknown` with low confidence. Unknown is never treated as false — it excludes the constraint from hard violations and prevents `verified_exact` from being true until all hard constraints are resolved to `yes`. The `ConstraintResult` exposes `status`, `evidence_id`, `source_url`, `quote`, and `attribute_evidence_details` for UI consumption. The `routes-judge-artefact.ts` fetches `attribute_evidence` artefacts from the `artefacts` table (type=`attribute_evidence`) for the same `run_id` and passes them into `judgeLeadsListArtefact`.
 

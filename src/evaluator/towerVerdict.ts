@@ -200,6 +200,8 @@ export interface TowerVerdictInput {
 
   attribute_evidence?: AttributeEvidenceArtefact[];
 
+  verified_exact?: number;
+
   delivery_summary?: "PASS" | "PARTIAL" | "STOP" | string;
 
   requires_relationship_evidence?: boolean;
@@ -271,6 +273,10 @@ function resolveDeliveredCount(input: TowerVerdictInput, matchedLeadCount: numbe
     return input.verification_summary!.verified_exact_count;
   }
 
+  if (typeof input.verified_exact === "number" && input.verified_exact > 0) {
+    return input.verified_exact;
+  }
+
   const delivered = input.delivered;
   if (typeof delivered === "object" && delivered != null) {
     if (delivered.delivered_matching_accumulated != null)
@@ -287,6 +293,10 @@ function resolveDeliveredCount(input: TowerVerdictInput, matchedLeadCount: numbe
   if (typeof delivered === "number") return delivered;
   if (input.accumulated_count != null) return input.accumulated_count;
   if (input.delivered_count != null) return input.delivered_count;
+
+  const leads = resolveLeads(input);
+  if (leads.length > 0) return leads.length;
+
   return 0;
 }
 
@@ -1391,6 +1401,46 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
     input.normalized_goal ??
     null;
 
+  const hasLeadsArray = Array.isArray(input.leads) && input.leads.length > 0;
+  const hasReliableCount =
+    hasCvl(input) ||
+    (typeof input.verified_exact === "number" && input.verified_exact > 0) ||
+    input.delivered_count != null ||
+    input.accumulated_count != null ||
+    (typeof input.delivered === "number") ||
+    (typeof input.delivered === "object" && input.delivered != null && (
+      input.delivered.delivered_matching_accumulated != null ||
+      input.delivered.delivered_matching_this_plan != null
+    ));
+
+  if (!hasLeadsArray && !hasReliableCount) {
+    const result: TowerVerdict = {
+      verdict: "STOP",
+      action: "stop",
+      delivered: 0,
+      requested: requestedCount ?? 0,
+      gaps: ["CONTRACT_ERROR"],
+      confidence: 100,
+      rationale: "Contract error: final_delivery/leads_list artefact is missing both a leads array and delivered-count fields that Tower can read. Tower cannot evaluate delivery without data.",
+      suggested_changes: [],
+      stop_reason: {
+        code: "CONTRACT_ERROR",
+        message: "Contract error: final_delivery missing leads array and delivered counts Tower can read.",
+        evidence: {
+          has_leads_array: false,
+          has_verified_exact: typeof input.verified_exact === "number",
+          has_cvl: hasCvl(input),
+          has_delivered_count: input.delivered_count != null,
+          has_delivered: input.delivered != null,
+          has_accumulated_count: input.accumulated_count != null,
+          fields_present: Object.keys(input).filter(k => (input as any)[k] != null),
+        },
+      },
+    };
+    console.log(`[TOWER] verdict=STOP reason=CONTRACT_ERROR leads_array=false reliable_count=false fields_present=${Object.keys(input).filter(k => (input as any)[k] != null).join(",")}`);
+    return result;
+  }
+
   if (requestedCount === null) {
     const result: TowerVerdict = {
       verdict: "STOP",
@@ -1557,6 +1607,32 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
 
   if (deliveredCount >= requestedCount && requestedCount > 0) {
     if (hardViolations.length > 0) {
+      const violatedFields = hardViolations.map(
+        (r) => `${r.constraint.type}(${r.constraint.field}=${r.constraint.value})`
+      );
+      const gaps = [
+        ...hardViolations.map(() => "HARD_CONSTRAINT_VIOLATED"),
+        ...locationUnverifiedGaps,
+        ...labelGaps,
+      ];
+      const result: TowerVerdict = {
+        verdict: "STOP",
+        action: "stop",
+        delivered: deliveredCount,
+        requested: requestedCount,
+        gaps,
+        confidence: 95,
+        rationale: `Count met (${deliveredCount}/${requestedCount}) but hard constraints violated: ${violatedFields.join(", ")}. Results do not satisfy all stated requirements.`,
+        suggested_changes: [],
+        constraint_results: constraintResults,
+        stop_reason: {
+          code: "COUNT_MET_HARD_VIOLATED",
+          message: `Count met but hard constraints violated: ${violatedFields.join(", ")}.`,
+          evidence: { delivered: deliveredCount, requested: requestedCount, violated_fields: violatedFields },
+        },
+      };
+      console.log(`[TOWER] verdict=STOP reason=COUNT_MET_HARD_VIOLATED delivered=${deliveredCount} requested=${requestedCount} violated=${violatedFields.join(",")}`);
+      return result;
     } else if (hardUnknowns.length > 0) {
       const unknownIds = hardUnknowns.map(
         (c) => `${c.type}(${c.field}=${c.value})`
@@ -1913,15 +1989,22 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
     requested: requestedCount,
     gaps: ["INTERNAL_ERROR", ...labelGaps],
     confidence: 100,
-    rationale: "No results were found that meet the stated requirements.",
+    rationale: `Unexpected state in verdict evaluation: delivered=${deliveredCount}, requested=${requestedCount}, leads=${leads.length}, hardViolations=${hardViolations.length}, hardUnknowns=${hardUnknowns.length}, constraints=${constraints.length}.`,
     suggested_changes: [],
     stop_reason: {
       code: "INTERNAL_ERROR",
       message: `Unexpected state reached in verdict evaluation.`,
-      evidence: { delivered: deliveredCount, requested: requestedCount },
+      evidence: {
+        delivered: deliveredCount,
+        requested: requestedCount,
+        leads_count: leads.length,
+        hard_violations_count: hardViolations.length,
+        hard_unknowns_count: hardUnknowns.length,
+        constraints_count: constraints.length,
+      },
     },
   };
-  console.log(`[TOWER] verdict=STOP reason=invalid_state`);
+  console.log(`[TOWER] verdict=STOP reason=invalid_state delivered=${deliveredCount} requested=${requestedCount} leads=${leads.length} hardViolations=${hardViolations.length} hardUnknowns=${hardUnknowns.length}`);
   return result;
 }
 

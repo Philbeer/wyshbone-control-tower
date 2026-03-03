@@ -164,6 +164,7 @@ const towerVerdictRequestSchema = z.object({
   requested_count: z.number().int().optional(),
   accumulated_count: z.number().int().optional(),
   delivered_count: z.number().int().optional(),
+  verified_exact: z.number().int().optional(),
 
   delivered: z.union([deliveredSchema, z.number().int()]).optional(),
 
