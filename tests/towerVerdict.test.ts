@@ -2611,4 +2611,105 @@ test("must_be_certain compound: one certain + one not → STOP for certain const
   }
 });
 
+test("final_delivery: delivered=10 requested=10 shortfall=0 => ACCEPT (not FAIL)", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 10,
+    leads: withEvidence([
+      { name: "Lead 1" }, { name: "Lead 2" }, { name: "Lead 3" },
+      { name: "Lead 4" }, { name: "Lead 5" }, { name: "Lead 6" },
+      { name: "Lead 7" }, { name: "Lead 8" }, { name: "Lead 9" },
+      { name: "Lead 10" },
+    ]),
+    constraints: [],
+    delivered_count: 10,
+    verified_exact: 30,
+    original_goal: "Find 10 pubs in Arundel",
+  });
+  if (result.verdict === "STOP" && result.rationale.includes("No results were found")) {
+    throw new Error(
+      `False FAIL: delivered=10, requested=10 but got verdict=${result.verdict} rationale="${result.rationale}"`
+    );
+  }
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.delivered).toBe(10);
+  expect(result.requested).toBe(10);
+  if (!result._debug) {
+    throw new Error("Missing _debug block on verdict");
+  }
+  if (result._debug.extractedDeliveredCount !== 10) {
+    throw new Error(`_debug.extractedDeliveredCount should be 10, got ${result._debug.extractedDeliveredCount}`);
+  }
+  if (result._debug.extractedRequestedCount !== 10) {
+    throw new Error(`_debug.extractedRequestedCount should be 10, got ${result._debug.extractedRequestedCount}`);
+  }
+  if (!result._debug.source) {
+    throw new Error("_debug.source should be set");
+  }
+  console.log(`  _debug: delivered=${result._debug.extractedDeliveredCount} requested=${result._debug.extractedRequestedCount} source=${result._debug.source}`);
+});
+
+test("final_delivery: delivered=0 requested=10 no replans => STOP", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 10,
+    leads: [],
+    constraints: [],
+    delivered_count: 0,
+    original_goal: "Find 10 pubs in Arundel",
+    meta: { replans_used: 3, max_replans: 3 },
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.delivered).toBe(0);
+  expect(result.requested).toBe(10);
+  if (!result._debug) {
+    throw new Error("Missing _debug block on verdict");
+  }
+  if (result._debug.extractedDeliveredCount !== 0) {
+    throw new Error(`_debug.extractedDeliveredCount should be 0, got ${result._debug.extractedDeliveredCount}`);
+  }
+  console.log(`  _debug: delivered=${result._debug.extractedDeliveredCount} requested=${result._debug.extractedRequestedCount} source=${result._debug.source}`);
+});
+
+test("final_delivery: delivered_count=10 no leads array => ACCEPT via delivered_count field", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 10,
+    constraints: [],
+    delivered_count: 10,
+    verified_exact: 30,
+    original_goal: "Find 10 pubs in Arundel",
+    verification_summary: { verified_exact_count: 10 },
+  });
+  if (result.verdict === "STOP" && result.rationale.includes("No results were found")) {
+    throw new Error(
+      `False FAIL: delivered_count=10 but got verdict=${result.verdict} rationale="${result.rationale}"`
+    );
+  }
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.delivered).toBe(10);
+  if (!result._debug) {
+    throw new Error("Missing _debug block on verdict");
+  }
+  console.log(`  _debug: delivered=${result._debug.extractedDeliveredCount} source=${result._debug.source}`);
+});
+
+test("final_delivery: no leads no counts => CONTRACT_ERROR (not 'No results found')", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 10,
+    constraints: [],
+    original_goal: "Find 10 pubs in Arundel",
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.gaps).toContain("CONTRACT_ERROR");
+  if (result.rationale.includes("No results were found")) {
+    throw new Error(
+      `Contract errors must NOT say 'No results were found', got: "${result.rationale}"`
+    );
+  }
+  if (!result.rationale.startsWith("Contract error:")) {
+    throw new Error(
+      `Contract error rationale must start with 'Contract error:', got: "${result.rationale}"`
+    );
+  }
+  console.log(`  rationale: ${result.rationale}`);
+});
+
 runTests();

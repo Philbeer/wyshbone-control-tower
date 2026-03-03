@@ -45,6 +45,9 @@ Every `TowerVerdict` includes `_debug: { extractedDeliveredCount, extractedReque
 **Contract Validation:**
 `judgeLeadsListCore` performs an early contract check: if no leads/delivered_leads array AND no reliable delivered-count fields are present, it returns STOP with code `CONTRACT_ERROR`. The rationale and stop_reason.message start with "Contract error:" and list all missing fields by name. "No results were found" is never used for contract errors.
 
+**judge-artefact Route Wiring (fixed):**
+`judgeLeadsListArtefact` in `server/routes-judge-artefact.ts` now passes `delivered_count`, `accumulated_count`, `verified_exact`, and `delivered_leads` through to `judgeLeadsList()`. The `deliveredObj` IIFE now handles numeric `delivered` at the payload root (previously only handled object-type delivered). This was the production root cause of the false FAIL: count fields from the artefact payload were never reaching `resolveDeliveredCount`.
+
 **Count Met + Hard Violated:**
 When `deliveredCount >= requestedCount` but hard constraint violations exist, Tower returns STOP with code `COUNT_MET_HARD_VIOLATED` listing the violated fields. Previously this was an empty if block that fell through to incorrect logic paths.
 

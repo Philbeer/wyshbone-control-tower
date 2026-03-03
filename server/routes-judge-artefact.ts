@@ -205,6 +205,9 @@ function judgeLeadsListArtefact(
     if (payloadJson?.delivered && typeof payloadJson.delivered === "object") {
       return payloadJson.delivered as DeliveredInfo;
     }
+    if (typeof payloadJson?.delivered === "number") {
+      return payloadJson.delivered as number;
+    }
     const dma =
       successCriteria?.delivered_matching_accumulated ??
       payloadJson?.delivered_matching_accumulated;
@@ -251,10 +254,14 @@ function judgeLeadsListArtefact(
 
   const towerResult = judgeLeadsList({
     leads,
+    delivered_leads: Array.isArray(payloadJson?.delivered_leads) ? payloadJson.delivered_leads : undefined,
     constraints,
     requested_count_user: requestedCountUser,
     requested_count: requestedCount,
     delivered: deliveredObj,
+    delivered_count: payloadJson?.delivered_count ?? successCriteria?.delivered_count,
+    accumulated_count: payloadJson?.accumulated_count ?? successCriteria?.accumulated_count,
+    verified_exact: typeof payloadJson?.verified_exact === "number" ? payloadJson.verified_exact : undefined,
     original_goal: goal,
     success_criteria:
       Object.keys(resolvedSuccessCriteria).length > 0
