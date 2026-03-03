@@ -119,7 +119,7 @@ export interface MetaInfo {
   relaxed_constraints?: string[];
 }
 
-export type CvlConstraintStatus = "yes" | "no" | "unknown" | "not_attempted";
+export type CvlConstraintStatus = "yes" | "no" | "unknown" | "not_attempted" | "not_applicable";
 
 export interface CvlConstraintResult {
   constraint_id?: string;
@@ -521,12 +521,13 @@ function evaluateConstraint(
 
     case "LOCATION": {
       if (cvlMatch) {
-        const passed = cvlMatch.status === "yes";
+        const passed = cvlMatch.status === "yes" || cvlMatch.status === "not_applicable";
         return {
           constraint,
           matched_count: passed ? total : 0,
           total_leads: total,
           passed,
+          ...(cvlMatch.status === "not_applicable" ? { status: "not_applicable" as CvlConstraintStatus } : {}),
         };
       }
       return {
@@ -1325,6 +1326,7 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
       if (cr.constraint.hardness !== "hard") return false;
       if (cr.passed) return false;
       const st = cr.status;
+      if (st === "not_applicable") return false;
       return st === "unknown" || st === "not_attempted" || !cr.passed;
     });
 

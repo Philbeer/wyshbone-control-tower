@@ -131,7 +131,7 @@ const cvlConstraintResultSchema = z.object({
   type: z.string(),
   field: z.string().optional(),
   value: z.union([z.string(), z.number()]).optional(),
-  status: z.enum(["yes", "no", "unknown"]),
+  status: z.enum(["yes", "no", "unknown", "not_attempted", "not_applicable"]),
   reason: z.string().optional(),
 });
 
@@ -146,7 +146,7 @@ const constraintsExtractedSchema = z.object({
 });
 
 const towerVerdictRequestSchema = z.object({
-  artefactType: z.literal("leads_list"),
+  artefactType: z.enum(["leads_list", "final_delivery"]),
   run_id: z.string().optional(),
   artefactId: z.string().optional(),
   goal: z.string().optional(),

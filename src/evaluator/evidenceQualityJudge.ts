@@ -1,5 +1,39 @@
 import type { StopReason } from "./towerVerdict";
 
+/*
+ * Verification-Attempted Rubric
+ * =============================
+ * Tower considers "verification attempted" when AT LEAST ONE of the
+ * following fields is present (even if null/false) on any lead in the
+ * leads array:
+ *
+ *   1. verified   (boolean)  - Agent's own claim that the lead was checked.
+ *   2. evidence   (string | string[] | object) - Supporting text / snippet
+ *                              backing the claim. Empty string or empty
+ *                              array counts as "present but empty" and will
+ *                              trigger the VERIFIED_WITHOUT_EVIDENCE gap if
+ *                              verified is true.
+ *   3. source_url (string)   - URL from which evidence was gathered. A
+ *                              non-empty source_url alone is sufficient to
+ *                              count as evidence present.
+ *
+ * If NONE of these three fields exist on ANY lead AND the top-level
+ * verified_exact_count is also missing, the verdict is STOP with gap
+ * NO_EVIDENCE_PRESENT ("evidence check was not attempted").
+ *
+ * Per-lead classification:
+ *   - verified=true  + evidence/source_url present  -> verified_with_evidence
+ *   - verified=true  + no evidence/source_url       -> verified_without_evidence
+ *                                                      (gap: VERIFIED_WITHOUT_EVIDENCE)
+ *   - verified=false                                 -> counted but not penalised
+ *   - verified=undefined/null                        -> unknown_count (not penalised)
+ *
+ * Constraint-level verification (in towerVerdict.ts):
+ *   - CvlConstraintStatus "not_applicable" is treated as a VALID state
+ *     (e.g. location not relevant to the query). It is NOT penalised as
+ *     missing evidence and does NOT trigger the truth gate.
+ */
+
 export interface EvidenceLeadInfo {
   name: string;
   verified?: boolean;
