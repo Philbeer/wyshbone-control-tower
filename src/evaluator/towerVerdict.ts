@@ -262,11 +262,16 @@ function resolveRequestedCount(input: TowerVerdictInput): number | null {
 }
 
 function resolveLeads(input: TowerVerdictInput): Lead[] {
-  if (Array.isArray(input.leads)) {
-    return input.leads.filter(
+  const filterLeads = (arr: any[]): Lead[] =>
+    arr.filter(
       (l): l is Lead =>
         l != null && typeof l === "object" && typeof (l as any).name === "string"
     );
+  if (Array.isArray(input.leads) && input.leads.length > 0) {
+    return filterLeads(input.leads);
+  }
+  if (Array.isArray(input.delivered_leads) && input.delivered_leads.length > 0) {
+    return filterLeads(input.delivered_leads);
   }
   return [];
 }
@@ -2032,6 +2037,22 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
     return { ...result, _debug: debugBlock };
   }
 
+  if (deliveredCount >= requestedCount) {
+    const result: TowerVerdict = {
+      verdict: "ACCEPT",
+      action: "continue",
+      delivered: deliveredCount,
+      requested: requestedCount,
+      gaps: [...labelGaps],
+      confidence: 80,
+      rationale: `Delivered ${deliveredCount} of ${requestedCount} requested. Count met.`,
+      suggested_changes: [],
+      constraint_results: constraintResults,
+    };
+    console.log(`[TOWER] verdict=ACCEPT reason=fallback_count_met delivered=${deliveredCount} requested=${requestedCount} leads=${leads.length}`);
+    return { ...result, _debug: debugBlock };
+  }
+
   const result: TowerVerdict = {
     verdict: "STOP",
     action: "stop",
@@ -2039,7 +2060,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
     requested: requestedCount,
     gaps: ["INTERNAL_ERROR", ...labelGaps],
     confidence: 100,
-    rationale: `Unexpected state in verdict evaluation: delivered=${deliveredCount}, requested=${requestedCount}, leads=${leads.length}, hardViolations=${hardViolations.length}, hardUnknowns=${hardUnknowns.length}, constraints=${constraints.length}.`,
+    rationale: `Unexpected state in verdict evaluation: delivered=${deliveredCount}, requested=${requestedCount}, leads=${leads.length}, hardViolations=${hardViolations.length}, hardUnknowns=${hardUnknowns.length}, constraints=${constraints.length}. _debug: source=${debugBlock.source}.`,
     suggested_changes: [],
     stop_reason: {
       code: "INTERNAL_ERROR",
@@ -2051,10 +2072,11 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         hard_violations_count: hardViolations.length,
         hard_unknowns_count: hardUnknowns.length,
         constraints_count: constraints.length,
+        _debug: debugBlock,
       },
     },
   };
-  console.log(`[TOWER] verdict=STOP reason=invalid_state delivered=${deliveredCount} requested=${requestedCount} leads=${leads.length} hardViolations=${hardViolations.length} hardUnknowns=${hardUnknowns.length}`);
+  console.log(`[TOWER] verdict=STOP reason=invalid_state delivered=${deliveredCount} requested=${requestedCount} leads=${leads.length} hardViolations=${hardViolations.length} hardUnknowns=${hardUnknowns.length} source=${debugBlock.source}`);
   return { ...result, _debug: debugBlock };
 }
 

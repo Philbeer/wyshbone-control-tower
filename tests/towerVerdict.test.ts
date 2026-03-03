@@ -2854,4 +2854,80 @@ test("INTEGRATION: tower-verdict route shape — delivered_leads + verified_exac
   console.log(`  INTEGRATION PASS: delivered_leads.length=8 used as source, verdict=${result.verdict}`);
 });
 
+test("BUG FIX: delivered_count=10 leads=[] must NEVER return 'Unexpected state' STOP", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 10,
+    leads: [],
+    constraints: [],
+    delivered_count: 10,
+    original_goal: "Find 10 restaurants in Arundel",
+    verification_summary: { verified_exact_count: 10 },
+  });
+  if (result.rationale.includes("Unexpected state")) {
+    throw new Error(
+      `BUG: delivered_count=10 but verdict hit 'Unexpected state' fallback. ` +
+      `verdict=${result.verdict} rationale="${result.rationale}" _debug=${JSON.stringify(result._debug)}`
+    );
+  }
+  if (result.verdict === "STOP" && result.rationale.includes("No results were found")) {
+    throw new Error(
+      `BUG: delivered_count=10 but verdict says 'No results were found'. ` +
+      `verdict=${result.verdict} rationale="${result.rationale}" _debug=${JSON.stringify(result._debug)}`
+    );
+  }
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.delivered).toBe(10);
+  console.log(`  BUG FIX PASS: verdict=${result.verdict} delivered=${result.delivered} source=${result._debug?.source}`);
+});
+
+test("BUG FIX: delivered_leads=10 items but leads=[] must ACCEPT (resolveLeads fallback)", () => {
+  const deliveredLeads = Array.from({ length: 10 }, (_, i) => ({
+    name: `Restaurant ${i + 1}`,
+    address: `${100 + i} Main St`,
+    source_url: `https://example.com/${i}`,
+    verified: true,
+    evidence: `Found on maps listing`,
+  }));
+  const result = judgeLeadsList({
+    requested_count_user: 10,
+    leads: [],
+    delivered_leads: deliveredLeads,
+    constraints: [],
+    delivered_count: 10,
+    original_goal: "Find 10 restaurants in Arundel",
+    verification_summary: { verified_exact_count: 10 },
+  });
+  if (result.rationale.includes("Unexpected state")) {
+    throw new Error(
+      `BUG: delivered_leads has 10 items but verdict hit 'Unexpected state'. ` +
+      `rationale="${result.rationale}"`
+    );
+  }
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.delivered).toBe(10);
+  if (result._debug?.source !== "delivered_leads.length") {
+    throw new Error(`Expected source=delivered_leads.length but got ${result._debug?.source}`);
+  }
+  console.log(`  BUG FIX PASS: verdict=${result.verdict} delivered=${result.delivered} source=${result._debug?.source}`);
+});
+
+test("BUG FIX: Unexpected state fallback with deliveredCount >= requestedCount returns ACCEPT not STOP", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 0,
+    leads: [],
+    constraints: [],
+    delivered_count: 5,
+    original_goal: "Find restaurants",
+    verification_summary: { verified_exact_count: 5 },
+  });
+  if (result.rationale.includes("Unexpected state")) {
+    throw new Error(
+      `Unexpected state fallback should not fire when deliveredCount >= requestedCount. ` +
+      `rationale="${result.rationale}"`
+    );
+  }
+  expect(result.verdict).toBe("ACCEPT");
+  console.log(`  BUG FIX PASS: requestedCount=0, deliveredCount=5 → verdict=${result.verdict}`);
+});
+
 runTests();

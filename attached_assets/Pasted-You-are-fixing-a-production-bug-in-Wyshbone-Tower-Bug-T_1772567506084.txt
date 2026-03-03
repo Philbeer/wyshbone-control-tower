@@ -1,0 +1,45 @@
+You are fixing a production bug in Wyshbone Tower.
+
+Bug:
+Tower final_delivery judgement fails with:
+"Unexpected state in verdict evaluation: delivered=10, requested=explicit, leads=0 ..."
+Even when final_delivery shows "10 leads delivered" and delivered_count=10.
+
+Root cause:
+The final_delivery judge path is reading leads.length (0) instead of the delivered leads list or delivered_count passed in the artefact payload.
+
+Task:
+Make Tower final_delivery judgement NEVER fail just because leads array is missing, if delivered_count or delivered_leads exists.
+It must correctly compute deliveredCount from:
+1) delivered_leads.length (if present)
+2) leads.length (if present)
+3) delivered_count (if present)
+4) verified_exact / accumulated_count / delivered object/number fallbacks (existing resolveDeliveredCount rules)
+
+Concrete changes required:
+1) server/routes-judge-artefact.ts
+- In judgeLeadsListArtefact(), when calling judgeLeadsList(), pass through ALL count fields from the artefact payload:
+  delivered_count, delivered_leads, verified_exact, accumulated_count (and any existing fields you already pass).
+- Fix deliveredObj extraction so it supports numeric delivered at payload root as well as object delivered.
+
+2) src/evaluator/towerVerdict.ts (or wherever judgeLeadsList / resolveDeliveredCount lives)
+- Ensure final_delivery path uses resolveDeliveredCount() result, not leads.length directly.
+- Remove/replace any "Unexpected state" guard that triggers when deliveredCount > 0 but leads.length == 0.
+  If deliveredCount >= requestedCount and there are no hard violations/unknowns, verdict must be PASS/ACCEPT, not fail.
+
+3) tests/towerVerdict.test.ts
+Add/adjust tests so these pass:
+- final_delivery with delivered_count=10 but leads=[] => ACCEPT/PASS
+- final_delivery with delivered_leads length 10 but leads=[] => ACCEPT/PASS
+- final_delivery with no leads and no counts => STOP with "Contract error: ..." (not "No results were found")
+Keep existing tests passing unless they were already failing before this change.
+
+Important constraints:
+- Rewrite the FULL contents of each file you touch (no partial diffs).
+- After changes, run tests and show the test output.
+- Do not change unrelated behaviour.
+
+Deliverables:
+- Full rewritten files
+- Brief note of why the bug happened and why this fix prevents it
+- Test results

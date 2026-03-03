@@ -48,6 +48,12 @@ Every `TowerVerdict` includes `_debug: { extractedDeliveredCount, extractedReque
 **Route Wiring (fixed in both routes):**
 Both `judgeLeadsListArtefact` (routes-judge-artefact.ts) and the tower-verdict inline route (routes-tower-verdict.ts) now pass `delivered_count`, `accumulated_count`, `verified_exact`, and `delivered_leads` through to `judgeLeadsList()`. The `deliveredObj` IIFE in judge-artefact now handles numeric `delivered` at the payload root. Both routes log the exact payload received (`[TOWER_IN] final_delivery_payload:`) and the verdict output includes `_debug` in logs. The `_debug` block is forwarded through `metrics._debug` in judge-artefact responses.
 
+**resolveLeads() fallback to delivered_leads:**
+`resolveLeads()` now checks `delivered_leads` when `leads` array is empty/missing. This ensures the evidence quality judge receives lead data even when only `delivered_leads` is present in the payload, preventing false ACCEPT→STOP overrides due to "NO_EVIDENCE_PRESENT".
+
+**"Unexpected state" fallback safety:**
+The INTERNAL_ERROR fallback at the end of `judgeLeadsListCore` now checks `deliveredCount >= requestedCount` first — if count is met, it returns ACCEPT instead of STOP. The STOP fallback still exists for genuine unhandled states but now includes `_debug` in the rationale and stop_reason evidence for traceability.
+
 **Count Met + Hard Violated:**
 When `deliveredCount >= requestedCount` but hard constraint violations exist, Tower returns STOP with code `COUNT_MET_HARD_VIOLATED` listing the violated fields. Previously this was an empty if block that fell through to incorrect logic paths.
 
