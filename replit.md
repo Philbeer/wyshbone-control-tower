@@ -36,11 +36,14 @@ The application is built on Node.js and Express, utilizing server-side rendering
 **Constraint-Driven Evidence-Based Evaluation (v3):**
 Tower uses user intent (`requested_count_user`) and accumulated matching results (`delivered_matching_accumulated`). It defines a priority for resolving requested and delivered counts. Constraints are typed (NAME_CONTAINS, NAME_STARTS_WITH, LOCATION, COUNT_MIN, HAS_ATTRIBUTE) with `hardness` (hard/soft), and a clear resolution priority for different constraint formats. Logic includes replan-aware verdicting, typed `suggested_change` types, and detection of `label_misleading` gaps. Hard constraints are strictly enforced, never auto-relaxed. CVL-aware judgement uses `verification_summary` for evidence-based verification, prioritizing `verified_exact_count` and requiring CVL status for LOCATION constraints. Rationale wording is factual and aligned with `delivery_summary`.
 
-**Delivered Count Resolution (expanded):**
-`resolveDeliveredCount()` priority chain: (1) CVL `verified_exact_count`, (2) top-level `verified_exact` field, (3) `delivered.delivered_matching_accumulated`, (4) matched lead count from constraint evaluation, (5) `delivered.delivered_matching_this_plan`, (6) numeric `delivered`, (7) `accumulated_count`, (8) `delivered_count`, (9) `leads.length` fallback, (10) 0. The `verified_exact` field was added to `TowerVerdictInput` and the Zod schema to support Supervisors that report verification counts at the top level without a full CVL payload.
+**Delivered Count Resolution (v2):**
+`resolveDeliveredCount()` returns `{ count, source }` for debug tracing. Priority chain: (1) `delivered_leads.length`, (2) `leads.length`, (3) `delivered_count`, (4) CVL `verification_summary.verified_exact_count`, (5) top-level `verified_exact`, (6) `accumulated_count`, (7) `delivered.delivered_matching_accumulated`, (8) `delivered.delivered_matching_this_plan`, (9) numeric `delivered`, (10) `matchedLeadCount`, (11) `default(0)`. Fields `verified_exact` and `delivered_leads` added to `TowerVerdictInput` and Zod schema.
+
+**Verdict Debug Block:**
+Every `TowerVerdict` includes `_debug: { extractedDeliveredCount, extractedRequestedCount, source }` showing which field was used to compute `deliveredCount`, for traceability in artefacts and API responses.
 
 **Contract Validation:**
-`judgeLeadsListCore` performs an early contract check: if no leads array AND no reliable delivered-count fields are present, it returns STOP with code `CONTRACT_ERROR` instead of the misleading "No results were found." The evidence object lists which fields were checked.
+`judgeLeadsListCore` performs an early contract check: if no leads/delivered_leads array AND no reliable delivered-count fields are present, it returns STOP with code `CONTRACT_ERROR`. The rationale and stop_reason.message start with "Contract error:" and list all missing fields by name. "No results were found" is never used for contract errors.
 
 **Count Met + Hard Violated:**
 When `deliveredCount >= requestedCount` but hard constraint violations exist, Tower returns STOP with code `COUNT_MET_HARD_VIOLATED` listing the violated fields. Previously this was an empty if block that fell through to incorrect logic paths.

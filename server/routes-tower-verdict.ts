@@ -158,6 +158,7 @@ const towerVerdictRequestSchema = z.object({
   normalized_goal: z.string().optional(),
 
   leads: z.array(leadSchema).optional(),
+  delivered_leads: z.array(leadSchema).optional(),
   constraints: z.array(constraintSchema).optional(),
 
   requested_count_user: z.number().int().optional(),

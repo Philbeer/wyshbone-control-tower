@@ -91,6 +91,12 @@ export interface StopReason {
   evidence?: Record<string, unknown>;
 }
 
+export interface TowerVerdictDebug {
+  extractedDeliveredCount: number;
+  extractedRequestedCount: number;
+  source: string;
+}
+
 export interface TowerVerdict {
   verdict: TowerVerdictAction;
   action: "continue" | "stop" | "change_plan";
@@ -102,6 +108,7 @@ export interface TowerVerdict {
   suggested_changes: SuggestedChange[];
   constraint_results?: ConstraintResult[];
   stop_reason?: StopReason;
+  _debug?: TowerVerdictDebug;
 }
 
 export interface DeliveredInfo {
@@ -161,6 +168,7 @@ export interface TowerVerdictInput {
   requested_count_user?: number;
   constraints?: Constraint[];
   leads?: Lead[];
+  delivered_leads?: Lead[];
 
   original_user_goal?: string;
   normalized_goal?: string;
@@ -268,36 +276,54 @@ function hasCvl(input: TowerVerdictInput): boolean {
     typeof input.verification_summary.verified_exact_count === "number";
 }
 
-function resolveDeliveredCount(input: TowerVerdictInput, matchedLeadCount: number | null): number {
+interface DeliveredCountResult {
+  count: number;
+  source: string;
+}
+
+function resolveDeliveredCount(input: TowerVerdictInput, matchedLeadCount: number | null): DeliveredCountResult {
+  if (Array.isArray(input.delivered_leads) && input.delivered_leads.length > 0) {
+    return { count: input.delivered_leads.length, source: "delivered_leads.length" };
+  }
+
+  const leads = resolveLeads(input);
+  if (leads.length > 0) {
+    return { count: leads.length, source: "leads.length" };
+  }
+
+  if (input.delivered_count != null) {
+    return { count: input.delivered_count, source: "delivered_count" };
+  }
+
   if (hasCvl(input)) {
-    return input.verification_summary!.verified_exact_count;
+    return { count: input.verification_summary!.verified_exact_count, source: "verification_summary.verified_exact_count" };
   }
 
   if (typeof input.verified_exact === "number" && input.verified_exact > 0) {
-    return input.verified_exact;
+    return { count: input.verified_exact, source: "verified_exact" };
+  }
+
+  if (input.accumulated_count != null) {
+    return { count: input.accumulated_count, source: "accumulated_count" };
   }
 
   const delivered = input.delivered;
   if (typeof delivered === "object" && delivered != null) {
     if (delivered.delivered_matching_accumulated != null)
-      return delivered.delivered_matching_accumulated;
-  }
-
-  if (matchedLeadCount != null && matchedLeadCount > 0) return matchedLeadCount;
-
-  if (typeof delivered === "object" && delivered != null) {
+      return { count: delivered.delivered_matching_accumulated, source: "delivered.delivered_matching_accumulated" };
     if (delivered.delivered_matching_this_plan != null)
-      return delivered.delivered_matching_this_plan;
+      return { count: delivered.delivered_matching_this_plan, source: "delivered.delivered_matching_this_plan" };
   }
 
-  if (typeof delivered === "number") return delivered;
-  if (input.accumulated_count != null) return input.accumulated_count;
-  if (input.delivered_count != null) return input.delivered_count;
+  if (typeof delivered === "number") {
+    return { count: delivered, source: "delivered(number)" };
+  }
 
-  const leads = resolveLeads(input);
-  if (leads.length > 0) return leads.length;
+  if (matchedLeadCount != null && matchedLeadCount > 0) {
+    return { count: matchedLeadCount, source: "matchedLeadCount" };
+  }
 
-  return 0;
+  return { count: 0, source: "default(0)" };
 }
 
 function findCvlStatusForConstraint(
@@ -1401,7 +1427,8 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
     input.normalized_goal ??
     null;
 
-  const hasLeadsArray = Array.isArray(input.leads) && input.leads.length > 0;
+  const hasLeadsArray = (Array.isArray(input.leads) && input.leads.length > 0) ||
+    (Array.isArray(input.delivered_leads) && input.delivered_leads.length > 0);
   const hasReliableCount =
     hasCvl(input) ||
     (typeof input.verified_exact === "number" && input.verified_exact > 0) ||
@@ -1414,6 +1441,24 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
     ));
 
   if (!hasLeadsArray && !hasReliableCount) {
+    const missingFields = [
+      "leads",
+      "delivered_leads",
+      "delivered_count",
+      "verification_summary.verified_exact_count",
+      "verified_exact",
+      "accumulated_count",
+      "delivered",
+    ].filter(f => {
+      if (f === "leads") return !Array.isArray(input.leads) || input.leads.length === 0;
+      if (f === "delivered_leads") return !Array.isArray(input.delivered_leads) || input.delivered_leads.length === 0;
+      if (f === "delivered_count") return input.delivered_count == null;
+      if (f === "verification_summary.verified_exact_count") return !hasCvl(input);
+      if (f === "verified_exact") return typeof input.verified_exact !== "number";
+      if (f === "accumulated_count") return input.accumulated_count == null;
+      if (f === "delivered") return input.delivered == null;
+      return true;
+    });
     const result: TowerVerdict = {
       verdict: "STOP",
       action: "stop",
@@ -1421,31 +1466,28 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       requested: requestedCount ?? 0,
       gaps: ["CONTRACT_ERROR"],
       confidence: 100,
-      rationale: "Contract error: final_delivery/leads_list artefact is missing both a leads array and delivered-count fields that Tower can read. Tower cannot evaluate delivery without data.",
+      rationale: `Contract error: final_delivery artefact is missing all delivery fields. Missing: ${missingFields.join(", ")}. Tower cannot evaluate delivery without data.`,
       suggested_changes: [],
       stop_reason: {
         code: "CONTRACT_ERROR",
-        message: "Contract error: final_delivery missing leads array and delivered counts Tower can read.",
+        message: `Contract error: final_delivery missing required fields: ${missingFields.join(", ")}.`,
         evidence: {
-          has_leads_array: false,
-          has_verified_exact: typeof input.verified_exact === "number",
-          has_cvl: hasCvl(input),
-          has_delivered_count: input.delivered_count != null,
-          has_delivered: input.delivered != null,
-          has_accumulated_count: input.accumulated_count != null,
+          missing_fields: missingFields,
           fields_present: Object.keys(input).filter(k => (input as any)[k] != null),
         },
       },
+      _debug: { extractedDeliveredCount: 0, extractedRequestedCount: requestedCount ?? 0, source: "none(contract_error)" },
     };
-    console.log(`[TOWER] verdict=STOP reason=CONTRACT_ERROR leads_array=false reliable_count=false fields_present=${Object.keys(input).filter(k => (input as any)[k] != null).join(",")}`);
+    console.log(`[TOWER] verdict=STOP reason=CONTRACT_ERROR missing=${missingFields.join(",")}`);
     return result;
   }
 
   if (requestedCount === null) {
+    const dcMissing = resolveDeliveredCount(input, null);
     const result: TowerVerdict = {
       verdict: "STOP",
       action: "stop",
-      delivered: 0,
+      delivered: dcMissing.count,
       requested: 0,
       gaps: ["MISSING_REQUESTED_COUNT"],
       confidence: 100,
@@ -1455,6 +1497,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         code: "MISSING_REQUESTED_COUNT",
         message: "Cannot evaluate: requested_count_user is missing from input.",
       },
+      _debug: { extractedDeliveredCount: dcMissing.count, extractedRequestedCount: 0, source: dcMissing.source },
     };
     console.log(`[TOWER] verdict=STOP reason=MISSING_REQUESTED_COUNT`);
     return result;
@@ -1463,7 +1506,8 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
   if (checkNoProgress(input)) {
     const matchedCount =
       leads.length > 0 ? getMatchedLeadCount(constraints, leads) : 0;
-    const deliveredCount = resolveDeliveredCount(input, matchedCount);
+    const dcResult = resolveDeliveredCount(input, matchedCount);
+    const deliveredCount = dcResult.count;
     const message = deliveredCount > 0
       ? `Only ${deliveredCount} exact matches were found. Remaining results do not meet all stated requirements.`
       : leads.length > 0
@@ -1483,6 +1527,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         message,
         evidence: { delivered: deliveredCount, requested: requestedCount, leads_count: leads.length },
       },
+      _debug: { extractedDeliveredCount: deliveredCount, extractedRequestedCount: requestedCount, source: dcResult.source },
     };
     console.log(`[TOWER] verdict=STOP reason=NO_PROGRESS`);
     return result;
@@ -1496,7 +1541,8 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
   if (concatCheck.corrupted) {
     const matchedCount =
       leads.length > 0 ? getMatchedLeadCount(constraints, leads) : 0;
-    const deliveredCount = resolveDeliveredCount(input, matchedCount);
+    const dcResultConcat = resolveDeliveredCount(input, matchedCount);
+    const deliveredCount = dcResultConcat.count;
     const result: TowerVerdict = {
       verdict: "CHANGE_PLAN",
       action: "change_plan",
@@ -1517,6 +1563,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         message: "Input appears concatenated. Ask the user to restate the request.",
         evidence: { detected_reason: concatCheck.reason },
       },
+      _debug: { extractedDeliveredCount: deliveredCount, extractedRequestedCount: requestedCount, source: dcResultConcat.source },
     };
     console.log(`[TOWER] verdict=CHANGE_PLAN reason=INPUT_CONCATENATED detail="${concatCheck.reason}"`);
     return result;
@@ -1532,7 +1579,10 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
 
   const matchedLeadCount =
     leads.length > 0 ? getMatchedLeadCount(constraints, leads) : null;
-  const deliveredCount = resolveDeliveredCount(input, matchedLeadCount);
+  const dcMain = resolveDeliveredCount(input, matchedLeadCount);
+  const deliveredCount = dcMain.count;
+  const deliveredSource = dcMain.source;
+  const debugBlock: TowerVerdictDebug = { extractedDeliveredCount: deliveredCount, extractedRequestedCount: requestedCount, source: deliveredSource };
 
   const constraintResults = constraints.map((c) => {
     if (c.type === "COUNT_MIN") {
@@ -1696,7 +1746,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
           },
         };
         console.log(`[TOWER] verdict=STOP reason=HARD_CONSTRAINT_UNVERIFIABLE`);
-        return result;
+        return { ...result, _debug: debugBlock };
       }
 
       if (canReplan(input)) {
@@ -1717,7 +1767,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
           },
         };
         console.log(`[TOWER] verdict=CHANGE_PLAN reason=hard_constraint_unknown_needs_verification`);
-        return result;
+        return { ...result, _debug: debugBlock };
       }
 
       const result: TowerVerdict = {
@@ -1737,7 +1787,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         },
       };
       console.log(`[TOWER] verdict=STOP reason=hard_unknown_no_replans`);
-      return result;
+      return { ...result, _debug: debugBlock };
     } else {
       const ratio = deliveredCount / requestedCount;
       const confidence = Math.min(95, Math.round(80 + (ratio - 1) * 15));
@@ -1760,7 +1810,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       console.log(
         `[TOWER] verdict=ACCEPT delivered=${deliveredCount} requested=${requestedCount} cvl=${cvlPresent}`
       );
-      return result;
+      return { ...result, _debug: debugBlock };
     }
   }
 
@@ -1793,7 +1843,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         },
       };
       console.log(`[TOWER] verdict=STOP reason=hard_constraint_impossible`);
-      return result;
+      return { ...result, _debug: debugBlock };
     }
 
     if (allHardViolated) {
@@ -1818,7 +1868,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         },
       };
       console.log(`[TOWER] verdict=STOP reason=hard_constraint_impossible`);
-      return result;
+      return { ...result, _debug: debugBlock };
     }
 
     const gaps = [
@@ -1863,7 +1913,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       console.log(
         `[TOWER] verdict=CHANGE_PLAN reason=hard_violated_suggestions_available`
       );
-      return result;
+      return { ...result, _debug: debugBlock };
     }
 
     const violatedFields = hardViolations.map((r) => `${r.constraint.type}(${r.constraint.field}=${r.constraint.value})`);
@@ -1886,7 +1936,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       },
     };
     console.log(`[TOWER] verdict=STOP reason=hard_constraint_impossible`);
-    return result;
+    return { ...result, _debug: debugBlock };
   }
 
   if (deliveredCount < requestedCount && requestedCount > 0) {
@@ -1926,7 +1976,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       console.log(
         `[TOWER] verdict=CHANGE_PLAN delivered=${deliveredCount} requested=${requestedCount}`
       );
-      return result;
+      return { ...result, _debug: debugBlock };
     }
 
     if (!canReplan(input)) {
@@ -1953,7 +2003,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       console.log(
         `[TOWER] verdict=STOP delivered=${deliveredCount} requested=${requestedCount} reason=max_replans_exhausted`
       );
-      return result;
+      return { ...result, _debug: debugBlock };
     }
 
     const result: TowerVerdict = {
@@ -1979,7 +2029,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
     console.log(
       `[TOWER] verdict=STOP delivered=${deliveredCount} requested=${requestedCount} reason=no_suggestions_location_not_expandable`
     );
-    return result;
+    return { ...result, _debug: debugBlock };
   }
 
   const result: TowerVerdict = {
@@ -2005,7 +2055,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
     },
   };
   console.log(`[TOWER] verdict=STOP reason=invalid_state delivered=${deliveredCount} requested=${requestedCount} leads=${leads.length} hardViolations=${hardViolations.length} hardUnknowns=${hardUnknowns.length}`);
-  return result;
+  return { ...result, _debug: debugBlock };
 }
 
 export interface AskLeadQuestionInput {
