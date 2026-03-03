@@ -1,0 +1,71 @@
+You are working in the Wyshbone-Tower repo.
+
+Goal: Tower becomes the only authority that decides when learning updates happen. Tower emits a learning_update artefact only when it has a clear judgement reason and metric trigger.
+
+Implement:
+
+Extend Tower judgement rubric to produce structured metrics for the run:
+Minimum metrics:
+
+requested_count
+
+returned_count
+
+underfilled (bool)
+
+verification_quality_score (0-1 or enum weak/ok/strong)
+
+cost_or_time_signal (eg steps_count, tool_calls, duration bucket if available)
+
+failure_reason enum: underfilled_results | weak_verification | too_slow | impossible_constraints | other
+
+Add policy change rules that map judgement -> knob changes (minimal, deterministic):
+
+If underfilled_results (returned_count < requested_count AND user wanted count explicitly or default_count applied):
+-> increase search_budget_pages by +1 (cap at 3) OR set radius_escalation to aggressive (pick one consistent rule)
+-> optionally set stop_if_underfilled=true if repeated underfill (only if you can see prior runs, otherwise skip)
+
+If weak_verification:
+-> increase verification_level one step: minimal -> standard -> strict
+
+If too_slow but ACCEPT:
+-> decrease verification_level one step OR decrease search_budget_pages by -1 (floor at 1)
+
+Emit learning_update artefact ONLY when:
+
+judgement is ACCEPT but has a clear optimisation trigger (too_slow), OR
+
+judgement is RETRY/CHANGE_PLAN due to underfilled or weak_verification
+No updates on STOP unless you’re explicitly learning “don’t attempt this shape” (skip for MVP).
+
+Artefact schema:
+
+type: learning_update
+
+query_shape_key (must match Supervisor’s key passed in run context)
+
+changed_fields: [{field, before, after}]
+
+tower_reason (short string)
+
+metrics_trigger (structured object with the metric values that triggered it)
+
+run_id
+
+Tower must not directly write to LearningStore. It only emits the artefact. Supervisor persists it.
+
+Acceptance tests:
+
+Underfilled run causes learning_update that increases search_budget_pages or radius_escalation.
+
+Weak verification run causes learning_update that increases verification_level.
+
+Normal ACCEPT run with no trigger emits no learning_update.
+
+Deliverables:
+
+Updated judgement output structure
+
+learning_update emission code path
+
+Unit tests or simple harness logs showing emission when triggers hit

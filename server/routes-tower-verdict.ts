@@ -4,6 +4,8 @@ import { judgeLeadsList } from "../src/evaluator/towerVerdict";
 import type { Constraint, StopReason, AttributeEvidenceArtefact } from "../src/evaluator/towerVerdict";
 import { judgePlasticsInjection } from "../src/evaluator/plasticsInjectionRubric";
 import type { PlasticsRubricInput, PlasticsStepSnapshot } from "../src/evaluator/plasticsInjectionRubric";
+import { evaluateLearningUpdate } from "../src/evaluator/learningUpdateEmitter";
+import type { LearningUpdateInput } from "../src/evaluator/learningUpdateEmitter";
 import { db } from "../src/lib/db";
 import { sql, eq } from "drizzle-orm";
 import { towerVerdicts } from "../shared/schema";
@@ -205,6 +207,13 @@ const towerVerdictRequestSchema = z.object({
   })).optional(),
 
   best_effort_accepted: z.boolean().optional(),
+
+  query_shape_key: z.string().optional(),
+  steps_count: z.number().int().optional(),
+  tool_calls: z.number().int().optional(),
+  current_search_budget_pages: z.number().int().optional(),
+  current_verification_level: z.enum(["minimal", "standard", "strict"]).optional(),
+  current_radius_escalation: z.enum(["conservative", "moderate", "aggressive"]).optional(),
 });
 
 interface PersistResult {
@@ -549,6 +558,26 @@ router.post("/tower-verdict", async (req, res) => {
       `[TOWER_IN] run_id=${runId} verdict=${result.verdict} action=${result.action} requested=${result.requested} delivered=${result.delivered} suggestions=${result.suggested_changes.length}`
     );
 
+    const learningInput: LearningUpdateInput = {
+      verdict: result.verdict,
+      delivered: result.delivered,
+      requested: result.requested,
+      gaps: result.gaps,
+      confidence: result.confidence,
+      stop_reason: result.stop_reason,
+      suggested_changes: result.suggested_changes,
+      constraint_results: result.constraint_results,
+      run_id: runId,
+      query_shape_key: data.query_shape_key,
+      replans_used: data.meta?.replans_used,
+      steps_count: data.steps_count,
+      tool_calls: data.tool_calls,
+      current_search_budget_pages: data.current_search_budget_pages,
+      current_verification_level: data.current_verification_level,
+      current_radius_escalation: data.current_radius_escalation,
+    };
+    const learningUpdate = evaluateLearningUpdate(learningInput);
+
     const pr = await persistTowerVerdict({
       run_id: runId,
       artefact_id: artId,
@@ -564,7 +593,10 @@ router.post("/tower-verdict", async (req, res) => {
       idempotency_key: idempotencyKey,
     });
 
-    res.json(addPersistMeta(result, pr));
+    res.json(addPersistMeta({
+      ...result,
+      ...(learningUpdate ? { learning_update: learningUpdate } : {}),
+    }, pr));
   } catch (err) {
     console.error(
       "[TOWER] Unexpected error in tower-verdict:",

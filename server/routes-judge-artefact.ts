@@ -6,6 +6,8 @@ import { judgeLeadsList, normalizeConstraintHardness, normalizeStructuredConstra
 import type { Lead, Constraint, DeliveredInfo, MetaInfo, StructuredConstraint, StopReason, AskLeadQuestionInput, AttributeEvidenceArtefact } from "../src/evaluator/towerVerdict";
 import { judgePlasticsInjection } from "../src/evaluator/plasticsInjectionRubric";
 import type { PlasticsRubricInput } from "../src/evaluator/plasticsInjectionRubric";
+import { evaluateLearningUpdate } from "../src/evaluator/learningUpdateEmitter";
+import type { LearningUpdateInput } from "../src/evaluator/learningUpdateEmitter";
 import { towerVerdicts } from "../shared/schema";
 
 const router = express.Router();
@@ -20,6 +22,12 @@ const judgeArtefactRequestSchema = z.object({
   artefactType: z.string().min(1),
   proof_mode: z.string().optional(),
   idempotency_key: z.string().optional(),
+  query_shape_key: z.string().optional(),
+  steps_count: z.number().int().optional(),
+  tool_calls: z.number().int().optional(),
+  current_search_budget_pages: z.number().int().optional(),
+  current_verification_level: z.enum(["minimal", "standard", "strict"]).optional(),
+  current_radius_escalation: z.enum(["conservative", "moderate", "aggressive"]).optional(),
 });
 
 interface JudgeArtefactResponse {
@@ -315,8 +323,11 @@ router.post("/judge-artefact", async (req, res) => {
       return;
     }
 
-    const { runId, artefactId, goal, successCriteria, artefactType, proof_mode, idempotency_key } =
-      parsed.data;
+    const {
+      runId, artefactId, goal, successCriteria, artefactType, proof_mode,
+      idempotency_key, query_shape_key, steps_count, tool_calls,
+      current_search_budget_pages, current_verification_level, current_radius_escalation,
+    } = parsed.data;
 
     const idempotencyKey = idempotency_key ?? null;
 
@@ -578,6 +589,26 @@ router.post("/judge-artefact", async (req, res) => {
         `[Tower][judge-artefact] leads_list run_id=${runId} verdict=${leadsResult.verdict} towerVerdict=${leadsResult.towerVerdict} action=${leadsResult.action} delivered=${leadsResult.metrics.delivered} requested=${leadsResult.metrics.requested}`
       );
 
+      const learningInput: LearningUpdateInput = {
+        verdict: leadsResult.towerVerdict as any,
+        delivered: (leadsResult.metrics.delivered as number) ?? 0,
+        requested: (leadsResult.metrics.requested as number) ?? 0,
+        gaps: (leadsResult.metrics.gaps as string[]) ?? [],
+        confidence: (leadsResult.metrics.confidence as number) ?? 0,
+        stop_reason: leadsResult.stop_reason,
+        suggested_changes: leadsResult.suggested_changes,
+        constraint_results: (leadsResult.metrics.constraint_results as any) ?? undefined,
+        run_id: runId,
+        query_shape_key: query_shape_key,
+        replans_used: (leadsResult.metrics as any)?.replans_used,
+        steps_count,
+        tool_calls,
+        current_search_budget_pages,
+        current_verification_level,
+        current_radius_escalation,
+      };
+      const learningUpdate = evaluateLearningUpdate(learningInput);
+
       const pr = await persistTowerVerdict({
         run_id: runId,
         artefact_id: artefactId,
@@ -593,7 +624,10 @@ router.post("/judge-artefact", async (req, res) => {
         idempotency_key: idempotencyKey,
       });
 
-      res.json(addPersistMeta(leadsResult, pr));
+      res.json(addPersistMeta({
+        ...leadsResult,
+        ...(learningUpdate ? { learning_update: learningUpdate } : {}),
+      }, pr));
       return;
     }
 
