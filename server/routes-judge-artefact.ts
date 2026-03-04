@@ -5,6 +5,8 @@ import { z } from "zod";
 import { judgeLeadsList, normalizeConstraintHardness, normalizeStructuredConstraints, judgeAskLeadQuestion } from "../src/evaluator/towerVerdict";
 import type { Lead, Constraint, DeliveredInfo, MetaInfo, StructuredConstraint, StopReason, AskLeadQuestionInput, AttributeEvidenceArtefact } from "../src/evaluator/towerVerdict";
 import { judgePlasticsInjection } from "../src/evaluator/plasticsInjectionRubric";
+import { judgeRunReceipt } from "../src/evaluator/receiptTruthJudge";
+import type { SiblingArtefact } from "../src/evaluator/receiptTruthJudge";
 import type { PlasticsRubricInput } from "../src/evaluator/plasticsInjectionRubric";
 import { evaluateLearningUpdate } from "../src/evaluator/learningUpdateEmitter";
 import type { LearningUpdateInput } from "../src/evaluator/learningUpdateEmitter";
@@ -653,6 +655,97 @@ router.post("/judge-artefact", async (req, res) => {
         ...leadsResult,
         ...(learningUpdate ? { learning_update: learningUpdate } : {}),
       }, pr));
+      return;
+    }
+
+    if (artefactType === "run_receipt") {
+      let siblingArtefacts: SiblingArtefact[] = [];
+      try {
+        const siblingResult = await db.execute(
+          sql`SELECT id, artefact_type, payload_json FROM artefacts
+              WHERE run_id = ${runId}
+                AND artefact_type IN ('lead_pack', 'contact_extract')
+              ORDER BY created_at DESC`
+        );
+        if (siblingResult.rows) {
+          for (const row of siblingResult.rows) {
+            let p: any = null;
+            try {
+              p = typeof row.payload_json === "string"
+                ? JSON.parse(row.payload_json as string)
+                : row.payload_json;
+            } catch {}
+            if (p) {
+              siblingArtefacts.push({
+                id: row.id as string,
+                artefact_type: row.artefact_type as string,
+                payload_json: p,
+              });
+            }
+          }
+        }
+        console.log(
+          `[Tower][judge-artefact] Found ${siblingArtefacts.length} sibling artefact(s) (lead_pack/contact_extract) for run_id=${runId}`
+        );
+      } catch (sibErr) {
+        console.error(
+          `[Tower][judge-artefact] Sibling artefact lookup failed for run_id=${runId}:`,
+          sibErr instanceof Error ? sibErr.message : sibErr
+        );
+      }
+
+      console.log(
+        `[TOWER_IN] run_receipt_payload(judge-artefact): run_id=${runId} ` +
+        `delivered_count=${payloadJson?.delivered_count ?? "none"} ` +
+        `requested_count=${payloadJson?.requested_count ?? "none"} ` +
+        `contacts_proven=${payloadJson?.contacts_proven ?? "none"} ` +
+        `delivered_leads=${Array.isArray(payloadJson?.delivered_leads) ? payloadJson.delivered_leads.length : "none"} ` +
+        `narrative_lines=${Array.isArray(payloadJson?.narrative_lines) ? payloadJson.narrative_lines.length : "none"}`
+      );
+
+      const receiptResult = judgeRunReceipt(payloadJson ?? {}, siblingArtefacts);
+
+      const towerVerdict: "ACCEPT" | "CHANGE_PLAN" | "STOP" =
+        receiptResult.verdict === "RETRY" ? "CHANGE_PLAN" : receiptResult.verdict;
+      const { verdict: rVerdict, action: rAction } = towerVerdictToPassFail(towerVerdict);
+
+      const receiptResponse: JudgeArtefactResponse = {
+        verdict: rVerdict,
+        action: rAction,
+        towerVerdict: towerVerdict,
+        stop_reason: receiptResult.stop_reason ?? null,
+        reasons: receiptResult.reasons,
+        metrics: {
+          artefactId,
+          runId,
+          artefactType,
+          goal,
+          ...receiptResult.metrics,
+          towerVerdict: towerVerdict,
+          judgedAt: new Date().toISOString(),
+        },
+        suggested_changes: [],
+      };
+
+      console.log(
+        `[Tower][judge-artefact] run_receipt run_id=${runId} verdict=${rVerdict} towerVerdict=${towerVerdict} ` +
+        `reasons=${JSON.stringify(receiptResult.reasons)}`
+      );
+
+      const pr = await persistTowerVerdict({
+        run_id: runId,
+        artefact_id: artefactId,
+        artefact_type: artefactType,
+        verdict: towerVerdict,
+        stop_reason: receiptResult.stop_reason,
+        gaps: receiptResult.reasons.filter(r => r !== "All receipt truth checks passed"),
+        suggested_changes: [],
+        confidence: 100,
+        rationale: receiptResult.reasons[0] ?? null,
+        idempotency_key: idempotencyKey,
+      });
+
+      res.json(addPersistMeta(receiptResponse, pr));
       return;
     }
 
