@@ -251,13 +251,31 @@ export interface AttemptHistoryEntry {
   delivered_count: number;
 }
 
+function isFiniteNumber(v: unknown): v is number {
+  return typeof v === "number" && isFinite(v);
+}
+
+function coerceToNumber(v: unknown): number | null {
+  if (isFiniteNumber(v)) return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    if (isFinite(n)) return n;
+  }
+  return null;
+}
+
 function resolveRequestedCount(input: TowerVerdictInput): number | null {
-  if (input.requested_count_user != null) return input.requested_count_user;
-  if (input.success_criteria?.requested_count_user != null)
-    return input.success_criteria.requested_count_user;
-  if (input.success_criteria?.target_count != null)
-    return input.success_criteria.target_count;
-  if (input.requested_count != null) return input.requested_count;
+  const candidates: unknown[] = [
+    input.requested_count_user,
+    input.success_criteria?.requested_count_user,
+    input.success_criteria?.target_count,
+    input.requested_count,
+  ];
+  for (const c of candidates) {
+    if (c == null) continue;
+    const n = coerceToNumber(c);
+    if (n != null) return n;
+  }
   return null;
 }
 
@@ -2037,37 +2055,46 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
     return { ...result, _debug: debugBlock };
   }
 
-  if (deliveredCount >= requestedCount) {
+  console.log(
+    `[TOWER] fallback_guard: delivered=${deliveredCount}(${typeof deliveredCount}) requested=${requestedCount}(${typeof requestedCount}) ` +
+    `leads=${leads.length} hardViolations=${hardViolations.length} hardUnknowns=${hardUnknowns.length} ` +
+    `constraints=${constraints.length} constraint_results=${constraintResults.length} source=${debugBlock.source}`
+  );
+
+  const numericDelivered = isFiniteNumber(deliveredCount) ? deliveredCount : 0;
+  const numericRequested = isFiniteNumber(requestedCount) ? requestedCount : 0;
+
+  if (numericDelivered >= numericRequested && hardViolations.length === 0 && hardUnknowns.length === 0) {
     const result: TowerVerdict = {
       verdict: "ACCEPT",
       action: "continue",
-      delivered: deliveredCount,
-      requested: requestedCount,
+      delivered: numericDelivered,
+      requested: numericRequested,
       gaps: [...labelGaps],
       confidence: 80,
-      rationale: `Delivered ${deliveredCount} of ${requestedCount} requested. Count met.`,
+      rationale: `Delivered ${numericDelivered} of ${numericRequested} requested. Count met.`,
       suggested_changes: [],
       constraint_results: constraintResults,
     };
-    console.log(`[TOWER] verdict=ACCEPT reason=fallback_count_met delivered=${deliveredCount} requested=${requestedCount} leads=${leads.length}`);
+    console.log(`[TOWER] verdict=ACCEPT reason=fallback_count_met delivered=${numericDelivered} requested=${numericRequested} leads=${leads.length}`);
     return { ...result, _debug: debugBlock };
   }
 
   const result: TowerVerdict = {
     verdict: "STOP",
     action: "stop",
-    delivered: deliveredCount,
-    requested: requestedCount,
+    delivered: numericDelivered,
+    requested: numericRequested,
     gaps: ["INTERNAL_ERROR", ...labelGaps],
     confidence: 100,
-    rationale: `Unexpected state in verdict evaluation: delivered=${deliveredCount}, requested=${requestedCount}, leads=${leads.length}, hardViolations=${hardViolations.length}, hardUnknowns=${hardUnknowns.length}, constraints=${constraints.length}. _debug: source=${debugBlock.source}.`,
+    rationale: `Unexpected state in verdict evaluation: delivered=${numericDelivered}, requested=${numericRequested}, leads=${leads.length}, hardViolations=${hardViolations.length}, hardUnknowns=${hardUnknowns.length}, constraints=${constraints.length}. _debug: source=${debugBlock.source}.`,
     suggested_changes: [],
     stop_reason: {
       code: "INTERNAL_ERROR",
       message: `Unexpected state reached in verdict evaluation.`,
       evidence: {
-        delivered: deliveredCount,
-        requested: requestedCount,
+        delivered: numericDelivered,
+        requested: numericRequested,
         leads_count: leads.length,
         hard_violations_count: hardViolations.length,
         hard_unknowns_count: hardUnknowns.length,
@@ -2076,7 +2103,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       },
     },
   };
-  console.log(`[TOWER] verdict=STOP reason=invalid_state delivered=${deliveredCount} requested=${requestedCount} leads=${leads.length} hardViolations=${hardViolations.length} hardUnknowns=${hardUnknowns.length} source=${debugBlock.source}`);
+  console.log(`[TOWER] verdict=STOP reason=invalid_state delivered=${numericDelivered} requested=${numericRequested} leads=${leads.length} hardViolations=${hardViolations.length} hardUnknowns=${hardUnknowns.length} source=${debugBlock.source}`);
   return { ...result, _debug: debugBlock };
 }
 

@@ -51,8 +51,11 @@ Both `judgeLeadsListArtefact` (routes-judge-artefact.ts) and the tower-verdict i
 **resolveLeads() fallback to delivered_leads:**
 `resolveLeads()` now checks `delivered_leads` when `leads` array is empty/missing. This ensures the evidence quality judge receives lead data even when only `delivered_leads` is present in the payload, preventing false ACCEPT→STOP overrides due to "NO_EVIDENCE_PRESENT".
 
+**Type-safe count resolution (resolveRequestedCount / route extraction):**
+`resolveRequestedCount` now uses `coerceToNumber()` to validate every candidate is a finite number. Non-numeric strings like `"explicit"` are skipped, falling through to the next candidate (e.g. `requested_count: 10`). `judgeLeadsListArtefact` in routes-judge-artefact.ts uses the same `toFiniteNumber()` guard when extracting `requestedCountUser`, `requestedCount`, and `targetCount` from `successCriteria` and `payloadJson`. Utility `isFiniteNumber()` is used throughout towerVerdict.ts for type guards.
+
 **"Unexpected state" fallback safety:**
-The INTERNAL_ERROR fallback at the end of `judgeLeadsListCore` now checks `deliveredCount >= requestedCount` first — if count is met, it returns ACCEPT instead of STOP. The STOP fallback still exists for genuine unhandled states but now includes `_debug` in the rationale and stop_reason evidence for traceability.
+The INTERNAL_ERROR fallback at the end of `judgeLeadsListCore` coerces both `deliveredCount` and `requestedCount` to safe numerics via `isFiniteNumber()`, then checks `numericDelivered >= numericRequested && hardViolations === 0 && hardUnknowns === 0` — if met, returns ACCEPT. Logs all computed variables (with types) before the guard. The STOP fallback still exists for genuine unhandled states with full `_debug` tracing.
 
 **Count Met + Hard Violated:**
 When `deliveredCount >= requestedCount` but hard constraint violations exist, Tower returns STOP with code `COUNT_MET_HARD_VIOLATED` listing the violated fields. Previously this was an empty if block that fell through to incorrect logic paths.

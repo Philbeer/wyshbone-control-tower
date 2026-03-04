@@ -186,19 +186,25 @@ function judgeLeadsListArtefact(
     console.log(`[Tower][DEBUG] after normalization: typed constraints length=${constraints.length} preview=${JSON.stringify(constraints.slice(0, 3).map((c) => ({ type: c.type, field: c.field, hardness: c.hardness, value: c.value })))}`);
   }
 
+  function toFiniteNumber(v: unknown): number | undefined {
+    if (typeof v === "number" && isFinite(v)) return v;
+    if (typeof v === "string") { const n = Number(v); if (isFinite(n)) return n; }
+    return undefined;
+  }
+
   const requestedCountUser =
-    successCriteria?.requested_count_user ??
-    payloadJson?.requested_count_user ??
+    toFiniteNumber(successCriteria?.requested_count_user) ??
+    toFiniteNumber(payloadJson?.requested_count_user) ??
     undefined;
 
   const requestedCount =
-    successCriteria?.requested_count ??
-    payloadJson?.requested_count ??
+    toFiniteNumber(successCriteria?.requested_count) ??
+    toFiniteNumber(payloadJson?.requested_count) ??
     undefined;
 
   const targetCount =
-    successCriteria?.target_count ??
-    payloadJson?.success_criteria?.target_count ??
+    toFiniteNumber(successCriteria?.target_count) ??
+    toFiniteNumber(payloadJson?.success_criteria?.target_count) ??
     undefined;
 
   const deliveredObj: DeliveredInfo | number | undefined = (() => {

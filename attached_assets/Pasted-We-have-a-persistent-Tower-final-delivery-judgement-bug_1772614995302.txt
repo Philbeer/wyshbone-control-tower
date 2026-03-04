@@ -1,0 +1,68 @@
+We have a persistent Tower final_delivery judgement bug. The run successfully delivered 10/10 leads, but Tower returns INTERNAL_ERROR and STOP.
+
+Here is the exact Tower judgement payload (from the artefact / API):
+
+{
+  "phase": "final_delivery",
+  "action": "stop",
+  "metrics": {
+    "gaps": ["INTERNAL_ERROR"],
+    "goal": "Find 10 pubs in Arundel for B2B outreach",
+    "runId": "8f07d08f-d544-40ba-902b-80ca18ca1d46",
+    "_debug": {
+      "source": "delivered_leads.length",
+      "extractedDeliveredCount": 10,
+      "extractedRequestedCount": "explicit"
+    },
+    "delivered": 10,
+    "requested": "explicit",
+    "confidence": 100,
+    "towerAction": "stop",
+    "artefactType": "final_delivery",
+    "towerVerdict": "STOP",
+    "artefactTitle": "Final delivery: 10 leads (30 verified exact)",
+    "artefactSummary": "10 leads delivered | requested=10 | verified_exact=30 | plans=1 | replans=0",
+    "constraint_results": []
+  },
+  "reasons": [
+    "Unexpected state in verdict evaluation: delivered=10, requested=explicit, leads=10, hardViolations=0, hardUnknowns=0, constraints=1. _debug: source=delivered_leads.length.",
+    "gap: INTERNAL_ERROR"
+  ],
+  "verdict": "fail",
+  "delivered": 10,
+  "requested": 10,
+  "artefact_id": "6c2377de-b883-4829-b4aa-514f04afdbe8",
+  "plan_version": 1,
+  "accumulated_unique": 30,
+  "accumulated_matching": 30,
+  "verified_exact_count": 30
+}
+
+TASKS (do all):
+1) Find the Tower code path that generates: "Unexpected state in verdict evaluation" for final_delivery.
+   - Identify exact file and line.
+2) Add logging to print the computed variables just before it throws/returns this error:
+   - deliveredCount
+   - requestedCount (and type)
+   - leadsCount (and source field used)
+   - hardViolations
+   - hardUnknowns
+   - constraintsCount
+   - constraint_results.length
+3) Fix the logic so a successful delivery (deliveredCount >= numeric requestedCount) returns PASS/ACCEPT.
+   - Must handle requested being string "explicit" as well as number.
+   - Use the numeric requested (top-level requested=10 or parse from artefactSummary) as the canonical requestedCount.
+4) Fix constraint logic:
+   - If constraintsCount > 0 but constraint_results is empty, do NOT treat as INTERNAL_ERROR. Treat as "constraints_not_evaluated" (soft) or ignore for final_delivery if hardViolations=0 and hardUnknowns=0.
+5) Add a small unit test for final_delivery judgement:
+   - delivered=10
+   - requested=10
+   - requested="explicit" in metrics
+   - leads=10
+   - constraints=1 but constraint_results=[]
+   Expected verdict: PASS (or ACCEPT) NOT FAIL/STOP.
+
+OUTPUT REQUIRED:
+- file + line for the bug
+- the minimal patch (diff)
+- the new test + confirmation it passes

@@ -2930,4 +2930,116 @@ test("BUG FIX: Unexpected state fallback with deliveredCount >= requestedCount r
   console.log(`  BUG FIX PASS: requestedCount=0, deliveredCount=5 → verdict=${result.verdict}`);
 });
 
+test("PRODUCTION BUG: requested_count_user='explicit' (string) must resolve to numeric requested_count=10", () => {
+  const result = judgeLeadsList({
+    requested_count_user: "explicit" as any,
+    requested_count: 10,
+    leads: Array.from({ length: 10 }, (_, i) => ({
+      name: `Pub ${i + 1}`,
+      address: `${i + 1} High St, Arundel`,
+      source_url: `https://example.com/pub${i + 1}`,
+      verified: true,
+      evidence: `Listed on TripAdvisor`,
+    })),
+    delivered_leads: Array.from({ length: 10 }, (_, i) => ({
+      name: `Pub ${i + 1}`,
+      address: `${i + 1} High St, Arundel`,
+      source_url: `https://example.com/pub${i + 1}`,
+    })),
+    constraints: [{ type: "COUNT_MIN", field: "requested_count", value: 10, hardness: "hard" }] as Constraint[],
+    delivered_count: 10,
+    original_goal: "Find 10 pubs in Arundel for B2B outreach",
+    verification_summary: { verified_exact_count: 30 },
+    meta: { replans_used: 0, max_replans: 3 },
+  });
+  if (result.rationale.includes("Unexpected state")) {
+    throw new Error(
+      `PRODUCTION BUG: requested_count_user="explicit" caused Unexpected state. ` +
+      `verdict=${result.verdict} rationale="${result.rationale}" ` +
+      `_debug=${JSON.stringify(result._debug)}`
+    );
+  }
+  if (result.verdict === "STOP" && result.gaps.includes("INTERNAL_ERROR")) {
+    throw new Error(
+      `PRODUCTION BUG: INTERNAL_ERROR despite delivered=10 requested=10. ` +
+      `rationale="${result.rationale}"`
+    );
+  }
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.delivered).toBe(10);
+  if (!result._debug) {
+    throw new Error("Missing _debug block");
+  }
+  if (typeof result._debug.extractedRequestedCount !== "number") {
+    throw new Error(
+      `extractedRequestedCount should be number, got ${typeof result._debug.extractedRequestedCount}: ${result._debug.extractedRequestedCount}`
+    );
+  }
+  expect(result._debug.extractedRequestedCount).toBe(10);
+  console.log(`  PRODUCTION BUG FIX: verdict=${result.verdict} requested=${result.requested}(${typeof result.requested}) _debug.source=${result._debug.source}`);
+});
+
+test("PRODUCTION BUG: constraints=1 but constraint_results=[] with no violations => ACCEPT not INTERNAL_ERROR", () => {
+  const result = judgeLeadsList({
+    requested_count_user: 10,
+    requested_count: 10,
+    leads: Array.from({ length: 10 }, (_, i) => ({
+      name: `Lead ${i + 1}`,
+      address: `${i + 1} Main St`,
+      source_url: `https://example.com/${i}`,
+      verified: true,
+      evidence: `Confirmed via search`,
+    })),
+    constraints: [{ type: "COUNT_MIN", field: "requested_count", value: 10, hardness: "hard" }] as Constraint[],
+    delivered_count: 10,
+    original_goal: "Find 10 leads",
+    verification_summary: { verified_exact_count: 10 },
+    meta: { replans_used: 0, max_replans: 3 },
+  });
+  if (result.gaps.includes("INTERNAL_ERROR")) {
+    throw new Error(
+      `constraints=1 but constraint_results empty should not be INTERNAL_ERROR. ` +
+      `verdict=${result.verdict} rationale="${result.rationale}"`
+    );
+  }
+  expect(result.verdict).toBe("ACCEPT");
+  console.log(`  CONSTRAINT FIX: verdict=${result.verdict} constraints_present=1 hardViolations=0`);
+});
+
+test("PRODUCTION BUG: exact replay of run 8f07d08f payload", () => {
+  const result = judgeLeadsList({
+    requested_count_user: "explicit" as any,
+    requested_count: 10,
+    leads: [],
+    delivered_leads: Array.from({ length: 10 }, (_, i) => ({
+      name: `Pub ${i + 1}`,
+      address: `${i + 1} High St, Arundel`,
+      source_url: `https://example.com/pub${i + 1}`,
+      verified: true,
+      evidence: `Listed on Google Maps`,
+    })),
+    constraints: [{ type: "COUNT_MIN", field: "requested_count", value: 10, hardness: "hard" }] as Constraint[],
+    delivered_count: 10,
+    accumulated_count: 30,
+    original_goal: "Find 10 pubs in Arundel for B2B outreach",
+    verification_summary: { verified_exact_count: 30 },
+    meta: { replans_used: 0, max_replans: 3, plan_version: 1 },
+  });
+  if (result.verdict === "STOP" || result.verdict === "CHANGE_PLAN") {
+    throw new Error(
+      `PRODUCTION REPLAY FAIL: Run 8f07d08f delivered 10/10 but Tower said ${result.verdict}. ` +
+      `rationale="${result.rationale}" gaps=${JSON.stringify(result.gaps)} ` +
+      `_debug=${JSON.stringify(result._debug)}`
+    );
+  }
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.delivered).toBe(10);
+  expect(result.requested).toBe(10);
+  if (!result._debug) throw new Error("Missing _debug");
+  if (result._debug.extractedRequestedCount !== 10) {
+    throw new Error(`requestedCount should be 10 not "${result._debug.extractedRequestedCount}"`);
+  }
+  console.log(`  PRODUCTION REPLAY PASS: verdict=${result.verdict} delivered=${result.delivered} requested=${result.requested} source=${result._debug.source}`);
+});
+
 runTests();
