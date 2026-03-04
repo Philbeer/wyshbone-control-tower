@@ -1,0 +1,169 @@
+Replit prompt (Tower repo): judge run_receipt for truth and consistency
+
+You are working in the Wyshbone Tower repo.
+
+Goal: Add a Tower judgement rule for the final artefact type="run_receipt" so Tower can catch incorrect counts and dishonest narrative claims.
+
+This is NOT a Supervisor task and NOT a UI task. Tower judges only.
+
+Context
+
+Supervisor now emits a final run_receipt artefact that contains:
+
+delivered leads (name + place_id)
+
+proven contact counts derived from artefacts (lead_pack, contact_extract) for delivered leads only
+
+narrative_lines meant to be shown to the user
+
+We need Tower to verify:
+
+The receipt does not claim facts it cannot prove.
+
+The receipt’s counts match the underlying artefacts.
+
+Inputs available to Tower
+
+Tower receives:
+
+the run_receipt artefact payload_json
+
+access to sibling artefacts for that run (same mechanism you already use for judging final_delivery), including:
+
+lead_pack
+
+contact_extract
+
+delivery_summary or final_delivery (if needed)
+
+web_visit_pages (optional, for coverage counts)
+
+Judgement outputs
+
+Return a normal TowerJudgement:
+
+verdict: ACCEPT / RETRY / STOP (or your equivalent)
+
+reasons: human-readable
+
+metrics: include any computed counts and mismatch details
+
+What to verify (rules)
+Rule A: delivered_count and requested_count must be numeric and consistent
+
+receipt.requested_count is a finite number
+
+receipt.delivered_count is a finite number
+
+delivered_count must equal receipt.delivered_leads.length
+If mismatch, FAIL with reason.
+
+Rule B: contacts_proven must control whether numeric claims are allowed
+
+If contacts_proven=false then:
+
+receipt.unique_email_count must be null
+
+receipt.unique_phone_count must be null
+
+narrative_lines must NOT contain phrases that imply a proven zero, like:
+
+“found 0 emails”
+
+“couldn’t find any emails”
+
+“no emails”
+Same for phones.
+If it does, FAIL with reason: “Receipt claims absence without proof”.
+
+If contacts_proven=true then:
+
+counts must be numbers (0 allowed)
+
+narrative may include “found X emails” and “found Y phone numbers”
+But if X or Y is 0, Tower must ensure the underlying artefacts really support 0 (see Rule C).
+
+Rule C: recompute contact counts from artefacts for delivered leads only
+
+Tower must independently compute:
+
+unique emails
+
+unique phones
+From sibling artefacts, matching delivered leads only.
+
+Use the same proven paths as we observed:
+
+lead_pack emails: payload.outputs.lead_pack.contacts.emails[*].value
+
+lead_pack phones: payload.outputs.lead_pack.contacts.phones[*].value
+
+contact_extract emails: payload.outputs.contacts.emails[*] (string)
+
+contact_extract phones: payload.outputs.contacts.phones[*] (string)
+
+Matching to delivered leads:
+
+Prefer place_id matching if artefact includes it
+
+Else match by normalized name if that is all you have
+
+If you cannot match reliably, then Tower should require contacts_proven=false (see Rule D)
+
+Now compare TowerComputed counts to receipt counts:
+
+If contacts_proven=true and receipt counts differ from TowerComputed counts, FAIL.
+Include both values in reasons and metrics.
+
+Rule D: if matching is not possible, receipt must downgrade to unproven
+
+If Tower cannot reliably join contact artefacts to delivered leads (missing place_id and ambiguous names), then:
+
+receipt.contacts_proven must be false
+
+counts must be null
+
+narrative must use the safe wording (varied by venue)
+If receipt tried to be “proven” anyway, FAIL and tell Supervisor to regenerate receipt with contacts_proven=false.
+
+Rule E: coverage counts should be sane (optional but recommended)
+
+If receipt includes:
+
+websites_checked_count
+
+contact_extraction_attempted_count
+Then Tower should verify they are <= delivered_count and non-negative.
+If wildly impossible, FAIL.
+
+Implementation tasks
+
+Add a new judgement handler for artefact type run_receipt inside the existing evaluator, alongside final_delivery.
+
+Implement computeReceiptTruth(runId, delivered_leads, siblingArtefacts):
+
+compute unique emails and phones with the proven paths above
+
+track which artefact ids contributed
+
+track whether matching was reliable
+
+Implement the rule checks and return verdict + reasons + metrics.
+
+Tests (required)
+
+Add tests that replay real shapes:
+Test 1: contacts_proven=true, receipt says emails=5 phones=9, artefacts yield 5 and 9 => ACCEPT
+Test 2: receipt says emails=9 phones=11 but artefacts yield 5 and 9 => FAIL
+Test 3: receipt contacts_proven=false but narrative says “couldn’t find any emails” => FAIL
+Test 4: cannot match artefacts to delivered leads => receipt must be unproven, if proven then FAIL
+
+What to output after implementation
+
+files changed
+
+which rule failed messages look like
+
+one example TowerJudgement payload for a FAIL showing mismatch details
+
+Do not change Supervisor or UI in this task.
