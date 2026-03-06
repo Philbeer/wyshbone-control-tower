@@ -1,0 +1,78 @@
+TOWER REPO TASK: produce a read-only report on how Tower currently judges artefacts against user intent and constraints.
+
+Do not change any code.
+This is an investigation/report only.
+
+Goal
+I want to understand how Tower currently decides whether an artefact satisfies the user’s request, and whether Tower is doing real semantic judgement or whether too much brittle matching/rule logic is happening in app code before Tower sees it.
+
+Context
+For examples like:
+"Find cafes in Manchester that serve vegan food"
+
+I want the system to work like this:
+- LLM intent layer extracts: cafes / Manchester / vegan food
+- tools gather evidence: Google Places, websites, snippets, extracted text
+- Tower judges whether the evidence supports the requested attribute and how strongly
+
+I do NOT want the app relying too heavily on brittle string/rule matching before Tower gets involved.
+
+Please report:
+
+1. Where Tower judgement starts
+- exact files/functions where artefacts are sent to Tower
+- what inputs Tower receives
+
+2. What Tower is actually judging
+For each judgement, show whether Tower receives:
+- the original user goal
+- structured constraints
+- success criteria
+- artefact payload/content
+- evidence snippets
+- prior plan/step context
+
+3. How semantic the judgement currently is
+Explain clearly:
+- is Tower using an LLM to judge whether evidence matches intent?
+- or is it mostly judging step success / JSON fields / status codes?
+- where is real semantic matching happening, if anywhere?
+
+4. What Tower does with website/content artefacts
+For example, if a website artefact contains phrases like:
+- vegan food
+- plant-based menu
+- vegan options
+does Tower currently reason about whether that satisfies the user’s request?
+Or does the app need to pre-convert that into simpler flags first?
+
+5. Current limitations
+Identify where the current system is too brittle, for example:
+- exact string matching
+- step_status only
+- tool success being treated as business success
+- missing semantic evaluation of content
+
+6. Best architecture recommendation
+Based on the current codebase, explain the cleanest design for:
+- app gathers evidence
+- Tower performs semantic judgement of whether evidence satisfies the goal
+- deterministic code handles execution/state only
+- avoid re-parsing natural language in brittle app code
+
+7. Exact files to edit later
+Point to the exact Tower files/functions that would need changing if we want Tower to become the main semantic judge of:
+- whether a business fits
+- how strongly it fits
+- whether evidence is direct / indirect / weak
+- whether to accept / retry / stop
+
+Output format
+Return a concise report with:
+- files involved
+- current behaviour
+- where semantic judgement does and does not happen
+- the clean recommended direction
+- exact edit points
+
+Do not modify code yet.
