@@ -1673,6 +1673,11 @@ async function start() {
     app.use('/api/tower', towerVerdictRoutesModule.default);
     console.log('✓ Tower Verdict v1 API loaded (POST /api/tower/tower-verdict)');
     
+    // Semantic Verify - standalone evidence judgement endpoint for Supervisor
+    const semanticVerifyRoutesModule = await import('./server/routes-semantic-verify.ts');
+    app.use('/api/tower', semanticVerifyRoutesModule.default);
+    console.log('✓ Semantic Verify API loaded (POST /api/tower/semantic-verify)');
+    
     // Run Trace Report - debug endpoint for Tower diagnostics
     const runTraceRoutesModule = await import('./server/routes-run-trace.ts');
     app.use('/debug', runTraceRoutesModule.default);
