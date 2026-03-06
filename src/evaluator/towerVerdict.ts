@@ -156,9 +156,11 @@ export interface AttributeEvidenceArtefact {
   extracted_quotes?: string[];
   page_title?: string;
   semantic_verdict?: CvlConstraintStatus;
-  semantic_strength?: "direct" | "indirect" | "weak" | "none";
+  semantic_status?: "verified" | "weak_match" | "no_evidence" | "insufficient_evidence";
+  semantic_strength?: "strong" | "indirect" | "weak" | "none";
   semantic_confidence?: number;
   semantic_reasoning?: string;
+  semantic_supporting_quotes?: string[];
 }
 
 export interface CvlVerificationSummary {
@@ -488,7 +490,7 @@ function evaluateConstraint(
             const ev = result.match;
             const effectiveVerdict = ev.semantic_verdict ?? ev.verdict;
             if (ATTR_TRACE && ev.semantic_verdict) {
-              console.log(`[TOWER][ATTR_TRACE] semantic override: lead="${lead.name}" upstream=${ev.verdict} semantic=${ev.semantic_verdict} strength=${ev.semantic_strength ?? "N/A"} confidence=${ev.semantic_confidence ?? "N/A"} reasoning="${(ev.semantic_reasoning ?? "").substring(0, 100)}"`);
+              console.log(`[TOWER][ATTR_TRACE] semantic override: lead="${lead.name}" upstream=${ev.verdict} semantic=${ev.semantic_verdict} status=${ev.semantic_status ?? "N/A"} strength=${ev.semantic_strength ?? "N/A"} confidence=${ev.semantic_confidence ?? "N/A"} quotes=${JSON.stringify(ev.semantic_supporting_quotes ?? [])} reasoning="${(ev.semantic_reasoning ?? "").substring(0, 100)}"`);
             }
             if (effectiveVerdict === "yes") {
               hasYes = true;

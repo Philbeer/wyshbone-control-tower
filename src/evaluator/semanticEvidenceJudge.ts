@@ -1,52 +1,74 @@
 import { openai } from "../lib/openai";
 import type { AttributeEvidenceArtefact, Constraint, CvlConstraintStatus } from "./towerVerdict";
 
+export type SemanticStatus = "verified" | "weak_match" | "no_evidence" | "insufficient_evidence";
+export type SemanticStrength = "strong" | "indirect" | "weak" | "none";
+
 export interface SemanticJudgement {
   satisfies: CvlConstraintStatus;
-  strength: "direct" | "indirect" | "weak" | "none";
+  status: SemanticStatus;
+  strength: SemanticStrength;
   confidence: number;
   reasoning: string;
+  supporting_quotes: string[];
 }
 
-const SYSTEM_PROMPT = `You are the Wyshbone Evidence Judge. You evaluate whether evidence (quotes, snippets, or text extracted from a website) supports a specific attribute constraint for a business.
+const SYSTEM_PROMPT = `You are Tower, the judgement layer for Wyshbone.
 
-You receive:
-- The user's original goal
-- The constraint being checked (e.g. "serves vegan food")
-- The raw constraint and attribute labels for context
-- The business name
-- One or more evidence snippets extracted from a web page
-- The page title and source URL for context
+Your job is NOT to judge whether a tool ran successfully.
+Your job IS to judge whether the evidence produced by the tool helps satisfy the user's original request.
 
-Your job is to judge whether the evidence semantically supports the constraint. Consider synonyms, related concepts, and implied meaning. For example:
-- "plant-based menu" supports "vegan food"
-- "we offer vegan options" supports "vegan food"
-- "fully vegan brunch" supports "vegan food"
-- "Had a vegan brunch in Manchester at Pot Kettle Black" supports "vegan food"
-- "vegetarian menu" only weakly supports "vegan food" (vegetarian ≠ vegan)
-- "great coffee selection" does not support "vegan food"
+You will receive:
+- original_user_goal
+- lead_name (business name)
+- constraint_to_check (the structured constraint)
+- constraint_raw and attribute_raw (raw labels for context)
+- source_url
+- evidence_text (one or more snippets extracted from a web page)
+- page_title
 
-When multiple snippets are provided, evaluate them together. If any snippet provides strong support, that is sufficient.
-
-You MUST respond with valid JSON in this exact structure:
-{
-  "satisfies": "yes" | "no" | "unknown",
-  "strength": "direct" | "indirect" | "weak" | "none",
-  "confidence": 0.0 to 1.0,
-  "reasoning": "1-2 sentence explanation"
-}
-
-Strength definitions:
-- "direct": evidence explicitly states the attribute (e.g. "vegan menu available")
-- "indirect": evidence strongly implies the attribute (e.g. "plant-based options" for vegan)
-- "weak": evidence has some relevance but is not conclusive (e.g. "vegetarian" for vegan)
-- "none": evidence does not support the attribute at all
+You must decide whether the evidence supports the constraint.
 
 Rules:
-- Be accurate but not overly strict. Real-world evidence is often informal.
-- If evidence is empty, null, or clearly irrelevant, return satisfies: "unknown", strength: "none".
-- Confidence should reflect how certain you are. Direct quotes = high confidence. Indirect inference = lower.
-- Keep reasoning concise.`;
+1. Do NOT pass just because the tool executed successfully.
+2. Ignore tool success unless the evidence itself is missing.
+3. Judge only against the user's real constraint.
+4. Be strict and honest.
+5. If the page text does not support the constraint, say so.
+6. If the evidence is indirect, weak, ambiguous, or inferred, say so clearly.
+7. Prefer "no_evidence" over pretending verification.
+8. Extract up to 3 short supporting quotes from the evidence text when available.
+9. Never invent quotes.
+10. Never say "verified" unless the evidence genuinely supports the constraint.
+
+You MUST respond with valid JSON in this exact shape:
+
+{
+  "judgement_type": "attribute_verification",
+  "satisfies": true,
+  "status": "verified",
+  "strength": "strong",
+  "confidence": 0.91,
+  "reason": "The page explicitly mentions vegan brunch, which supports the vegan food constraint.",
+  "supporting_quotes": [
+    "Had a vegan brunch in Manchester at Pot Kettle Black"
+  ]
+}
+
+Allowed values:
+- status: "verified" | "weak_match" | "no_evidence" | "insufficient_evidence"
+- strength: "strong" | "indirect" | "weak" | "none"
+
+Decision guidance:
+- verified = explicit or very strong support
+- weak_match = partial / indirect support
+- no_evidence = no meaningful support in the text
+- insufficient_evidence = page failed, empty text, or unusable evidence
+
+Important:
+A successful crawl is NOT a successful verification.
+A successful tool call with no relevant text should usually be:
+status = "no_evidence"`;
 
 interface SemanticJudgeInput {
   originalGoal: string;
@@ -76,8 +98,9 @@ function buildUserPrompt(input: SemanticJudgeInput): string {
   }
 
   return JSON.stringify({
-    original_goal: input.originalGoal,
-    constraint: {
+    original_user_goal: input.originalGoal,
+    lead_name: input.leadName,
+    constraint_to_check: {
       type: input.constraint.type,
       field: input.constraint.field,
       value: input.constraint.value,
@@ -85,10 +108,9 @@ function buildUserPrompt(input: SemanticJudgeInput): string {
     },
     constraint_raw: input.constraintRaw ?? null,
     attribute_raw: input.attributeRaw ?? null,
-    business_name: input.leadName,
-    evidence_snippets: evidenceSnippets.length > 0 ? evidenceSnippets : null,
-    page_title: input.pageTitle ?? null,
     source_url: input.sourceUrl ?? null,
+    page_title: input.pageTitle ?? null,
+    evidence_text: evidenceSnippets.length > 0 ? evidenceSnippets : null,
   }, null, 2);
 }
 
@@ -100,6 +122,52 @@ function hasAnyEvidence(input: SemanticJudgeInput): boolean {
     return true;
   }
   return false;
+}
+
+function mapLlmResponseToJudgement(parsed: any): SemanticJudgement {
+  const validStatuses: SemanticStatus[] = ["verified", "weak_match", "no_evidence", "insufficient_evidence"];
+  const validStrengths: SemanticStrength[] = ["strong", "indirect", "weak", "none"];
+
+  const status: SemanticStatus = validStatuses.includes(parsed.status) ? parsed.status : "insufficient_evidence";
+
+  let strength: SemanticStrength;
+  if (parsed.strength === "direct") {
+    strength = "strong";
+  } else if (validStrengths.includes(parsed.strength)) {
+    strength = parsed.strength;
+  } else {
+    strength = "none";
+  }
+
+  const confidence = typeof parsed.confidence === "number" && parsed.confidence >= 0 && parsed.confidence <= 1
+    ? parsed.confidence
+    : 0.5;
+
+  const reasonText = parsed.reason ?? parsed.reasoning;
+  const reasoning = typeof reasonText === "string" ? reasonText.substring(0, 500) : "No reasoning provided.";
+
+  let satisfies: CvlConstraintStatus;
+  if (typeof parsed.satisfies === "boolean") {
+    satisfies = parsed.satisfies ? "yes" : "no";
+  } else if (typeof parsed.satisfies === "string" && ["yes", "no", "unknown"].includes(parsed.satisfies)) {
+    satisfies = parsed.satisfies as CvlConstraintStatus;
+  } else if (status === "verified") {
+    satisfies = "yes";
+  } else if (status === "no_evidence") {
+    satisfies = "no";
+  } else {
+    satisfies = "unknown";
+  }
+
+  let supporting_quotes: string[] = [];
+  if (Array.isArray(parsed.supporting_quotes)) {
+    supporting_quotes = parsed.supporting_quotes
+      .filter((q: unknown) => typeof q === "string" && (q as string).trim().length > 0)
+      .map((q: string) => q.trim().substring(0, 500))
+      .slice(0, 3);
+  }
+
+  return { satisfies, status, strength, confidence, reasoning, supporting_quotes };
 }
 
 export async function judgeEvidenceSemantically(
@@ -115,9 +183,11 @@ export async function judgeEvidenceSemantically(
 ): Promise<SemanticJudgement> {
   const fallback: SemanticJudgement = {
     satisfies: "unknown",
+    status: "insufficient_evidence",
     strength: "none",
     confidence: 0,
     reasoning: "Semantic judge could not evaluate — falling back to upstream verdict.",
+    supporting_quotes: [],
   };
 
   const input: SemanticJudgeInput = {
@@ -135,9 +205,11 @@ export async function judgeEvidenceSemantically(
   if (!hasAnyEvidence(input)) {
     return {
       satisfies: "unknown",
+      status: "insufficient_evidence",
       strength: "none",
       confidence: 0,
       reasoning: "No evidence text provided to evaluate.",
+      supporting_quotes: [],
     };
   }
 
@@ -154,7 +226,7 @@ export async function judgeEvidenceSemantically(
         { role: "user", content: buildUserPrompt(input) },
       ],
       temperature: 0.1,
-      max_tokens: 300,
+      max_tokens: 400,
     });
 
     const text = response.choices[0]?.message?.content;
@@ -170,18 +242,7 @@ export async function judgeEvidenceSemantically(
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
-
-    const validSatisfies = ["yes", "no", "unknown"];
-    const validStrengths = ["direct", "indirect", "weak", "none"];
-
-    const satisfies: CvlConstraintStatus = validSatisfies.includes(parsed.satisfies) ? parsed.satisfies : "unknown";
-    const strength = validStrengths.includes(parsed.strength) ? parsed.strength as SemanticJudgement["strength"] : "none";
-    const confidence = typeof parsed.confidence === "number" && parsed.confidence >= 0 && parsed.confidence <= 1
-      ? parsed.confidence
-      : 0.5;
-    const reasoning = typeof parsed.reasoning === "string" ? parsed.reasoning.substring(0, 500) : "No reasoning provided.";
-
-    return { satisfies, strength, confidence, reasoning };
+    return mapLlmResponseToJudgement(parsed);
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error(`[TOWER][SEMANTIC] LLM call failed: ${errMsg}`);
@@ -263,15 +324,18 @@ export async function enrichAttributeEvidence(
       const ev = enriched[index];
 
       ev.semantic_verdict = judgement.satisfies;
+      ev.semantic_status = judgement.status;
       ev.semantic_strength = judgement.strength;
       ev.semantic_confidence = judgement.confidence;
       ev.semantic_reasoning = judgement.reasoning;
+      ev.semantic_supporting_quotes = judgement.supporting_quotes;
 
       if (SEMANTIC_TRACE) {
         console.log(
           `[TOWER][SEMANTIC] lead="${ev.lead_name}" attr="${ev.attribute}" ` +
           `upstream_verdict=${ev.verdict} semantic_verdict=${judgement.satisfies} ` +
-          `strength=${judgement.strength} confidence=${judgement.confidence} ` +
+          `status=${judgement.status} strength=${judgement.strength} confidence=${judgement.confidence} ` +
+          `supporting_quotes=${JSON.stringify(judgement.supporting_quotes)} ` +
           `reasoning="${judgement.reasoning.substring(0, 120)}"`
         );
       }
