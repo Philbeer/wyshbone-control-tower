@@ -483,11 +483,15 @@ router.post("/tower-verdict", async (req, res) => {
                 lead_place_id: p.lead_place_id ?? p.placeId ?? p.place_id,
                 attribute: p.attribute ?? p.attribute_key,
                 attribute_key: p.attribute_key,
+                attribute_raw: p.attribute_raw,
+                constraint_raw: p.constraint_raw,
                 verdict: p.verdict,
                 confidence: p.confidence ?? 0,
                 evidence_id: p.evidence_id,
                 source_url: p.source_url,
                 quote: p.quote,
+                extracted_quotes: Array.isArray(p.extracted_quotes) ? p.extracted_quotes.filter((q: unknown) => typeof q === "string" && q) : undefined,
+                page_title: typeof p.page_title === "string" ? p.page_title : undefined,
               });
             }
           }

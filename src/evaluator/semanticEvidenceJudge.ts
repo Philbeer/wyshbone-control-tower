@@ -8,20 +8,25 @@ export interface SemanticJudgement {
   reasoning: string;
 }
 
-const SYSTEM_PROMPT = `You are the Wyshbone Evidence Judge. You evaluate whether a piece of evidence (a quote, snippet, or text from a website) supports a specific attribute constraint for a business.
+const SYSTEM_PROMPT = `You are the Wyshbone Evidence Judge. You evaluate whether evidence (quotes, snippets, or text extracted from a website) supports a specific attribute constraint for a business.
 
 You receive:
 - The user's original goal
 - The constraint being checked (e.g. "serves vegan food")
+- The raw constraint and attribute labels for context
 - The business name
-- The evidence text (quote/snippet from a website or source)
+- One or more evidence snippets extracted from a web page
+- The page title and source URL for context
 
 Your job is to judge whether the evidence semantically supports the constraint. Consider synonyms, related concepts, and implied meaning. For example:
 - "plant-based menu" supports "vegan food"
-- "we offer vegan options" supports "vegan food"  
+- "we offer vegan options" supports "vegan food"
 - "fully vegan brunch" supports "vegan food"
+- "Had a vegan brunch in Manchester at Pot Kettle Black" supports "vegan food"
 - "vegetarian menu" only weakly supports "vegan food" (vegetarian ≠ vegan)
 - "great coffee selection" does not support "vegan food"
+
+When multiple snippets are provided, evaluate them together. If any snippet provides strong support, that is sufficient.
 
 You MUST respond with valid JSON in this exact structure:
 {
@@ -43,25 +48,58 @@ Rules:
 - Confidence should reflect how certain you are. Direct quotes = high confidence. Indirect inference = lower.
 - Keep reasoning concise.`;
 
-function buildUserPrompt(
-  originalGoal: string,
-  constraint: Constraint,
-  leadName: string,
-  evidenceQuote: string | null | undefined,
-  sourceUrl: string | null | undefined
-): string {
+interface SemanticJudgeInput {
+  originalGoal: string;
+  constraint: Constraint;
+  leadName: string;
+  evidenceQuote: string | null | undefined;
+  extractedQuotes: string[] | null | undefined;
+  sourceUrl: string | null | undefined;
+  pageTitle: string | null | undefined;
+  constraintRaw: string | null | undefined;
+  attributeRaw: string | null | undefined;
+}
+
+function buildUserPrompt(input: SemanticJudgeInput): string {
+  const evidenceSnippets: string[] = [];
+
+  if (input.extractedQuotes && input.extractedQuotes.length > 0) {
+    for (const q of input.extractedQuotes) {
+      if (typeof q === "string" && q.trim().length > 0) {
+        evidenceSnippets.push(q.trim());
+      }
+    }
+  }
+
+  if (evidenceSnippets.length === 0 && input.evidenceQuote && input.evidenceQuote.trim().length > 0) {
+    evidenceSnippets.push(input.evidenceQuote.trim());
+  }
+
   return JSON.stringify({
-    original_goal: originalGoal,
+    original_goal: input.originalGoal,
     constraint: {
-      type: constraint.type,
-      field: constraint.field,
-      value: constraint.value,
-      hardness: constraint.hardness,
+      type: input.constraint.type,
+      field: input.constraint.field,
+      value: input.constraint.value,
+      hardness: input.constraint.hardness,
     },
-    business_name: leadName,
-    evidence_quote: evidenceQuote ?? null,
-    source_url: sourceUrl ?? null,
+    constraint_raw: input.constraintRaw ?? null,
+    attribute_raw: input.attributeRaw ?? null,
+    business_name: input.leadName,
+    evidence_snippets: evidenceSnippets.length > 0 ? evidenceSnippets : null,
+    page_title: input.pageTitle ?? null,
+    source_url: input.sourceUrl ?? null,
   }, null, 2);
+}
+
+function hasAnyEvidence(input: SemanticJudgeInput): boolean {
+  if (input.extractedQuotes && input.extractedQuotes.some(q => typeof q === "string" && q.trim().length > 0)) {
+    return true;
+  }
+  if (input.evidenceQuote && input.evidenceQuote.trim().length > 0) {
+    return true;
+  }
+  return false;
 }
 
 export async function judgeEvidenceSemantically(
@@ -69,7 +107,11 @@ export async function judgeEvidenceSemantically(
   constraint: Constraint,
   leadName: string,
   evidenceQuote: string | null | undefined,
-  sourceUrl: string | null | undefined
+  sourceUrl: string | null | undefined,
+  extractedQuotes?: string[] | null,
+  pageTitle?: string | null,
+  constraintRaw?: string | null,
+  attributeRaw?: string | null
 ): Promise<SemanticJudgement> {
   const fallback: SemanticJudgement = {
     satisfies: "unknown",
@@ -78,7 +120,19 @@ export async function judgeEvidenceSemantically(
     reasoning: "Semantic judge could not evaluate — falling back to upstream verdict.",
   };
 
-  if (!evidenceQuote || evidenceQuote.trim().length === 0) {
+  const input: SemanticJudgeInput = {
+    originalGoal,
+    constraint,
+    leadName,
+    evidenceQuote,
+    extractedQuotes: extractedQuotes ?? null,
+    sourceUrl,
+    pageTitle: pageTitle ?? null,
+    constraintRaw: constraintRaw ?? null,
+    attributeRaw: attributeRaw ?? null,
+  };
+
+  if (!hasAnyEvidence(input)) {
     return {
       satisfies: "unknown",
       strength: "none",
@@ -97,7 +151,7 @@ export async function judgeEvidenceSemantically(
       model: process.env.SEMANTIC_JUDGE_MODEL ?? process.env.EVAL_MODEL_ID ?? "gpt-4o-mini",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: buildUserPrompt(originalGoal, constraint, leadName, evidenceQuote, sourceUrl) },
+        { role: "user", content: buildUserPrompt(input) },
       ],
       temperature: 0.1,
       max_tokens: 300,
@@ -151,7 +205,10 @@ export async function enrichAttributeEvidence(
 
   for (let i = 0; i < enriched.length; i++) {
     const ev = enriched[i];
-    if (!ev.quote || ev.quote.trim().length === 0) continue;
+
+    const hasExtractedQuotes = ev.extracted_quotes && ev.extracted_quotes.some(q => typeof q === "string" && q.trim().length > 0);
+    const hasQuote = ev.quote && ev.quote.trim().length > 0;
+    if (!hasExtractedQuotes && !hasQuote) continue;
 
     const normEvAttr = normalizeForMatch(ev.attribute_key ?? ev.attribute);
     if (!normEvAttr) continue;
@@ -166,7 +223,17 @@ export async function enrichAttributeEvidence(
 
     promises.push({
       index: i,
-      promise: judgeEvidenceSemantically(originalGoal, matchingConstraint, ev.lead_name, ev.quote, ev.source_url),
+      promise: judgeEvidenceSemantically(
+        originalGoal,
+        matchingConstraint,
+        ev.lead_name,
+        ev.quote,
+        ev.source_url,
+        ev.extracted_quotes,
+        ev.page_title,
+        ev.constraint_raw,
+        ev.attribute_raw
+      ),
       constraint: matchingConstraint,
     });
   }
@@ -175,6 +242,14 @@ export async function enrichAttributeEvidence(
 
   if (SEMANTIC_TRACE) {
     console.log(`[TOWER][SEMANTIC] Running semantic judgement on ${promises.length} evidence item(s) for goal="${originalGoal}"`);
+    for (const p of promises) {
+      const ev = enriched[p.index];
+      const quoteCount = ev.extracted_quotes?.length ?? 0;
+      console.log(
+        `[TOWER][SEMANTIC] queued: lead="${ev.lead_name}" attr="${ev.attribute}" ` +
+        `extracted_quotes=${quoteCount} has_quote=${!!ev.quote} page_title="${ev.page_title ?? "none"}"`
+      );
+    }
   }
 
   const results = await Promise.allSettled(promises.map(p => p.promise));

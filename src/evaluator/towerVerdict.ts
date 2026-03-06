@@ -146,11 +146,15 @@ export interface AttributeEvidenceArtefact {
   lead_place_id?: string;
   attribute: string;
   attribute_key?: string;
+  attribute_raw?: string;
+  constraint_raw?: string;
   verdict: CvlConstraintStatus;
   confidence: number;
   evidence_id?: string;
   source_url?: string;
   quote?: string;
+  extracted_quotes?: string[];
+  page_title?: string;
   semantic_verdict?: CvlConstraintStatus;
   semantic_strength?: "direct" | "indirect" | "weak" | "none";
   semantic_confidence?: number;
