@@ -1,0 +1,66 @@
+TOWER REPO TASK: make Tower the semantic judge of evidence in the core evaluation path.
+
+Goal
+Tower should stop relying mainly on upstream precomputed verdict flags for attribute matching.
+Instead, Tower should semantically judge whether raw evidence supports the user’s requested constraint.
+
+Architecture target
+- Intent extractor understands the request
+- Supervisor gathers evidence
+- Tower semantically judges whether evidence matches the goal
+- Deterministic code handles counts, retries, stop/continue logic
+
+What to implement
+1. Add a semantic evidence judge
+Create a new evaluator, e.g.:
+src/evaluator/semanticEvidenceJudge.ts
+
+2. Input to the semantic judge
+It should receive:
+- original user goal
+- structured constraint
+- lead/business identity
+- raw evidence quote/snippet/text
+- source_url if available
+
+3. Output
+Return a structured result like:
+{
+  "satisfies": true | false | unknown,
+  "strength": "direct" | "indirect" | "weak" | "none",
+  "confidence": 0-1,
+  "reasoning": "short explanation"
+}
+
+4. Wire it into Tower’s HAS_ATTRIBUTE path
+In the core artefact evaluation flow, when raw attribute evidence exists:
+- prefer semantic judgement over blindly trusting upstream verdict === "yes"
+
+5. Keep safe fallback
+If the semantic judge fails or evidence is missing:
+- fall back to the current deterministic path
+- do not break existing runs
+
+6. Keep deterministic control in place
+Do not redesign execution control here.
+Tower should still use deterministic logic for:
+- counts
+- replans
+- accept/retry/stop thresholds
+- governance
+
+Success result
+For:
+"Find cafes in Manchester that serve vegan food"
+
+and evidence like:
+- "plant-based menu available"
+- "vegan options on request"
+- "fully vegan brunch menu"
+
+Tower should be able to judge that the evidence supports the attribute, without brittle exact phrase matching.
+
+Important
+- Minimal production-safe change
+- Add semantic judgement only in the main attribute evidence path first
+- Do not redesign the whole Tower system
