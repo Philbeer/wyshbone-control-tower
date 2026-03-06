@@ -6,6 +6,7 @@ import { judgePlasticsInjection } from "../src/evaluator/plasticsInjectionRubric
 import type { PlasticsRubricInput, PlasticsStepSnapshot } from "../src/evaluator/plasticsInjectionRubric";
 import { evaluateLearningUpdate } from "../src/evaluator/learningUpdateEmitter";
 import type { LearningUpdateInput } from "../src/evaluator/learningUpdateEmitter";
+import { enrichAttributeEvidence } from "../src/evaluator/semanticEvidenceJudge";
 import { db } from "../src/lib/db";
 import { sql, eq } from "drizzle-orm";
 import { towerVerdicts } from "../shared/schema";
@@ -505,6 +506,21 @@ router.post("/tower-verdict", async (req, res) => {
         console.error(
           `[Tower][tower-verdict] attribute_evidence lookup failed for run_id=${runId}:`,
           attrEvErr instanceof Error ? attrEvErr.message : attrEvErr
+        );
+      }
+    }
+
+    const goalForSemantic = data.original_goal ?? data.original_user_goal ?? data.normalized_goal ?? "";
+    if (attributeEvidenceItems.length > 0 && goalForSemantic) {
+      try {
+        const constraintsForSemantic = (data.constraints as Constraint[] | undefined) ?? [];
+        if (constraintsForSemantic.some(c => c.type === "HAS_ATTRIBUTE")) {
+          attributeEvidenceItems = await enrichAttributeEvidence(attributeEvidenceItems, goalForSemantic, constraintsForSemantic);
+        }
+      } catch (semanticErr) {
+        console.error(
+          `[Tower][tower-verdict] semantic enrichment failed for run_id=${runId}, falling back to upstream verdicts:`,
+          semanticErr instanceof Error ? semanticErr.message : semanticErr
         );
       }
     }

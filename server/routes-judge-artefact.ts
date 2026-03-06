@@ -10,6 +10,7 @@ import type { SiblingArtefact } from "../src/evaluator/receiptTruthJudge";
 import type { PlasticsRubricInput } from "../src/evaluator/plasticsInjectionRubric";
 import { evaluateLearningUpdate } from "../src/evaluator/learningUpdateEmitter";
 import type { LearningUpdateInput } from "../src/evaluator/learningUpdateEmitter";
+import { enrichAttributeEvidence } from "../src/evaluator/semanticEvidenceJudge";
 import { towerVerdicts } from "../shared/schema";
 
 const router = express.Router();
@@ -580,6 +581,30 @@ router.post("/judge-artefact", async (req, res) => {
           `[Tower][judge-artefact] attribute_evidence lookup failed for run_id=${runId}:`,
           attrEvErr instanceof Error ? attrEvErr.message : attrEvErr
         );
+      }
+
+      if (attributeEvidenceItems.length > 0 && goal) {
+        try {
+          const rawConstraints = payloadJson?.constraints;
+          const rawStructuredConstraints = Array.isArray(payloadJson?.structured_constraints) ? payloadJson.structured_constraints : undefined;
+          let constraintsForSemantic: Constraint[] = [];
+          if (Array.isArray(rawConstraints) && rawConstraints.length > 0) {
+            constraintsForSemantic = rawConstraints
+              .map((c: any) => normalizeConstraintHardness(c))
+              .filter((c: Constraint | null): c is Constraint => c !== null);
+          }
+          if (constraintsForSemantic.length === 0 && rawStructuredConstraints && rawStructuredConstraints.length > 0) {
+            constraintsForSemantic = normalizeStructuredConstraints(rawStructuredConstraints);
+          }
+          if (constraintsForSemantic.some(c => c.type === "HAS_ATTRIBUTE")) {
+            attributeEvidenceItems = await enrichAttributeEvidence(attributeEvidenceItems, goal, constraintsForSemantic);
+          }
+        } catch (semanticErr) {
+          console.error(
+            `[Tower][judge-artefact] semantic enrichment failed for run_id=${runId}, falling back to upstream verdicts:`,
+            semanticErr instanceof Error ? semanticErr.message : semanticErr
+          );
+        }
       }
 
       console.log(

@@ -1,0 +1,70 @@
+TOWER REPO TASK: add real semantic evidence judgement to the core artefact evaluation path.
+
+Goal
+Tower should stop relying mainly on pre-computed yes/no verdict flags from upstream for attribute matching.
+Instead, Tower should semantically judge whether raw evidence actually supports the user’s requested constraint.
+
+Target behaviour
+For cases like:
+"Find cafes in Manchester that serve vegan food"
+
+Tower should receive:
+- original user goal
+- structured constraint
+- raw evidence text / quote / snippet / source_url
+
+Then Tower should use an LLM judge to decide:
+- does this evidence satisfy the constraint?
+- how strongly?
+- is it direct, indirect, weak, or absent?
+- confidence score
+- short reasoning
+
+Architecture rule
+- Tower LLM does semantic judgement of evidence
+- Deterministic code still handles execution control:
+  - counts
+  - replans
+  - gating
+  - accept / retry / stop logic
+
+What to implement
+1. Add a new semantic evidence judge in Tower, for example:
+   src/evaluator/semanticEvidenceJudge.ts
+
+2. Input to the semantic judge should include:
+- original_goal
+- constraint
+- lead/business identity
+- evidence quote/snippet/text
+- source_url if available
+
+3. Output should be structured, something like:
+{
+  "satisfies": true|false|unknown,
+  "strength": "direct" | "indirect" | "weak" | "none",
+  "confidence": 0-1,
+  "reasoning": "short explanation"
+}
+
+4. Wire this into the HAS_ATTRIBUTE evaluation path in towerVerdict.ts
+- when raw attribute evidence exists, prefer semantic judgement over blindly trusting upstream verdict === "yes"
+
+5. Keep fallback safe
+- if semantic judge fails, fall back to existing deterministic verdict path so nothing breaks
+
+6. Keep the change minimal and production-safe
+- do not redesign the whole Tower system
+- add semantic judging only in the key attribute evidence path first
+
+Success result
+If evidence says:
+- "plant-based menu available"
+- "vegan options on request"
+- "fully vegan brunch menu"
+
+Tower should be able to judge whether that supports the user request for "serves vegan food" without relying on brittle exact key matching.
+
+Important
+Do not change execution orchestration here.
+This task is only about making Tower the true semantic judge of evidence.

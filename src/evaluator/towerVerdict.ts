@@ -151,6 +151,10 @@ export interface AttributeEvidenceArtefact {
   evidence_id?: string;
   source_url?: string;
   quote?: string;
+  semantic_verdict?: CvlConstraintStatus;
+  semantic_strength?: "direct" | "indirect" | "weak" | "none";
+  semantic_confidence?: number;
+  semantic_reasoning?: string;
 }
 
 export interface CvlVerificationSummary {
@@ -478,7 +482,11 @@ function evaluateConstraint(
           }
           if (result) {
             const ev = result.match;
-            if (ev.verdict === "yes") {
+            const effectiveVerdict = ev.semantic_verdict ?? ev.verdict;
+            if (ATTR_TRACE && ev.semantic_verdict) {
+              console.log(`[TOWER][ATTR_TRACE] semantic override: lead="${lead.name}" upstream=${ev.verdict} semantic=${ev.semantic_verdict} strength=${ev.semantic_strength ?? "N/A"} confidence=${ev.semantic_confidence ?? "N/A"} reasoning="${(ev.semantic_reasoning ?? "").substring(0, 100)}"`);
+            }
+            if (effectiveVerdict === "yes") {
               hasYes = true;
               evidencePointers.push({
                 lead: lead.name,
@@ -486,7 +494,7 @@ function evaluateConstraint(
                 source_url: ev.source_url,
                 quote: ev.quote,
               });
-            } else if (ev.verdict === "no") {
+            } else if (effectiveVerdict === "no") {
               hasNo = true;
             } else {
               hasUnknown = true;
