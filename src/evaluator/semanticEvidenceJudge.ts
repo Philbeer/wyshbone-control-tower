@@ -11,6 +11,7 @@ export interface SemanticJudgement {
   confidence: number;
   reasoning: string;
   supporting_quotes: string[];
+  judge_mode?: "llm" | "keyword_fallback";
 }
 
 const SYSTEM_PROMPT = `You are Tower, the judgement layer for Wyshbone.
@@ -114,14 +115,149 @@ function buildUserPrompt(input: SemanticJudgeInput): string {
   }, null, 2);
 }
 
-function hasAnyEvidence(input: SemanticJudgeInput): boolean {
-  if (input.extractedQuotes && input.extractedQuotes.some(q => typeof q === "string" && q.trim().length > 0)) {
-    return true;
+function collectEvidenceTexts(input: SemanticJudgeInput): string[] {
+  const texts: string[] = [];
+  if (input.extractedQuotes) {
+    for (const q of input.extractedQuotes) {
+      if (typeof q === "string" && q.trim().length > 0) {
+        texts.push(q.trim());
+      }
+    }
   }
   if (input.evidenceQuote && input.evidenceQuote.trim().length > 0) {
-    return true;
+    texts.push(input.evidenceQuote.trim());
   }
-  return false;
+  return texts;
+}
+
+function hasAnyEvidence(input: SemanticJudgeInput): boolean {
+  return collectEvidenceTexts(input).length > 0;
+}
+
+function tokenizeForMatch(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(t => t.length > 2);
+}
+
+function keywordFallbackJudge(input: SemanticJudgeInput): SemanticJudgement {
+  const constraintValue = String(input.constraint.value ?? "").toLowerCase().trim();
+  if (!constraintValue) {
+    return {
+      satisfies: "unknown",
+      status: "insufficient_evidence",
+      strength: "none",
+      confidence: 0,
+      reasoning: "No constraint value to match against.",
+      supporting_quotes: [],
+      judge_mode: "keyword_fallback",
+    };
+  }
+
+  const constraintTokens = tokenizeForMatch(constraintValue);
+  if (constraintTokens.length === 0) {
+    return {
+      satisfies: "unknown",
+      status: "insufficient_evidence",
+      strength: "none",
+      confidence: 0,
+      reasoning: "Constraint value produced no matchable tokens.",
+      supporting_quotes: [],
+      judge_mode: "keyword_fallback",
+    };
+  }
+
+  const evidenceTexts = collectEvidenceTexts(input);
+  const pageTitle = input.pageTitle?.trim() ?? "";
+
+  const allTextsToSearch = [...evidenceTexts];
+  if (pageTitle.length > 0) {
+    allTextsToSearch.push(pageTitle);
+  }
+
+  const matchedSnippets: string[] = [];
+  let bestTokenOverlap = 0;
+  let titleMatch = false;
+
+  for (const text of allTextsToSearch) {
+    const textLower = text.toLowerCase();
+    const isTitle = text === pageTitle;
+
+    if (textLower.includes(constraintValue)) {
+      if (isTitle) titleMatch = true;
+      matchedSnippets.push(text.substring(0, 200));
+      bestTokenOverlap = constraintTokens.length;
+      continue;
+    }
+
+    const textTokens = tokenizeForMatch(text);
+    let overlap = 0;
+    for (const ct of constraintTokens) {
+      if (textTokens.some(tt => tt.includes(ct) || ct.includes(tt))) {
+        overlap++;
+      }
+    }
+
+    if (overlap > 0) {
+      const ratio = overlap / constraintTokens.length;
+      if (ratio >= 0.5) {
+        if (isTitle) titleMatch = true;
+        matchedSnippets.push(text.substring(0, 200));
+        if (overlap > bestTokenOverlap) bestTokenOverlap = overlap;
+      }
+    }
+  }
+
+  if (matchedSnippets.length === 0) {
+    return {
+      satisfies: "unknown",
+      status: "no_evidence",
+      strength: "none",
+      confidence: 0.3,
+      reasoning: `Keyword fallback: no tokens from constraint "${constraintValue}" found in evidence text.`,
+      supporting_quotes: [],
+      judge_mode: "keyword_fallback",
+    };
+  }
+
+  const tokenRatio = bestTokenOverlap / constraintTokens.length;
+  const uniqueSnippets = [...new Set(matchedSnippets)].slice(0, 3);
+
+  if (tokenRatio >= 1.0 || (tokenRatio >= 0.8 && titleMatch)) {
+    return {
+      satisfies: "yes",
+      status: "weak_match",
+      strength: "indirect",
+      confidence: titleMatch ? 0.7 : 0.6,
+      reasoning: `Keyword fallback: constraint "${constraintValue}" found in evidence text${titleMatch ? " and page title" : ""}. LLM unavailable for full semantic check.`,
+      supporting_quotes: uniqueSnippets,
+      judge_mode: "keyword_fallback",
+    };
+  }
+
+  if (tokenRatio >= 0.5) {
+    return {
+      satisfies: "yes",
+      status: "weak_match",
+      strength: "weak",
+      confidence: titleMatch ? 0.55 : 0.4,
+      reasoning: `Keyword fallback: partial keyword match (${Math.round(tokenRatio * 100)}% token overlap) for "${constraintValue}"${titleMatch ? ", page title also matches" : ""}. LLM unavailable for full semantic check.`,
+      supporting_quotes: uniqueSnippets,
+      judge_mode: "keyword_fallback",
+    };
+  }
+
+  return {
+    satisfies: "unknown",
+    status: "no_evidence",
+    strength: "none",
+    confidence: 0.2,
+    reasoning: `Keyword fallback: insufficient keyword overlap for "${constraintValue}" in evidence.`,
+    supporting_quotes: [],
+    judge_mode: "keyword_fallback",
+  };
 }
 
 function mapLlmResponseToJudgement(parsed: any): SemanticJudgement {
@@ -167,7 +303,7 @@ function mapLlmResponseToJudgement(parsed: any): SemanticJudgement {
       .slice(0, 3);
   }
 
-  return { satisfies, status, strength, confidence, reasoning, supporting_quotes };
+  return { satisfies, status, strength, confidence, reasoning, supporting_quotes, judge_mode: "llm" };
 }
 
 export async function judgeEvidenceSemantically(
@@ -181,15 +317,6 @@ export async function judgeEvidenceSemantically(
   constraintRaw?: string | null,
   attributeRaw?: string | null
 ): Promise<SemanticJudgement> {
-  const fallback: SemanticJudgement = {
-    satisfies: "unknown",
-    status: "insufficient_evidence",
-    strength: "none",
-    confidence: 0,
-    reasoning: "Semantic judge could not evaluate — falling back to upstream verdict.",
-    supporting_quotes: [],
-  };
-
   const input: SemanticJudgeInput = {
     originalGoal,
     constraint,
@@ -202,7 +329,12 @@ export async function judgeEvidenceSemantically(
     attributeRaw: attributeRaw ?? null,
   };
 
+  const TRACE = process.env.DEBUG_TOWER_SEMANTIC_TRACE === "true";
+
   if (!hasAnyEvidence(input)) {
+    if (TRACE) {
+      console.log(`[TOWER][SEMANTIC] No evidence text for lead="${leadName}" constraint="${constraint.value}" — returning insufficient_evidence`);
+    }
     return {
       satisfies: "unknown",
       status: "insufficient_evidence",
@@ -213,40 +345,86 @@ export async function judgeEvidenceSemantically(
     };
   }
 
+  if (TRACE) {
+    const texts = collectEvidenceTexts(input);
+    console.log(
+      `[TOWER][SEMANTIC] Judging lead="${leadName}" constraint="${constraint.value}" ` +
+      `evidence_count=${texts.length} page_title="${pageTitle ?? "none"}" ` +
+      `has_api_key=${!!process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== "placeholder-key-not-set"}`
+    );
+  }
+
   if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY === "placeholder-key-not-set") {
-    console.warn("[TOWER][SEMANTIC] OPENAI_API_KEY not set — skipping semantic evidence judgement");
-    return fallback;
+    console.warn("[TOWER][SEMANTIC] OPENAI_API_KEY not set — using keyword fallback judge");
+    const kwResult = keywordFallbackJudge(input);
+    if (TRACE) {
+      console.log(
+        `[TOWER][SEMANTIC] keyword_fallback result: lead="${leadName}" satisfies=${kwResult.satisfies} ` +
+        `status=${kwResult.status} strength=${kwResult.strength} confidence=${kwResult.confidence} ` +
+        `quotes=${JSON.stringify(kwResult.supporting_quotes)} reason="${kwResult.reasoning.substring(0, 120)}"`
+      );
+    }
+    return kwResult;
   }
 
   try {
+    const promptPayload = buildUserPrompt(input);
+
+    if (TRACE) {
+      console.log(`[TOWER][SEMANTIC] LLM prompt for lead="${leadName}": ${promptPayload.substring(0, 500)}`);
+    }
+
     const response = await openai.chat.completions.create({
       model: process.env.SEMANTIC_JUDGE_MODEL ?? process.env.EVAL_MODEL_ID ?? "gpt-4o-mini",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: buildUserPrompt(input) },
+        { role: "user", content: promptPayload },
       ],
       temperature: 0.1,
       max_tokens: 400,
     });
 
     const text = response.choices[0]?.message?.content;
+
+    if (TRACE) {
+      console.log(`[TOWER][SEMANTIC] LLM raw response for lead="${leadName}": ${(text ?? "NULL").substring(0, 500)}`);
+    }
+
     if (!text) {
-      console.warn("[TOWER][SEMANTIC] Empty response from LLM");
-      return fallback;
+      console.warn("[TOWER][SEMANTIC] Empty response from LLM — using keyword fallback judge");
+      return keywordFallbackJudge(input);
     }
 
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      console.warn("[TOWER][SEMANTIC] Could not extract JSON from LLM response");
-      return fallback;
+      console.warn(`[TOWER][SEMANTIC] Could not extract JSON from LLM response — using keyword fallback. Raw: ${text.substring(0, 200)}`);
+      return keywordFallbackJudge(input);
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
-    return mapLlmResponseToJudgement(parsed);
+    const result = mapLlmResponseToJudgement(parsed);
+
+    if (TRACE) {
+      console.log(
+        `[TOWER][SEMANTIC] LLM result: lead="${leadName}" satisfies=${result.satisfies} ` +
+        `status=${result.status} strength=${result.strength} confidence=${result.confidence} ` +
+        `quotes=${JSON.stringify(result.supporting_quotes)} reason="${result.reasoning.substring(0, 120)}"`
+      );
+    }
+
+    return result;
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.error(`[TOWER][SEMANTIC] LLM call failed: ${errMsg}`);
-    return fallback;
+    console.error(`[TOWER][SEMANTIC] LLM call failed: ${errMsg} — using keyword fallback judge`);
+    const kwResult = keywordFallbackJudge(input);
+    if (TRACE) {
+      console.log(
+        `[TOWER][SEMANTIC] keyword_fallback after LLM failure: lead="${leadName}" satisfies=${kwResult.satisfies} ` +
+        `status=${kwResult.status} strength=${kwResult.strength} confidence=${kwResult.confidence} ` +
+        `quotes=${JSON.stringify(kwResult.supporting_quotes)}`
+      );
+    }
+    return kwResult;
   }
 }
 
@@ -335,6 +513,7 @@ export async function enrichAttributeEvidence(
           `[TOWER][SEMANTIC] lead="${ev.lead_name}" attr="${ev.attribute}" ` +
           `upstream_verdict=${ev.verdict} semantic_verdict=${judgement.satisfies} ` +
           `status=${judgement.status} strength=${judgement.strength} confidence=${judgement.confidence} ` +
+          `judge_mode=${judgement.judge_mode ?? "unknown"} ` +
           `supporting_quotes=${JSON.stringify(judgement.supporting_quotes)} ` +
           `reasoning="${judgement.reasoning.substring(0, 120)}"`
         );

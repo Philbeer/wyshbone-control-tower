@@ -74,8 +74,18 @@ router.post("/semantic-verify", async (req, res) => {
         confidence: 0,
         reason: "No evidence text provided to evaluate.",
         supporting_quotes: [],
+        matched_snippets: [],
+        judge_mode: "none",
       });
     }
+
+    console.log(
+      `[Tower][semantic-verify] Processing: lead="${body.lead_name}" ` +
+      `constraint="${body.constraint_to_check}" ` +
+      `extracted_quotes=${extractedQuotes?.length ?? 0} ` +
+      `has_evidence_text=${!!evidenceQuote} ` +
+      `page_title="${body.page_title ?? "none"}"`
+    );
 
     const judgement = await judgeEvidenceSemantically(
       body.original_user_goal,
@@ -89,7 +99,7 @@ router.post("/semantic-verify", async (req, res) => {
       body.attribute_raw ?? null
     );
 
-    return res.status(200).json({
+    const responseJson = {
       judgement_type: "attribute_verification",
       satisfies: judgement.satisfies === "yes",
       status: judgement.status,
@@ -97,7 +107,19 @@ router.post("/semantic-verify", async (req, res) => {
       confidence: judgement.confidence,
       reason: judgement.reasoning,
       supporting_quotes: judgement.supporting_quotes,
-    });
+      matched_snippets: judgement.supporting_quotes,
+      judge_mode: judgement.judge_mode ?? "llm",
+    };
+
+    console.log(
+      `[Tower][semantic-verify] Result: lead="${body.lead_name}" ` +
+      `satisfies=${responseJson.satisfies} status=${responseJson.status} ` +
+      `strength=${responseJson.strength} confidence=${responseJson.confidence} ` +
+      `judge_mode=${responseJson.judge_mode} ` +
+      `quotes=${JSON.stringify(responseJson.supporting_quotes)}`
+    );
+
+    return res.status(200).json(responseJson);
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error(`[Tower][semantic-verify] Internal error: ${errMsg}`);
