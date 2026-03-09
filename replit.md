@@ -43,6 +43,9 @@ Tower uses user intent (`requested_count_user`) and accumulated matching results
 **Verdict Debug Block:**
 Every `TowerVerdict` includes `_debug: { extractedDeliveredCount, extractedRequestedCount, source }` showing which field was used to compute `deliveredCount`, for traceability in artefacts and API responses.
 
+**Null Requested Count (No Count Requirement):**
+When `requested_count_user` is null/missing (user did not request a specific number), Tower no longer fails with `MISSING_REQUESTED_COUNT`. Instead: (1) If `delivered_exact_count >= 1` and all hard constraints are satisfied → ACCEPT with `requested: 0`. (2) If `delivered_exact_count >= 1` but hard constraints are violated → STOP with `COUNT_MET_HARD_VIOLATED`. (3) If `delivered_exact_count >= 1` but hard constraints are unknown and replans available → CHANGE_PLAN. (4) If `delivered_exact_count >= 1` but hard constraints unknown and no replans → ACCEPT_WITH_UNVERIFIED. (5) If `delivered_exact_count === 0` → STOP with code `ZERO_DELIVERED`. Count shortfall logic (`INSUFFICIENT_COUNT`) only applies when the user explicitly requested a numeric count.
+
 **Contract Validation:**
 `judgeLeadsListCore` performs an early contract check: if no leads/delivered_leads array AND no reliable delivered-count fields are present, it returns STOP with code `CONTRACT_ERROR`. The rationale and stop_reason.message start with "Contract error:" and list all missing fields by name. "No results were found" is never used for contract errors.
 

@@ -1519,26 +1519,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
     return result;
   }
 
-  if (requestedCount === null) {
-    const dcMissing = resolveDeliveredCount(input, null);
-    const result: TowerVerdict = {
-      verdict: "STOP",
-      action: "stop",
-      delivered: dcMissing.count,
-      requested: 0,
-      gaps: ["MISSING_REQUESTED_COUNT"],
-      confidence: 100,
-      rationale: "Cannot evaluate: requested_count_user is missing from input.",
-      suggested_changes: [],
-      stop_reason: {
-        code: "MISSING_REQUESTED_COUNT",
-        message: "Cannot evaluate: requested_count_user is missing from input.",
-      },
-      _debug: { extractedDeliveredCount: dcMissing.count, extractedRequestedCount: 0, source: dcMissing.source },
-    };
-    console.log(`[TOWER] verdict=STOP reason=MISSING_REQUESTED_COUNT`);
-    return result;
-  }
+  const userRequestedCount = requestedCount !== null;
 
   if (checkNoProgress(input)) {
     const matchedCount =
@@ -1554,7 +1535,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       verdict: "STOP",
       action: "stop",
       delivered: deliveredCount,
-      requested: requestedCount,
+      requested: requestedCount ?? 0,
       gaps: ["NO_PROGRESS"],
       confidence: 95,
       rationale: message,
@@ -1562,9 +1543,9 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       stop_reason: {
         code: "NO_PROGRESS",
         message,
-        evidence: { delivered: deliveredCount, requested: requestedCount, leads_count: leads.length },
+        evidence: { delivered: deliveredCount, requested: requestedCount ?? 0, leads_count: leads.length },
       },
-      _debug: { extractedDeliveredCount: deliveredCount, extractedRequestedCount: requestedCount, source: dcResult.source },
+      _debug: { extractedDeliveredCount: deliveredCount, extractedRequestedCount: requestedCount ?? 0, source: dcResult.source },
     };
     console.log(`[TOWER] verdict=STOP reason=NO_PROGRESS`);
     return result;
@@ -1584,7 +1565,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       verdict: "CHANGE_PLAN",
       action: "change_plan",
       delivered: deliveredCount,
-      requested: requestedCount,
+      requested: requestedCount ?? 0,
       gaps: ["INPUT_CONCATENATED"],
       confidence: 95,
       rationale: `Input appears corrupted. ${concatCheck.reason} Ask the user to restate the request.`,
@@ -1600,7 +1581,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         message: "Input appears concatenated. Ask the user to restate the request.",
         evidence: { detected_reason: concatCheck.reason },
       },
-      _debug: { extractedDeliveredCount: deliveredCount, extractedRequestedCount: requestedCount, source: dcResultConcat.source },
+      _debug: { extractedDeliveredCount: deliveredCount, extractedRequestedCount: requestedCount ?? 0, source: dcResultConcat.source },
     };
     console.log(`[TOWER] verdict=CHANGE_PLAN reason=INPUT_CONCATENATED detail="${concatCheck.reason}"`);
     return result;
@@ -1619,7 +1600,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
   const dcMain = resolveDeliveredCount(input, matchedLeadCount);
   const deliveredCount = dcMain.count;
   const deliveredSource = dcMain.source;
-  const debugBlock: TowerVerdictDebug = { extractedDeliveredCount: deliveredCount, extractedRequestedCount: requestedCount, source: deliveredSource };
+  const debugBlock: TowerVerdictDebug = { extractedDeliveredCount: deliveredCount, extractedRequestedCount: requestedCount ?? 0, source: deliveredSource };
 
   const constraintResults = constraints.map((c) => {
     if (c.type === "COUNT_MIN") {
@@ -1692,7 +1673,114 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
 
   const labelGaps = checkLabelHonesty(input, constraintResults);
 
-  if (deliveredCount >= requestedCount && requestedCount > 0) {
+  if (!userRequestedCount) {
+    if (deliveredCount >= 1 && hardViolations.length === 0 && hardUnknowns.length === 0) {
+      const gaps = [...locationUnverifiedGaps, ...labelGaps];
+      const rationale = cvlPresent
+        ? "Verified match(es) delivered. All hard constraints satisfied."
+        : "Exact match(es) delivered. No specific count was requested.";
+      const result: TowerVerdict = {
+        verdict: "ACCEPT",
+        action: "continue",
+        delivered: deliveredCount,
+        requested: 0,
+        gaps,
+        confidence: 85,
+        rationale,
+        suggested_changes: [],
+        constraint_results: constraintResults,
+      };
+      console.log(`[TOWER] verdict=ACCEPT reason=no_count_requested delivered=${deliveredCount}`);
+      return { ...result, _debug: debugBlock };
+    }
+
+    if (deliveredCount >= 1 && hardViolations.length > 0) {
+      const violatedFields = hardViolations.map(
+        (r) => `${r.constraint.type}(${r.constraint.field}=${r.constraint.value})`
+      );
+      const result: TowerVerdict = {
+        verdict: "STOP",
+        action: "stop",
+        delivered: deliveredCount,
+        requested: 0,
+        gaps: [...hardViolations.map(() => "HARD_CONSTRAINT_VIOLATED"), ...labelGaps],
+        confidence: 95,
+        rationale: `Results delivered but hard constraints violated: ${violatedFields.join(", ")}.`,
+        suggested_changes: [],
+        constraint_results: constraintResults,
+        stop_reason: {
+          code: "COUNT_MET_HARD_VIOLATED",
+          message: `Hard constraints violated: ${violatedFields.join(", ")}.`,
+          evidence: { delivered: deliveredCount, violated_fields: violatedFields },
+        },
+      };
+      console.log(`[TOWER] verdict=STOP reason=no_count_requested_hard_violated delivered=${deliveredCount}`);
+      return { ...result, _debug: debugBlock };
+    }
+
+    if (deliveredCount >= 1 && hardUnknowns.length > 0) {
+      const unknownIds = hardUnknowns.map(
+        (c) => `${c.type}(${c.field}=${c.value})`
+      );
+      if (canReplan(input)) {
+        const suggestions: SuggestedChange[] = hardUnknowns.map((c) => ({
+          type: "ADD_VERIFICATION_STEP" as SuggestedChangeType,
+          field: c.field,
+          from: null,
+          to: null,
+          reason: `Hard constraint ${c.type}(${c.field}) status unknown — verification needed.`,
+        }));
+        const result: TowerVerdict = {
+          verdict: "CHANGE_PLAN",
+          action: "change_plan",
+          delivered: deliveredCount,
+          requested: 0,
+          gaps: hardUnknowns.map(() => "HARD_CONSTRAINT_UNKNOWN"),
+          confidence: 60,
+          rationale: `Results delivered but hard constraints have unknown status: ${unknownIds.join(", ")}. Verification needed.`,
+          suggested_changes: suggestions,
+          constraint_results: constraintResults,
+        };
+        console.log(`[TOWER] verdict=CHANGE_PLAN reason=no_count_requested_hard_unknown delivered=${deliveredCount}`);
+        return { ...result, _debug: debugBlock };
+      }
+      const result: TowerVerdict = {
+        verdict: "ACCEPT_WITH_UNVERIFIED",
+        action: "continue",
+        delivered: deliveredCount,
+        requested: 0,
+        gaps: hardUnknowns.map(() => "HARD_CONSTRAINT_UNKNOWN"),
+        confidence: 60,
+        rationale: `Results delivered but some hard constraints could not be verified: ${unknownIds.join(", ")}. Accepted as best-effort.`,
+        suggested_changes: [],
+        constraint_results: constraintResults,
+      };
+      console.log(`[TOWER] verdict=ACCEPT_WITH_UNVERIFIED reason=no_count_requested_hard_unknown_no_replans delivered=${deliveredCount}`);
+      return { ...result, _debug: debugBlock };
+    }
+
+    const result: TowerVerdict = {
+      verdict: "STOP",
+      action: "stop",
+      delivered: 0,
+      requested: 0,
+      gaps: ["ZERO_DELIVERED"],
+      confidence: 100,
+      rationale: "No results were delivered.",
+      suggested_changes: [],
+      constraint_results: constraintResults,
+      stop_reason: {
+        code: "ZERO_DELIVERED",
+        message: "No results were delivered despite no explicit count requirement.",
+      },
+    };
+    console.log(`[TOWER] verdict=STOP reason=no_count_requested_zero_delivered`);
+    return { ...result, _debug: debugBlock };
+  }
+
+  const effectiveRequestedCount = requestedCount as number;
+
+  if (deliveredCount >= effectiveRequestedCount && effectiveRequestedCount > 0) {
     if (hardViolations.length > 0) {
       const violatedFields = hardViolations.map(
         (r) => `${r.constraint.type}(${r.constraint.field}=${r.constraint.value})`
@@ -1706,19 +1794,19 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         verdict: "STOP",
         action: "stop",
         delivered: deliveredCount,
-        requested: requestedCount,
+        requested: effectiveRequestedCount,
         gaps,
         confidence: 95,
-        rationale: `Count met (${deliveredCount}/${requestedCount}) but hard constraints violated: ${violatedFields.join(", ")}. Results do not satisfy all stated requirements.`,
+        rationale: `Count met (${deliveredCount}/${effectiveRequestedCount}) but hard constraints violated: ${violatedFields.join(", ")}. Results do not satisfy all stated requirements.`,
         suggested_changes: [],
         constraint_results: constraintResults,
         stop_reason: {
           code: "COUNT_MET_HARD_VIOLATED",
           message: `Count met but hard constraints violated: ${violatedFields.join(", ")}.`,
-          evidence: { delivered: deliveredCount, requested: requestedCount, violated_fields: violatedFields },
+          evidence: { delivered: deliveredCount, requested: effectiveRequestedCount, violated_fields: violatedFields },
         },
       };
-      console.log(`[TOWER] verdict=STOP reason=COUNT_MET_HARD_VIOLATED delivered=${deliveredCount} requested=${requestedCount} violated=${violatedFields.join(",")}`);
+      console.log(`[TOWER] verdict=STOP reason=COUNT_MET_HARD_VIOLATED delivered=${deliveredCount} requested=${effectiveRequestedCount} violated=${violatedFields.join(",")}`);
       return result;
     } else if (hardUnknowns.length > 0) {
       const unknownIds = hardUnknowns.map(
@@ -1770,16 +1858,16 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
           verdict: "STOP",
           action: "stop",
           delivered: deliveredCount,
-          requested: requestedCount,
+          requested: effectiveRequestedCount,
           gaps: [...gaps, "HARD_CONSTRAINT_UNVERIFIABLE"],
           confidence: 70,
-          rationale: `Count met (${deliveredCount}/${requestedCount}) but hard constraints unverifiable with current tools: ${unknownIds.join(", ")}.`,
+          rationale: `Count met (${deliveredCount}/${effectiveRequestedCount}) but hard constraints unverifiable with current tools: ${unknownIds.join(", ")}.`,
           suggested_changes: suggestions,
           constraint_results: constraintResults,
           stop_reason: {
             code: "HARD_CONSTRAINT_UNVERIFIABLE",
             message: `Count met but hard constraints unverifiable with current tools.`,
-            evidence: { delivered: deliveredCount, requested: requestedCount, unverifiable_constraints: unknownIds },
+            evidence: { delivered: deliveredCount, requested: effectiveRequestedCount, unverifiable_constraints: unknownIds },
           },
         };
         console.log(`[TOWER] verdict=STOP reason=HARD_CONSTRAINT_UNVERIFIABLE`);
@@ -1791,16 +1879,16 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
           verdict: "CHANGE_PLAN",
           action: "change_plan",
           delivered: deliveredCount,
-          requested: requestedCount,
+          requested: effectiveRequestedCount,
           gaps,
           confidence: 60,
-          rationale: `Count met (${deliveredCount}/${requestedCount}) but hard constraints have unknown status: ${unknownIds.join(", ")}. Verification needed before accepting.`,
+          rationale: `Count met (${deliveredCount}/${effectiveRequestedCount}) but hard constraints have unknown status: ${unknownIds.join(", ")}. Verification needed before accepting.`,
           suggested_changes: suggestions,
           constraint_results: constraintResults,
           stop_reason: {
             code: "HARD_CONSTRAINT_UNKNOWN",
             message: `Count met but hard constraints have unknown status. Verification needed before accepting.`,
-            evidence: { delivered: deliveredCount, requested: requestedCount, unknown_constraints: unknownIds },
+            evidence: { delivered: deliveredCount, requested: effectiveRequestedCount, unknown_constraints: unknownIds },
           },
         };
         console.log(`[TOWER] verdict=CHANGE_PLAN reason=hard_constraint_unknown_needs_verification`);
@@ -1811,22 +1899,22 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         verdict: "STOP",
         action: "stop",
         delivered: deliveredCount,
-        requested: requestedCount,
+        requested: effectiveRequestedCount,
         gaps: [...gaps, "NO_PROGRESS"],
         confidence: 70,
-        rationale: `Count met (${deliveredCount}/${requestedCount}) but hard constraints have unknown status and no replans remain: ${unknownIds.join(", ")}.`,
+        rationale: `Count met (${deliveredCount}/${effectiveRequestedCount}) but hard constraints have unknown status and no replans remain: ${unknownIds.join(", ")}.`,
         suggested_changes: [],
         constraint_results: constraintResults,
         stop_reason: {
           code: "HARD_CONSTRAINT_UNKNOWN",
           message: `Count met but hard constraints have unknown status and no replans remain.`,
-          evidence: { delivered: deliveredCount, requested: requestedCount, unknown_constraints: unknownIds },
+          evidence: { delivered: deliveredCount, requested: effectiveRequestedCount, unknown_constraints: unknownIds },
         },
       };
       console.log(`[TOWER] verdict=STOP reason=hard_unknown_no_replans`);
       return { ...result, _debug: debugBlock };
     } else {
-      const ratio = deliveredCount / requestedCount;
+      const ratio = deliveredCount / effectiveRequestedCount;
       const confidence = Math.min(95, Math.round(80 + (ratio - 1) * 15));
 
       const gaps = [...locationUnverifiedGaps, ...labelGaps];
@@ -1837,7 +1925,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         verdict: "ACCEPT",
         action: "continue",
         delivered: deliveredCount,
-        requested: requestedCount,
+        requested: effectiveRequestedCount,
         gaps,
         confidence: Math.max(80, confidence),
         rationale,
@@ -1845,7 +1933,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         constraint_results: constraintResults,
       };
       console.log(
-        `[TOWER] verdict=ACCEPT delivered=${deliveredCount} requested=${requestedCount} cvl=${cvlPresent}`
+        `[TOWER] verdict=ACCEPT delivered=${deliveredCount} requested=${effectiveRequestedCount} cvl=${cvlPresent}`
       );
       return { ...result, _debug: debugBlock };
     }
@@ -1864,7 +1952,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         verdict: "STOP",
         action: "stop",
         delivered: deliveredCount,
-        requested: requestedCount,
+        requested: effectiveRequestedCount,
         gaps: [
           ...hardViolations.map(() => "HARD_CONSTRAINT_VIOLATED"),
           ...labelGaps,
@@ -1889,7 +1977,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         verdict: "STOP",
         action: "stop",
         delivered: deliveredCount,
-        requested: requestedCount,
+        requested: effectiveRequestedCount,
         gaps: [
           ...hardViolations.map(() => "HARD_CONSTRAINT_VIOLATED"),
           ...labelGaps,
@@ -1912,14 +2000,14 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       ...hardViolations.map(() => "HARD_CONSTRAINT_VIOLATED"),
       ...labelGaps,
     ];
-    if (deliveredCount < requestedCount) {
+    if (deliveredCount < effectiveRequestedCount) {
       gaps.push("INSUFFICIENT_COUNT");
     }
 
-    let softChanges = buildSuggestions(input, constraints, constraintResults, deliveredCount, requestedCount);
+    let softChanges = buildSuggestions(input, constraints, constraintResults, deliveredCount, effectiveRequestedCount);
 
     if (canReplan(input) && softChanges.length === 0 && isLocationExpandable(constraints, input)) {
-      const fallback = buildFallbackExpandArea(input, deliveredCount, requestedCount);
+      const fallback = buildFallbackExpandArea(input, deliveredCount, effectiveRequestedCount);
       if (fallback) softChanges = [fallback];
     }
 
@@ -1929,10 +2017,10 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         verdict: "CHANGE_PLAN",
         action: "change_plan",
         delivered: deliveredCount,
-        requested: requestedCount,
+        requested: effectiveRequestedCount,
         gaps,
         confidence: Math.round(
-          30 + (deliveredCount / Math.max(requestedCount, 1)) * 40
+          30 + (deliveredCount / Math.max(effectiveRequestedCount, 1)) * 40
         ),
         rationale: deliveredCount > 0
           ? `Only ${deliveredCount} exact matches were found. Remaining results do not meet all stated requirements.`
@@ -1944,7 +2032,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         stop_reason: {
           code: "HARD_CONSTRAINT_VIOLATED",
           message: `Hard constraints violated. Suggestions available for replanning.`,
-          evidence: { violated_fields: violatedFields, delivered: deliveredCount, requested: requestedCount },
+          evidence: { violated_fields: violatedFields, delivered: deliveredCount, requested: effectiveRequestedCount },
         },
       };
       console.log(
@@ -1958,7 +2046,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       verdict: "STOP",
       action: "stop",
       delivered: deliveredCount,
-      requested: requestedCount,
+      requested: effectiveRequestedCount,
       gaps: [...gaps, "NO_PROGRESS"],
       confidence: 95,
       rationale: deliveredCount > 0
@@ -1976,13 +2064,13 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
     return { ...result, _debug: debugBlock };
   }
 
-  if (deliveredCount < requestedCount && requestedCount > 0) {
+  if (deliveredCount < effectiveRequestedCount && effectiveRequestedCount > 0) {
     const gaps: string[] = ["INSUFFICIENT_COUNT", ...locationUnverifiedGaps, ...labelGaps];
 
-    let suggestions = buildSuggestions(input, constraints, constraintResults, deliveredCount, requestedCount);
+    let suggestions = buildSuggestions(input, constraints, constraintResults, deliveredCount, effectiveRequestedCount);
 
     if (canReplan(input) && suggestions.length === 0 && isLocationExpandable(constraints, input)) {
-      const fallback = buildFallbackExpandArea(input, deliveredCount, requestedCount);
+      const fallback = buildFallbackExpandArea(input, deliveredCount, effectiveRequestedCount);
       if (fallback) suggestions = [fallback];
     }
 
@@ -1991,12 +2079,12 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         verdict: "CHANGE_PLAN",
         action: "change_plan",
         delivered: deliveredCount,
-        requested: requestedCount,
+        requested: effectiveRequestedCount,
         gaps,
         confidence:
           deliveredCount === 0
             ? 95
-            : Math.round(50 + (deliveredCount / requestedCount) * 30),
+            : Math.round(50 + (deliveredCount / effectiveRequestedCount) * 30),
         rationale: deliveredCount > 0
           ? `Only ${deliveredCount} exact matches were found. Remaining results do not meet all stated requirements.`
           : leads.length > 0
@@ -2007,11 +2095,11 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         stop_reason: {
           code: "INSUFFICIENT_COUNT",
           message: `Insufficient matches found. Suggestions available for replanning.`,
-          evidence: { delivered: deliveredCount, requested: requestedCount, leads_count: leads.length },
+          evidence: { delivered: deliveredCount, requested: effectiveRequestedCount, leads_count: leads.length },
         },
       };
       console.log(
-        `[TOWER] verdict=CHANGE_PLAN delivered=${deliveredCount} requested=${requestedCount}`
+        `[TOWER] verdict=CHANGE_PLAN delivered=${deliveredCount} requested=${effectiveRequestedCount}`
       );
       return { ...result, _debug: debugBlock };
     }
@@ -2021,7 +2109,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         verdict: "STOP",
         action: "stop",
         delivered: deliveredCount,
-        requested: requestedCount,
+        requested: effectiveRequestedCount,
         gaps: [...gaps, "MAX_REPLANS_EXHAUSTED"],
         confidence: 90,
         rationale: deliveredCount > 0
@@ -2034,11 +2122,11 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
         stop_reason: {
           code: "MAX_REPLANS_EXHAUSTED",
           message: `Insufficient matches and no replans remain.`,
-          evidence: { delivered: deliveredCount, requested: requestedCount, leads_count: leads.length },
+          evidence: { delivered: deliveredCount, requested: effectiveRequestedCount, leads_count: leads.length },
         },
       };
       console.log(
-        `[TOWER] verdict=STOP delivered=${deliveredCount} requested=${requestedCount} reason=max_replans_exhausted`
+        `[TOWER] verdict=STOP delivered=${deliveredCount} requested=${effectiveRequestedCount} reason=max_replans_exhausted`
       );
       return { ...result, _debug: debugBlock };
     }
@@ -2047,7 +2135,7 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       verdict: "STOP",
       action: "stop",
       delivered: deliveredCount,
-      requested: requestedCount,
+      requested: effectiveRequestedCount,
       gaps: [...gaps, "NO_PROGRESS"],
       confidence: 90,
       rationale: deliveredCount > 0
@@ -2060,23 +2148,23 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       stop_reason: {
         code: "INSUFFICIENT_COUNT",
         message: `Insufficient matches and no suggestions available.`,
-        evidence: { delivered: deliveredCount, requested: requestedCount, leads_count: leads.length },
+        evidence: { delivered: deliveredCount, requested: effectiveRequestedCount, leads_count: leads.length },
       },
     };
     console.log(
-      `[TOWER] verdict=STOP delivered=${deliveredCount} requested=${requestedCount} reason=no_suggestions_location_not_expandable`
+      `[TOWER] verdict=STOP delivered=${deliveredCount} requested=${effectiveRequestedCount} reason=no_suggestions_location_not_expandable`
     );
     return { ...result, _debug: debugBlock };
   }
 
   console.log(
-    `[TOWER] fallback_guard: delivered=${deliveredCount}(${typeof deliveredCount}) requested=${requestedCount}(${typeof requestedCount}) ` +
+    `[TOWER] fallback_guard: delivered=${deliveredCount}(${typeof deliveredCount}) requested=${effectiveRequestedCount}(${typeof effectiveRequestedCount}) ` +
     `leads=${leads.length} hardViolations=${hardViolations.length} hardUnknowns=${hardUnknowns.length} ` +
     `constraints=${constraints.length} constraint_results=${constraintResults.length} source=${debugBlock.source}`
   );
 
   const numericDelivered = isFiniteNumber(deliveredCount) ? deliveredCount : 0;
-  const numericRequested = isFiniteNumber(requestedCount) ? requestedCount : 0;
+  const numericRequested = isFiniteNumber(effectiveRequestedCount) ? effectiveRequestedCount : 0;
 
   if (numericDelivered >= numericRequested && hardViolations.length === 0 && hardUnknowns.length === 0) {
     const result: TowerVerdict = {

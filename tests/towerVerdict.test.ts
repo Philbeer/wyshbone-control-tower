@@ -139,14 +139,54 @@ const dentistLeads: Lead[] = withEvidence(dentistLeadsRaw);
 
 // ── Core contract tests ──
 
-test("STOP when requested_count_user is missing", () => {
+test("ACCEPT when requested_count_user is missing but leads delivered with satisfied constraints", () => {
   const result = judgeLeadsList({
     leads: sampleLeads,
     original_goal: "Find pubs in Arundel",
   });
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.action).toBe("continue");
+  expect(result.requested).toBe(0);
+});
+
+test("STOP when requested_count_user is missing and zero leads delivered", () => {
+  const result = judgeLeadsList({
+    leads: [],
+    original_goal: "Find pubs in Arundel",
+    delivered_count: 0,
+  });
   expect(result.verdict).toBe("STOP");
   expect(result.action).toBe("stop");
-  expect(result.gaps).toContain("MISSING_REQUESTED_COUNT");
+  expect(result.gaps).toContain("ZERO_DELIVERED");
+});
+
+test("ACCEPT when no count requested and 1 exact match satisfies hard constraints (Swan pub case)", () => {
+  const result = judgeLeadsList({
+    leads: [{ name: "The Swan Inn", address: "High Street, Arundel", verified: true, evidence: "Google Maps listing" }],
+    original_goal: "Find pubs in Arundel with Swan in the name",
+    constraints: [
+      { type: "NAME_CONTAINS", field: "name", value: "Swan", hardness: "hard" },
+      { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+    ],
+  });
+  expect(result.verdict).toBe("ACCEPT");
+  expect(result.action).toBe("continue");
+  expect(result.delivered).toBe(1);
+  expect(result.requested).toBe(0);
+});
+
+test("STOP when no count requested but hard constraints violated", () => {
+  const result = judgeLeadsList({
+    leads: [{ name: "The Red Lion", address: "High Street, Arundel", verified: true, evidence: "Google Maps listing" }],
+    original_goal: "Find pubs in Arundel with Swan in the name",
+    constraints: [
+      { type: "NAME_CONTAINS", field: "name", value: "Swan", hardness: "hard" },
+      { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+    ],
+  });
+  expect(result.verdict).toBe("STOP");
+  expect(result.action).toBe("stop");
+  expect(result.gaps).toContain("HARD_CONSTRAINT_VIOLATED");
 });
 
 test("ACCEPT: basic count met with no constraints", () => {
