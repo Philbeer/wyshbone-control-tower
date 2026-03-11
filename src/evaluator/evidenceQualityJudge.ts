@@ -45,7 +45,7 @@ export interface EvidenceLeadInfo {
 export interface EvidenceQualityInput {
   leads: EvidenceLeadInfo[];
   verified_exact_count?: number;
-  requested_count: number;
+  requested_count: number | null;
   delivery_summary?: "PASS" | "PARTIAL" | "STOP" | string;
   tower_verdict?: "ACCEPT" | "CHANGE_PLAN" | "STOP";
 }
@@ -120,7 +120,7 @@ export function judgeEvidenceQuality(input: EvidenceQualityInput): EvidenceQuali
 
   const effectiveVerified = verified_exact_count ?? verifiedWithEvidence;
 
-  if (effectiveVerified < requested_count && requested_count > 0) {
+  if (requested_count != null && effectiveVerified < requested_count && requested_count > 0) {
     gaps.push("VERIFIED_EXACT_BELOW_REQUESTED");
   }
 

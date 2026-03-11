@@ -260,6 +260,8 @@ export interface TowerVerdictInput {
   unresolved_hard_constraints?: UnresolvedHardConstraint[];
 
   best_effort_accepted?: boolean;
+  verification_policy?: string;
+  strategy?: string;
 }
 
 export interface UnresolvedHardConstraint {
@@ -1262,7 +1264,7 @@ function judgeLeadsListInner(input: TowerVerdictInput): TowerVerdict {
   const eqResult = judgeEvidenceQuality({
     leads: evidenceLeads,
     verified_exact_count: input.verification_summary?.verified_exact_count,
-    requested_count: coreResult.requested,
+    requested_count: resolveRequestedCount(input) != null ? coreResult.requested : null,
     delivery_summary: input.delivery_summary,
     tower_verdict: coreResult.verdict,
   });
@@ -1275,7 +1277,9 @@ function judgeLeadsListInner(input: TowerVerdictInput): TowerVerdict {
     ? allHardConstraintsSelfEvident(coreResult.constraint_results)
     : false;
 
-  if (!eqResult.pass && coreResult.verdict === "ACCEPT" && !selfEvident) {
+  const discoveryOnly = input.verification_policy === "DIRECTORY_VERIFIED" && input.strategy === "discovery_only";
+
+  if (!eqResult.pass && coreResult.verdict === "ACCEPT" && !selfEvident && !discoveryOnly) {
     console.log(`[TOWER] evidence_quality_override verdict=ACCEPT→STOP gaps=${eqResult.gaps.join(",")}`);
     return {
       ...coreResult,
@@ -1288,6 +1292,9 @@ function judgeLeadsListInner(input: TowerVerdictInput): TowerVerdict {
   }
   if (!eqResult.pass && coreResult.verdict === "ACCEPT" && selfEvident) {
     console.log(`[TOWER] evidence_quality_override SKIPPED (self-evident constraints) gaps=${eqResult.gaps.join(",")}`); // TOWER_SELF_EVIDENT_FIX
+  }
+  if (!eqResult.pass && coreResult.verdict === "ACCEPT" && discoveryOnly) {
+    console.log(`[TOWER] evidence_quality_override SKIPPED (discovery_only + DIRECTORY_VERIFIED) gaps=${eqResult.gaps.join(",")}`);
   }
 
   if (!eqResult.pass && coreResult.verdict === "CHANGE_PLAN") {

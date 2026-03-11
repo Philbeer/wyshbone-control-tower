@@ -3,7 +3,7 @@ import type { ChatRequest, ChatMessage } from './chatApiTypes';
 
 export type BehaviourTestResult = {
   testId: string;
-  status: "pass" | "fail" | "error";
+  status: "pass" | "fail" | "error" | "PASS" | "HONEST_PARTIAL" | "BATCH_EXHAUSTED" | "CAPABILITY_FAIL" | "WRONG_DECISION";
   details: string;
   rawLog?: any;
   durationMs?: number;

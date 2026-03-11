@@ -528,7 +528,7 @@ export async function judgeEvidenceSemantically(
     }
 
     const response = await openai.chat.completions.create({
-      model: process.env.SEMANTIC_JUDGE_MODEL ?? process.env.EVAL_MODEL_ID ?? "gpt-4o-mini",
+      model: process.env.SEMANTIC_JUDGE_MODEL ?? "gpt-4o",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: promptPayload },

@@ -211,6 +211,9 @@ const towerVerdictRequestSchema = z.object({
 
   best_effort_accepted: z.boolean().optional(),
 
+  verification_policy: z.string().optional(),
+  strategy: z.string().optional(),
+
   query_shape_key: z.string().optional(),
   steps_count: z.number().int().optional(),
   tool_calls: z.number().int().optional(),
@@ -575,6 +578,8 @@ router.post("/tower-verdict", async (req, res) => {
       time_predicates_unknown_count: data.time_predicates_unknown_count,
       unresolved_hard_constraints: data.unresolved_hard_constraints,
       best_effort_accepted: data.best_effort_accepted,
+      verification_policy: data.verification_policy,
+      strategy: data.strategy,
     });
 
     if (DEBUG) {

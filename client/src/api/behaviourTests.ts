@@ -9,7 +9,7 @@ export type BehaviourTestSummary = {
   latestRun: {
     id: string;
     createdAt: string;
-    status: "pass" | "fail" | "error" | "pending";
+    status: "pass" | "fail" | "error" | "pending" | "PASS" | "HONEST_PARTIAL" | "BATCH_EXHAUSTED" | "CAPABILITY_FAIL" | "WRONG_DECISION";
     details: string | null;
     buildTag: string | null;
     durationMs: number | null;
@@ -18,7 +18,7 @@ export type BehaviourTestSummary = {
 
 export type BehaviourTestResult = {
   testId: string;
-  status: "pass" | "fail" | "error";
+  status: "pass" | "fail" | "error" | "PASS" | "HONEST_PARTIAL" | "BATCH_EXHAUSTED" | "CAPABILITY_FAIL" | "WRONG_DECISION";
   details: string;
   rawLog?: any;
   durationMs?: number;
