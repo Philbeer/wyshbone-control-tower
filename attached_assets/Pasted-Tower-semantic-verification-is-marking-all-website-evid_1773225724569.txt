@@ -1,0 +1,21 @@
+Tower semantic verification is marking all website evidence as weak_match even when the quote explicitly contains the matched phrase. This needs to be fixed so that genuine matches are promoted to verified.
+The problem:
+When Tower semantically verifies a lead against a constraint like website_evidence: "live music", it is returning weak_match for every result regardless of evidence quality. This means leads where the extracted quote literally contains the words "live music" are getting the same score as leads where the quote doesn't contain those words at all.
+What correct behaviour looks like:
+
+If the extracted quote explicitly contains the matched phrase verbatim (e.g. "The Red Lion Arundel hosts live music...", "From live music and quiz nights...", "From live music to food events...") → Tower should return verified, confidence ≥ 0.85
+If the extracted quote does not contain the matched phrase but the page might loosely relate (e.g. "Clive & Victoria are delighted to welcome you to our family run pub.") → Tower should return weak_match, confidence ≤ 0.65
+If no evidence was found at all → no_evidence
+
+The fix needed:
+In the Tower semantic verification logic for website_evidence constraints, add a pre-check before the LLM call: if the quote or any snippet in evidence_items contains the constraint_value string as a literal substring (case-insensitive), return verified directly without needing LLM judgement. The LLM path is only needed for semantic/indirect matches.
+Expected outcome after fix:
+For the query "Find 5 pubs in Arundel that mention live music on their website":
+
+George & Dragon → verified (quote contains "live music" verbatim)
+Norfolk Arms Hotel → verified (quote contains "live music" verbatim)
+The Red Lion → verified (quote contains "live music" verbatim)
+The Black Horse → weak_match (quote does not contain "live music")
+The George at Burpham → weak_match (quote does not contain "live music")
+
+This then allows the Supervisor delivery-summary.ts classification (already fixed) to correctly place the 3 verified leads in delivered_exact and the 2 weak ones in delivered_closest, producing shortfall=2 and an honest partial result surfaced to the UI.

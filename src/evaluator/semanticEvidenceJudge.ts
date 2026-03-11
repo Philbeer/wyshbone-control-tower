@@ -260,6 +260,65 @@ function keywordFallbackJudge(input: SemanticJudgeInput): SemanticJudgement {
   };
 }
 
+const NEGATION_PATTERNS = /\b(no|not|never|without|doesn'?t|don'?t|isn'?t|wasn'?t|won'?t|can'?t|cannot|stopped|ceased|formerly|previously|used to|no longer)\b/i;
+
+function hasNegationNearMatch(text: string, matchIndex: number, constraintLength: number): boolean {
+  const windowStart = Math.max(0, matchIndex - 30);
+  const windowEnd = Math.min(text.length, matchIndex + constraintLength + 10);
+  const window = text.substring(windowStart, windowEnd);
+  return NEGATION_PATTERNS.test(window);
+}
+
+function isWordBoundaryMatch(text: string, matchIndex: number, constraintLength: number): boolean {
+  const before = matchIndex > 0 ? text[matchIndex - 1] : " ";
+  const after = matchIndex + constraintLength < text.length ? text[matchIndex + constraintLength] : " ";
+  const isWordChar = (c: string) => /[a-z0-9]/i.test(c);
+  return !isWordChar(before) && !isWordChar(after);
+}
+
+function checkVerbatimMatch(input: SemanticJudgeInput): SemanticJudgement | null {
+  const constraintValue = String(input.constraint.value ?? "").toLowerCase().trim();
+  if (!constraintValue || constraintValue.length < 3) return null;
+
+  const evidenceTexts = collectEvidenceTexts(input);
+  if (evidenceTexts.length === 0) return null;
+
+  const matchedSnippets: string[] = [];
+
+  for (const text of evidenceTexts) {
+    const lowerText = text.toLowerCase();
+    let searchFrom = 0;
+    while (true) {
+      const idx = lowerText.indexOf(constraintValue, searchFrom);
+      if (idx === -1) break;
+      searchFrom = idx + 1;
+
+      if (!isWordBoundaryMatch(lowerText, idx, constraintValue.length)) continue;
+      if (hasNegationNearMatch(lowerText, idx, constraintValue.length)) continue;
+
+      const start = Math.max(0, idx - 40);
+      const end = Math.min(text.length, idx + constraintValue.length + 40);
+      const snippet = (start > 0 ? "..." : "") + text.substring(start, end) + (end < text.length ? "..." : "");
+      matchedSnippets.push(snippet);
+      break;
+    }
+  }
+
+  if (matchedSnippets.length === 0) return null;
+
+  const uniqueSnippets = [...new Set(matchedSnippets)].slice(0, 3);
+
+  return {
+    satisfies: "yes",
+    status: "verified",
+    strength: "strong",
+    confidence: 0.95,
+    reasoning: `Verbatim match: the evidence text contains "${constraintValue}" as a literal phrase.`,
+    supporting_quotes: uniqueSnippets,
+    judge_mode: "keyword_fallback",
+  };
+}
+
 function mapLlmResponseToJudgement(parsed: any): SemanticJudgement {
   const validStatuses: SemanticStatus[] = ["verified", "weak_match", "no_evidence", "insufficient_evidence"];
   const validStrengths: SemanticStrength[] = ["strong", "indirect", "weak", "none"];
@@ -352,6 +411,17 @@ export async function judgeEvidenceSemantically(
       `evidence_count=${texts.length} page_title="${pageTitle ?? "none"}" ` +
       `has_api_key=${!!process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== "placeholder-key-not-set"}`
     );
+  }
+
+  const verbatimResult = checkVerbatimMatch(input);
+  if (verbatimResult) {
+    if (TRACE) {
+      console.log(
+        `[TOWER][SEMANTIC] verbatim_match: lead="${leadName}" constraint="${constraint.value}" ` +
+        `confidence=${verbatimResult.confidence} quotes=${JSON.stringify(verbatimResult.supporting_quotes)}`
+      );
+    }
+    return verbatimResult;
   }
 
   if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY === "placeholder-key-not-set") {
