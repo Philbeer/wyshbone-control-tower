@@ -357,7 +357,12 @@ export function buildLeadsEvidence(
 }
 
 export function fireBehaviourJudge(input: BehaviourJudgeInput): void {
-  if (process.env.BEHAVIOUR_JUDGE_ENABLED !== "true") return;
+  console.log(`[BEHAVIOUR_JUDGE] fireBehaviourJudge called run_id=${input.run_id} ENABLED=${process.env.BEHAVIOUR_JUDGE_ENABLED}`);
+  if (process.env.BEHAVIOUR_JUDGE_ENABLED !== "true") {
+    console.log(`[BEHAVIOUR_JUDGE] skipped — BEHAVIOUR_JUDGE_ENABLED is not "true" (value=${JSON.stringify(process.env.BEHAVIOUR_JUDGE_ENABLED)})`);
+    return;
+  }
+  console.log(`[BEHAVIOUR_JUDGE] gate passed — calling LLM for run_id=${input.run_id} query_class=${input.query_class}`);
 
   judgeBehaviour(input)
     .then(async (result) => {
