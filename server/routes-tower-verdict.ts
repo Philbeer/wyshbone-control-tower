@@ -7,6 +7,7 @@ import type { PlasticsRubricInput, PlasticsStepSnapshot } from "../src/evaluator
 import { evaluateLearningUpdate } from "../src/evaluator/learningUpdateEmitter";
 import type { LearningUpdateInput } from "../src/evaluator/learningUpdateEmitter";
 import { enrichAttributeEvidence } from "../src/evaluator/semanticEvidenceJudge";
+import { fireBehaviourJudge } from "../src/evaluator/behaviourJudge";
 import { db } from "../src/lib/db";
 import { sql, eq } from "drizzle-orm";
 import { towerVerdicts } from "../shared/schema";
@@ -213,6 +214,7 @@ const towerVerdictRequestSchema = z.object({
 
   verification_policy: z.string().optional(),
   strategy: z.string().optional(),
+  agent_clarified: z.boolean().optional(),
 
   query_shape_key: z.string().optional(),
   steps_count: z.number().int().optional(),
@@ -580,6 +582,7 @@ router.post("/tower-verdict", async (req, res) => {
       best_effort_accepted: data.best_effort_accepted,
       verification_policy: data.verification_policy,
       strategy: data.strategy,
+      agent_clarified: data.agent_clarified,
     });
 
     if (DEBUG) {
@@ -630,6 +633,36 @@ router.post("/tower-verdict", async (req, res) => {
       rationale: result.rationale,
       idempotency_key: idempotencyKey,
     });
+
+    if (!pr.duplicate) {
+      const goal =
+        data.original_goal ?? data.original_user_goal ?? data.normalized_goal ?? "";
+      fireBehaviourJudge({
+        run_id: runId,
+        original_goal: goal,
+        strategy: data.strategy ?? null,
+        verification_policy: data.verification_policy ?? null,
+        delivered_count: result.delivered,
+        requested_count: data.requested_count_user ?? data.requested_count ?? null,
+        constraints: (data.constraints ?? []).map((c: any) => ({
+          type: c.type,
+          field: c.field,
+          value: c.value,
+          hardness: c.hardness ?? "hard",
+        })),
+        constraint_verdicts: (result.constraint_results ?? []).map((cr) => ({
+          type: cr.constraint.type,
+          field: cr.constraint.field,
+          value: cr.constraint.value,
+          verdict: cr.constraint_verdict ?? (cr.passed ? "VERIFIED" : "UNSUPPORTED"),
+          reason: undefined,
+        })),
+        tower_verdict: result.verdict,
+        tower_gaps: result.gaps,
+        tower_stop_reason_code: result.stop_reason?.code ?? null,
+        agent_clarified: data.agent_clarified ?? false,
+      });
+    }
 
     res.json(addPersistMeta({
       ...result,

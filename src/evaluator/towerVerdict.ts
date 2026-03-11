@@ -262,6 +262,7 @@ export interface TowerVerdictInput {
   best_effort_accepted?: boolean;
   verification_policy?: string;
   strategy?: string;
+  agent_clarified?: boolean;
 }
 
 export interface UnresolvedHardConstraint {

@@ -513,3 +513,23 @@ export const insertLearningArtefactSchema = createInsertSchema(learningArtefacts
 });
 export type InsertLearningArtefact = z.infer<typeof insertLearningArtefactSchema>;
 export type LearningArtefact = typeof learningArtefacts.$inferSelect;
+
+export const behaviourJudgeResults = pgTable("behaviour_judge_results", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  run_id: text("run_id").notNull(),
+  outcome: text("outcome").notNull(),
+  reason: text("reason").notNull(),
+  confidence: integer("confidence"),
+  tower_verdict: text("tower_verdict"),
+  delivered_count: integer("delivered_count"),
+  requested_count: integer("requested_count"),
+  input_snapshot: jsonb("input_snapshot"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertBehaviourJudgeResultSchema = createInsertSchema(behaviourJudgeResults).omit({
+  id: true,
+  created_at: true,
+});
+export type InsertBehaviourJudgeResult = z.infer<typeof insertBehaviourJudgeResultSchema>;
+export type BehaviourJudgeResultRow = typeof behaviourJudgeResults.$inferSelect;
