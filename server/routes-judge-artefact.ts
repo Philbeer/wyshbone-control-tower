@@ -11,6 +11,8 @@ import type { PlasticsRubricInput } from "../src/evaluator/plasticsInjectionRubr
 import { evaluateLearningUpdate } from "../src/evaluator/learningUpdateEmitter";
 import type { LearningUpdateInput } from "../src/evaluator/learningUpdateEmitter";
 import { enrichAttributeEvidence } from "../src/evaluator/semanticEvidenceJudge";
+import { fireBehaviourJudge, inferQueryClass, mapSourceTier, buildLeadsEvidence } from "../src/evaluator/behaviourJudge";
+import type { ConstraintVerdictDetail } from "../src/evaluator/behaviourJudge";
 import { towerVerdicts } from "../shared/schema";
 
 const router = express.Router();
@@ -685,6 +687,77 @@ router.post("/judge-artefact", async (req, res) => {
         rationale: leadsResult.reasons[0] ?? null,
         idempotency_key: idempotencyKey,
       });
+
+      if (!pr.duplicate) {
+        const constraintResults = (leadsResult.metrics.constraint_results as any[]) ?? [];
+        const bjConstraints = constraintResults.map((cr: any) => ({
+          type: (cr.constraint?.type ?? "UNKNOWN") as string,
+          field: (cr.constraint?.field ?? "") as string,
+          value: (cr.constraint?.value ?? "") as string | number,
+          hardness: (cr.constraint?.hardness ?? "hard") as "hard" | "soft",
+          evidence_requirement: cr.constraint?.evidence_requirement as string | undefined,
+        }));
+
+        const bjConstraintVerdicts: ConstraintVerdictDetail[] = constraintResults.map((cr: any) => {
+          const detail: ConstraintVerdictDetail = {
+            type: cr.constraint.type,
+            field: cr.constraint.field,
+            value: cr.constraint.value,
+            hardness: cr.constraint.hardness,
+            verdict: cr.constraint_verdict ?? (cr.passed ? "VERIFIED" : "UNSUPPORTED"),
+            matched_count: cr.matched_count,
+            total_leads: cr.total_leads,
+          };
+          if (cr.quote) detail.quote = cr.quote;
+          if (cr.source_url) detail.source_url = cr.source_url;
+          if (cr.attribute_evidence_details && cr.attribute_evidence_details.length > 0) {
+            const first = cr.attribute_evidence_details[0];
+            if (!detail.quote && first.quote) detail.quote = first.quote;
+            if (!detail.source_url && first.source_url) detail.source_url = first.source_url;
+          }
+          const matchingAttrEv = attributeEvidenceItems.find((ae) =>
+            ae.attribute_key === cr.constraint.field || ae.attribute === cr.constraint.field
+          );
+          if (matchingAttrEv?.source_tier) {
+            detail.source_tier = mapSourceTier(matchingAttrEv.source_tier);
+          }
+          if (matchingAttrEv?.semantic_reasoning) {
+            detail.reason = matchingAttrEv.semantic_reasoning;
+          }
+          return detail;
+        });
+
+        const bjLeadsEvidence = buildLeadsEvidence(
+          (Array.isArray(payloadJson?.leads) ? payloadJson.leads : []) as Array<{ name: string; [key: string]: unknown }>,
+          (Array.isArray(payloadJson?.delivered_leads) ? payloadJson.delivered_leads : undefined) as Array<{ name: string; [key: string]: unknown }> | undefined,
+          attributeEvidenceItems,
+        );
+
+        const bjQueryClass = inferQueryClass(goal, bjConstraints);
+
+        const bjRequestedCount =
+          (typeof successCriteria?.requested_count_user === "number" ? successCriteria.requested_count_user : null) ??
+          (typeof payloadJson?.requested_count_user === "number" ? payloadJson.requested_count_user : null) ??
+          (typeof successCriteria?.requested_count === "number" ? successCriteria.requested_count : null) ??
+          (typeof payloadJson?.requested_count === "number" ? payloadJson.requested_count : null);
+
+        fireBehaviourJudge({
+          run_id: runId,
+          original_goal: goal,
+          strategy: payloadJson?.strategy ?? null,
+          verification_policy: payloadJson?.verification_policy ?? null,
+          delivered_count: (leadsResult.metrics.delivered as number) ?? 0,
+          requested_count: bjRequestedCount,
+          query_class: bjQueryClass,
+          constraints: bjConstraints,
+          constraint_verdicts: bjConstraintVerdicts,
+          leads_evidence: bjLeadsEvidence,
+          tower_verdict: leadsResult.towerVerdict,
+          tower_gaps: (leadsResult.metrics.gaps as string[]) ?? [],
+          tower_stop_reason_code: leadsResult.stop_reason?.code ?? null,
+          agent_clarified: payloadJson?.agent_clarified ?? false,
+        });
+      }
 
       res.json(addPersistMeta({
         ...leadsResult,
