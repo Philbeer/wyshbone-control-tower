@@ -310,7 +310,6 @@ function resolveRequestedCount(input: TowerVerdictInput): number | null {
     input.requested_count_user,
     input.success_criteria?.requested_count_user,
     input.success_criteria?.target_count,
-    input.requested_count,
   ];
   for (const c of candidates) {
     if (c == null) continue;
