@@ -347,11 +347,12 @@ function resolveDeliveredCount(input: TowerVerdictInput, matchedLeadCount: numbe
     return { count: input.delivered_leads.length, source: "delivered_leads.length" };
   }
 
-  // TOWER_COUNT_FIX: when delivered_count is explicitly provided, prefer it over leads.length.
-  // leads may contain the search pool (e.g. 20 SEARCH_PLACES results) while delivered_count
-  // reflects the filtered delivery (e.g. 1 after FILTER_FIELDS). delivered_count is the
-  // authoritative signal from Supervisor about actual delivery.
-  if (input.delivered_count != null) {
+  // TOWER_COUNT_FIX: when delivered_count is explicitly provided and positive, prefer it
+  // over leads.length. leads may contain the search pool (e.g. 20 SEARCH_PLACES results)
+  // while delivered_count reflects the filtered delivery (e.g. 1 after FILTER_FIELDS).
+  // Guard: delivered_count=0 with real leads is treated as stale/default — fall through
+  // to leads.length so real deliveries aren't reported as zero.
+  if (input.delivered_count != null && input.delivered_count > 0) {
     return { count: input.delivered_count, source: "delivered_count" };
   }
 
@@ -1224,7 +1225,7 @@ export function detectRelationshipPredicate(
 // not override ACCEPT → STOP for missing verification data.
 function allHardConstraintsSelfEvident(constraintResults: ConstraintResult[]): boolean {
   const hardResults = constraintResults.filter((cr) => cr.constraint.hardness === "hard");
-  if (hardResults.length === 0) return true;
+  if (hardResults.length === 0) return false; // TOWER_SELF_EVIDENT_FIX: no hard constraints ≠ self-evident; evidence quality still applies
   const selfEvidentTypes: Set<string> = new Set(["NAME_CONTAINS", "NAME_STARTS_WITH", "LOCATION", "COUNT_MIN"]);
   for (const cr of hardResults) {
     if (!selfEvidentTypes.has(cr.constraint.type)) return false;

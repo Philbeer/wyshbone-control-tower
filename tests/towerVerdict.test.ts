@@ -3304,4 +3304,145 @@ test("HONEST_SHORTFALL: delivery_summary=STOP does not trigger honest partial pa
   console.log(`  STOP_DELIVERY_PASS: verdict=${result.verdict} gaps=${JSON.stringify(result.gaps)}`);
 });
 
+// ── TOWER_COUNT_FIX regression: stale delivered_count=0 with valid leads ──
+
+test("TOWER_COUNT_FIX: stale delivered_count=0 with real leads falls through to leads.length", () => {
+  const realLeads = Array.from({ length: 3 }, (_, i) => ({
+    name: `Lead ${i + 1}`,
+    address: `${i + 1} Main St`,
+    verified: true,
+    evidence: `Evidence for lead ${i + 1}`,
+    source_url: `https://example.com/lead${i + 1}`,
+  }));
+
+  const result = judgeLeadsList({
+    requested_count_user: 3,
+    leads: realLeads as Lead[],
+    delivered_count: 0,
+    constraints: [
+      { type: "COUNT_MIN", field: "requested_count", value: 3, hardness: "hard" },
+    ] as Constraint[],
+  });
+
+  if (result._debug?.source === "delivered_count") {
+    throw new Error(
+      `TOWER_COUNT_FIX regression: stale delivered_count=0 was used instead of leads.length. ` +
+      `_debug.source="${result._debug.source}" extractedDeliveredCount=${result._debug.extractedDeliveredCount}`
+    );
+  }
+  if (result._debug?.extractedDeliveredCount === 0) {
+    throw new Error(
+      `TOWER_COUNT_FIX regression: extractedDeliveredCount=0 despite 3 real leads in array`
+    );
+  }
+  if (result.verdict === "STOP" && result.rationale?.includes("No results")) {
+    throw new Error(
+      `TOWER_COUNT_FIX regression: 3 real leads but verdict=STOP with "No results" rationale`
+    );
+  }
+  console.log(
+    `  TOWER_COUNT_FIX PASS: stale delivered_count=0 ignored, ` +
+    `source=${result._debug?.source} count=${result._debug?.extractedDeliveredCount} verdict=${result.verdict}`
+  );
+});
+
+test("TOWER_COUNT_FIX: delivered_count=1 preferred over leads.length=20 (search pool)", () => {
+  const searchPool = Array.from({ length: 20 }, (_, i) => ({
+    name: `Place ${i + 1}`,
+    address: `${i + 1} High St`,
+    verified: true,
+    evidence: `Found via search`,
+    source_url: `https://example.com/p${i + 1}`,
+  }));
+
+  const result = judgeLeadsList({
+    requested_count_user: 1,
+    leads: searchPool as Lead[],
+    delivered_count: 1,
+    constraints: [
+      { type: "COUNT_MIN", field: "requested_count", value: 1, hardness: "hard" },
+    ] as Constraint[],
+  });
+
+  if (result._debug?.source !== "delivered_count") {
+    throw new Error(
+      `TOWER_COUNT_FIX regression: delivered_count=1 not preferred over leads.length=20. ` +
+      `source=${result._debug?.source} extractedDeliveredCount=${result._debug?.extractedDeliveredCount}`
+    );
+  }
+  if (result._debug?.extractedDeliveredCount !== 1) {
+    throw new Error(
+      `TOWER_COUNT_FIX regression: extractedDeliveredCount=${result._debug?.extractedDeliveredCount} expected 1`
+    );
+  }
+  console.log(
+    `  TOWER_COUNT_FIX PASS: delivered_count=1 preferred over leads.length=20, verdict=${result.verdict}`
+  );
+});
+
+// ── TOWER_SELF_EVIDENT_FIX regression: zero hard constraints + poor evidence ──
+
+test("TOWER_SELF_EVIDENT_FIX: zero hard constraints with poor evidence still triggers evidence quality gate", () => {
+  const unverifiedLeads = Array.from({ length: 5 }, (_, i) => ({
+    name: `Business ${i + 1}`,
+    address: `${i + 1} Oak Ave`,
+  }));
+
+  const result = judgeLeadsList({
+    requested_count_user: 5,
+    leads: unverifiedLeads as Lead[],
+    delivered_count: 5,
+    constraints: [
+      { type: "COUNT_MIN", field: "requested_count", value: 5, hardness: "soft" },
+    ] as Constraint[],
+  });
+
+  const hasEvidenceGap = result.gaps.some(
+    (g: string) => g === "NO_EVIDENCE_PRESENT" || g === "VERIFIED_EXACT_BELOW_REQUESTED"
+  );
+
+  if (result.verdict === "ACCEPT" && !hasEvidenceGap) {
+    throw new Error(
+      `TOWER_SELF_EVIDENT_FIX regression: zero hard constraints + no evidence fields on leads ` +
+      `should still be checked by evidence quality gate, but verdict=ACCEPT with no evidence gaps. ` +
+      `gaps=${JSON.stringify(result.gaps)}`
+    );
+  }
+
+  console.log(
+    `  TOWER_SELF_EVIDENT_FIX PASS: zero hard constraints + poor evidence → ` +
+    `verdict=${result.verdict} gaps=${JSON.stringify(result.gaps)} (evidence quality gate applied)`
+  );
+});
+
+test("TOWER_SELF_EVIDENT_FIX: self-evident hard constraints bypass evidence quality gate", () => {
+  const nameMatchLeads = [
+    { name: "The Swan Inn", address: "1 High St, Arundel" },
+    { name: "Swan Hotel", address: "5 River Rd, Arundel" },
+  ];
+
+  const result = judgeLeadsList({
+    requested_count_user: 2,
+    leads: nameMatchLeads as Lead[],
+    delivered_count: 2,
+    constraints: [
+      { type: "NAME_CONTAINS", field: "name", value: "Swan", hardness: "hard" },
+      { type: "COUNT_MIN", field: "requested_count", value: 2, hardness: "hard" },
+    ] as Constraint[],
+  });
+
+  if (result.verdict === "STOP" && result.gaps.some((g: string) => g === "NO_EVIDENCE_PRESENT")) {
+    throw new Error(
+      `TOWER_SELF_EVIDENT_FIX regression: self-evident constraints (NAME_CONTAINS + COUNT_MIN) ` +
+      `should bypass evidence quality gate, but verdict=STOP with NO_EVIDENCE_PRESENT. ` +
+      `gaps=${JSON.stringify(result.gaps)}`
+    );
+  }
+
+  console.log(
+    `  TOWER_SELF_EVIDENT_FIX PASS: self-evident hard constraints → ` +
+    `verdict=${result.verdict} gaps=${JSON.stringify(result.gaps)} (evidence quality gate bypassed)`
+  );
+});
+
 runTests();
