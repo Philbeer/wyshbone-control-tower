@@ -1,0 +1,91 @@
+Execution mode: Sequential
+
+Goal
+Upgrade Tower judgement so it can handle honest shortfall and evidence-quality-aware outcomes for hard website-evidence queries.
+
+Context
+
+Supervisor delivery classification has now been fixed so that:
+- only strong / verified evidence supports delivered_exact
+- weak_match leads are downgraded to delivered_closest
+- shortfall is now allowed honestly instead of padding exact results
+
+This exposed the next gap:
+Tower still needs to judge these runs properly.
+
+Example target case:
+User asks:
+"Find 5 pubs in Arundel that mention live music on their website"
+
+Actual truthful outcome:
+- 3 leads are genuinely verified with website evidence
+- 2 other candidates are weak/unverified
+- requested count = 5
+- exact count = 3
+- shortfall = 2
+
+Desired Tower behaviour:
+- do NOT treat this as fake full success
+- do NOT require padding with weak matches
+- do NOT collapse everything into blunt pass/fail
+- recognise that this is an honest partial result for an evidence-required constraint
+
+Required changes
+
+1. Find where Tower currently derives verdicts from:
+   - delivered count
+   - requested count
+   - hard constraints
+   - evidence quality
+   - constraint_results
+
+2. Add an outcome path for honest partial success when:
+   - hard evidence constraints are satisfied for some delivered_exact leads
+   - weak/unverified candidates are not promoted to exact
+   - requested count was not fully met
+
+3. Implement a verdict model that distinguishes at least:
+   - ACCEPT
+   - ACCEPT_WITH_UNVERIFIED
+   - CHANGE_PLAN
+   - STOP
+
+If an explicit new partial-friendly rationale is needed, use the existing verdict set but make the rationale and stop/change behaviour correct.
+If a new machine-readable gap / reason is needed for honest shortfall, add it cleanly.
+
+4. For hard website-evidence constraints:
+   - verified exact leads should count positively
+   - weak/unverified closest leads should not satisfy the hard constraint
+   - shortfall with genuine exact results should be treated differently from contradiction or fake evidence
+
+5. Ensure Tower checks actual constraint quality, not just delivered count.
+   Specifically inspect:
+   - constraint_results population
+   - whether website_evidence hard constraints are actually represented
+   - whether empty or missing constraint_results can still allow misleading PASS outcomes
+
+6. Add regression tests covering:
+   - 3 verified exact, 2 closest weak, requested 5
+     expected: honest partial / non-fake success path
+   - 0 verified exact, 5 weak closest, requested 5
+     expected: not accepted as success
+   - 5 verified exact, requested 5
+     expected: ACCEPT
+   - broken evidence quality should not be counted as satisfying the hard website constraint
+
+7. Write a markdown file:
+TOWER_PARTIAL_HONEST_SUCCESS_FIX.md
+
+Include:
+- prior bad behaviour
+- new verdict rule
+- how honest shortfall is handled
+- how hard website-evidence constraints are judged now
+- tests added
+
+Rules
+
+- Do not work on UI yet
+- Build on the new Supervisor delivery classification truth
+- Prefer the smallest clean production-grade change
+- Be explicit about how this interacts with hard constraints and requested count

@@ -1454,6 +1454,73 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
   return coreResult;
 }
 
+interface HonestPartialResult {
+  detected: boolean;
+  verifiedExactCount: number;
+  hardEvidenceConstraintsPassed: boolean;
+}
+
+function detectHonestPartial(
+  input: TowerVerdictInput,
+  deliveredCount: number,
+  requestedCount: number,
+  constraintResults: ConstraintResult[],
+  hardViolations: ConstraintResult[],
+  hardUnknowns: Constraint[],
+): HonestPartialResult {
+  const NO = { detected: false, verifiedExactCount: 0, hardEvidenceConstraintsPassed: false };
+
+  if (deliveredCount <= 0) return NO;
+  const nonCountHardViolations = hardViolations.filter(
+    (r) => r.constraint.type !== "COUNT_MIN"
+  );
+  if (nonCountHardViolations.length > 0) return NO;
+
+  const deliverySummary = input.delivery_summary;
+  if (deliverySummary !== "PARTIAL" && deliverySummary !== "PASS") return NO;
+
+  const leads = resolveLeads(input);
+
+  let verifiedExactCount = 0;
+
+  if (input.verification_summary && typeof input.verification_summary.verified_exact_count === "number") {
+    verifiedExactCount = input.verification_summary.verified_exact_count;
+  } else {
+    for (const lead of leads) {
+      const isVerified = (lead as any).verified === true;
+      const hasEvidence =
+        ((lead as any).evidence != null &&
+          ((typeof (lead as any).evidence === "string" && (lead as any).evidence.trim().length > 0) ||
+           (Array.isArray((lead as any).evidence) && (lead as any).evidence.length > 0))) ||
+        (typeof (lead as any).source_url === "string" && (lead as any).source_url.trim().length > 0);
+      if (isVerified && hasEvidence) {
+        verifiedExactCount++;
+      }
+    }
+  }
+
+  if (verifiedExactCount <= 0) return NO;
+  if (verifiedExactCount >= requestedCount) return NO;
+  if (verifiedExactCount > deliveredCount) {
+    verifiedExactCount = deliveredCount;
+  }
+
+  const hardEvidenceConstraints = constraintResults.filter(
+    (cr) => cr.constraint.hardness === "hard" && cr.constraint.type === "HAS_ATTRIBUTE"
+  );
+  const hardEvidenceConstraintsPassed = hardEvidenceConstraints.length === 0 ||
+    hardEvidenceConstraints.some((cr) => cr.passed || cr.status === "yes");
+
+  const nonEvidenceHardUnknowns = hardUnknowns.filter((c) => c.type !== "HAS_ATTRIBUTE");
+  if (nonEvidenceHardUnknowns.length > 0) return NO;
+
+  return {
+    detected: true,
+    verifiedExactCount,
+    hardEvidenceConstraintsPassed,
+  };
+}
+
 function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
   const requestedCount = resolveRequestedCount(input);
   const leads = resolveLeads(input);
@@ -1940,6 +2007,86 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
   }
 
   if (hardViolations.length > 0) {
+    const onlyCountMinViolations = hardViolations.every((r) => r.constraint.type === "COUNT_MIN");
+    if (onlyCountMinViolations && deliveredCount > 0 && deliveredCount < effectiveRequestedCount) {
+      const honestPartialEarly = detectHonestPartial(
+        input,
+        deliveredCount,
+        effectiveRequestedCount,
+        constraintResults,
+        hardViolations,
+        hardUnknowns,
+      );
+      if (honestPartialEarly.detected && !canReplan(input)) {
+        const honestGaps = ["HONEST_SHORTFALL", ...locationUnverifiedGaps, ...labelGaps];
+        const result: TowerVerdict = {
+          verdict: "ACCEPT_WITH_UNVERIFIED",
+          action: "continue",
+          delivered: honestPartialEarly.verifiedExactCount,
+          requested: effectiveRequestedCount,
+          gaps: honestGaps,
+          confidence: Math.round(40 + (honestPartialEarly.verifiedExactCount / effectiveRequestedCount) * 50),
+          rationale: `Honest partial result: ${honestPartialEarly.verifiedExactCount} of ${effectiveRequestedCount} requested leads are verified with evidence. ` +
+            `Shortfall of ${effectiveRequestedCount - honestPartialEarly.verifiedExactCount} could not be filled with verified results. ` +
+            `Unverified candidates were not promoted to exact.`,
+          suggested_changes: [],
+          constraint_results: constraintResults,
+          stop_reason: {
+            code: "HONEST_SHORTFALL",
+            message: `${honestPartialEarly.verifiedExactCount} of ${effectiveRequestedCount} leads verified with evidence. Shortfall is genuine — weak/unverified candidates were not promoted.`,
+            evidence: {
+              verified_exact_count: honestPartialEarly.verifiedExactCount,
+              requested: effectiveRequestedCount,
+              shortfall: effectiveRequestedCount - honestPartialEarly.verifiedExactCount,
+              delivery_summary: input.delivery_summary ?? null,
+              hard_evidence_constraints_passed: honestPartialEarly.hardEvidenceConstraintsPassed,
+            },
+          },
+        };
+        console.log(
+          `[TOWER] verdict=ACCEPT_WITH_UNVERIFIED reason=HONEST_SHORTFALL verified_exact=${honestPartialEarly.verifiedExactCount} ` +
+          `requested=${effectiveRequestedCount} delivery_summary=${input.delivery_summary ?? "none"}`
+        );
+        return { ...result, _debug: debugBlock };
+      }
+      if (honestPartialEarly.detected && canReplan(input)) {
+        const honestGaps = ["HONEST_SHORTFALL", ...locationUnverifiedGaps, ...labelGaps];
+        let suggestions = buildSuggestions(input, constraints, constraintResults, deliveredCount, effectiveRequestedCount);
+        if (suggestions.length === 0 && isLocationExpandable(constraints, input)) {
+          const fallback = buildFallbackExpandArea(input, deliveredCount, effectiveRequestedCount);
+          if (fallback) suggestions = [fallback];
+        }
+        const result: TowerVerdict = {
+          verdict: "CHANGE_PLAN",
+          action: "change_plan",
+          delivered: honestPartialEarly.verifiedExactCount,
+          requested: effectiveRequestedCount,
+          gaps: honestGaps,
+          confidence: Math.round(40 + (honestPartialEarly.verifiedExactCount / effectiveRequestedCount) * 40),
+          rationale: `Honest partial result: ${honestPartialEarly.verifiedExactCount} of ${effectiveRequestedCount} requested leads are verified with evidence. ` +
+            `Replanning to find ${effectiveRequestedCount - honestPartialEarly.verifiedExactCount} more verified leads.`,
+          suggested_changes: suggestions,
+          constraint_results: constraintResults,
+          stop_reason: {
+            code: "HONEST_SHORTFALL",
+            message: `${honestPartialEarly.verifiedExactCount} verified, ${effectiveRequestedCount - honestPartialEarly.verifiedExactCount} still needed. Replanning.`,
+            evidence: {
+              verified_exact_count: honestPartialEarly.verifiedExactCount,
+              requested: effectiveRequestedCount,
+              shortfall: effectiveRequestedCount - honestPartialEarly.verifiedExactCount,
+              delivery_summary: input.delivery_summary ?? null,
+              hard_evidence_constraints_passed: honestPartialEarly.hardEvidenceConstraintsPassed,
+            },
+          },
+        };
+        console.log(
+          `[TOWER] verdict=CHANGE_PLAN reason=HONEST_SHORTFALL verified_exact=${honestPartialEarly.verifiedExactCount} ` +
+          `requested=${effectiveRequestedCount} delivery_summary=${input.delivery_summary ?? "none"}`
+        );
+        return { ...result, _debug: debugBlock };
+      }
+    }
+
     const allHard = constraints.filter((c) => c.hardness === "hard");
     const allHardViolated =
       allHard.length > 0 &&
@@ -2066,6 +2213,85 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
 
   if (deliveredCount < effectiveRequestedCount && effectiveRequestedCount > 0) {
     const gaps: string[] = ["INSUFFICIENT_COUNT", ...locationUnverifiedGaps, ...labelGaps];
+
+    const isHonestPartial = detectHonestPartial(
+      input,
+      deliveredCount,
+      effectiveRequestedCount,
+      constraintResults,
+      hardViolations,
+      hardUnknowns,
+    );
+
+    if (isHonestPartial.detected && !canReplan(input)) {
+      const honestGaps = ["HONEST_SHORTFALL", ...locationUnverifiedGaps, ...labelGaps];
+      const result: TowerVerdict = {
+        verdict: "ACCEPT_WITH_UNVERIFIED",
+        action: "continue",
+        delivered: isHonestPartial.verifiedExactCount,
+        requested: effectiveRequestedCount,
+        gaps: honestGaps,
+        confidence: Math.round(40 + (isHonestPartial.verifiedExactCount / effectiveRequestedCount) * 50),
+        rationale: `Honest partial result: ${isHonestPartial.verifiedExactCount} of ${effectiveRequestedCount} requested leads are verified with evidence. ` +
+          `Shortfall of ${effectiveRequestedCount - isHonestPartial.verifiedExactCount} could not be filled with verified results. ` +
+          `Unverified candidates were not promoted to exact.`,
+        suggested_changes: [],
+        constraint_results: constraintResults,
+        stop_reason: {
+          code: "HONEST_SHORTFALL",
+          message: `${isHonestPartial.verifiedExactCount} of ${effectiveRequestedCount} leads verified with evidence. Shortfall is genuine — weak/unverified candidates were not promoted.`,
+          evidence: {
+            verified_exact_count: isHonestPartial.verifiedExactCount,
+            requested: effectiveRequestedCount,
+            shortfall: effectiveRequestedCount - isHonestPartial.verifiedExactCount,
+            delivery_summary: input.delivery_summary ?? null,
+            hard_evidence_constraints_passed: isHonestPartial.hardEvidenceConstraintsPassed,
+          },
+        },
+      };
+      console.log(
+        `[TOWER] verdict=ACCEPT_WITH_UNVERIFIED reason=HONEST_SHORTFALL verified_exact=${isHonestPartial.verifiedExactCount} ` +
+        `requested=${effectiveRequestedCount} delivery_summary=${input.delivery_summary ?? "none"}`
+      );
+      return { ...result, _debug: debugBlock };
+    }
+
+    if (isHonestPartial.detected && canReplan(input)) {
+      const honestGaps = ["HONEST_SHORTFALL", ...locationUnverifiedGaps, ...labelGaps];
+      let suggestions = buildSuggestions(input, constraints, constraintResults, deliveredCount, effectiveRequestedCount);
+      if (suggestions.length === 0 && isLocationExpandable(constraints, input)) {
+        const fallback = buildFallbackExpandArea(input, deliveredCount, effectiveRequestedCount);
+        if (fallback) suggestions = [fallback];
+      }
+      const result: TowerVerdict = {
+        verdict: "CHANGE_PLAN",
+        action: "change_plan",
+        delivered: isHonestPartial.verifiedExactCount,
+        requested: effectiveRequestedCount,
+        gaps: honestGaps,
+        confidence: Math.round(40 + (isHonestPartial.verifiedExactCount / effectiveRequestedCount) * 40),
+        rationale: `Honest partial result: ${isHonestPartial.verifiedExactCount} of ${effectiveRequestedCount} requested leads are verified with evidence. ` +
+          `Replanning to find ${effectiveRequestedCount - isHonestPartial.verifiedExactCount} more verified leads.`,
+        suggested_changes: suggestions,
+        constraint_results: constraintResults,
+        stop_reason: {
+          code: "HONEST_SHORTFALL",
+          message: `${isHonestPartial.verifiedExactCount} verified, ${effectiveRequestedCount - isHonestPartial.verifiedExactCount} still needed. Replanning.`,
+          evidence: {
+            verified_exact_count: isHonestPartial.verifiedExactCount,
+            requested: effectiveRequestedCount,
+            shortfall: effectiveRequestedCount - isHonestPartial.verifiedExactCount,
+            delivery_summary: input.delivery_summary ?? null,
+            hard_evidence_constraints_passed: isHonestPartial.hardEvidenceConstraintsPassed,
+          },
+        },
+      };
+      console.log(
+        `[TOWER] verdict=CHANGE_PLAN reason=HONEST_SHORTFALL verified_exact=${isHonestPartial.verifiedExactCount} ` +
+        `requested=${effectiveRequestedCount} delivery_summary=${input.delivery_summary ?? "none"}`
+      );
+      return { ...result, _debug: debugBlock };
+    }
 
     let suggestions = buildSuggestions(input, constraints, constraintResults, deliveredCount, effectiveRequestedCount);
 

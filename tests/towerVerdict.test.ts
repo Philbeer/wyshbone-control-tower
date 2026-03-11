@@ -3082,4 +3082,226 @@ test("PRODUCTION BUG: exact replay of run 8f07d08f payload", () => {
   console.log(`  PRODUCTION REPLAY PASS: verdict=${result.verdict} delivered=${result.delivered} requested=${result.requested} source=${result._debug.source}`);
 });
 
+test("HONEST_SHORTFALL: 3 verified exact, 2 closest weak, requested 5 → ACCEPT_WITH_UNVERIFIED + HONEST_SHORTFALL", () => {
+  const verifiedLeads = Array.from({ length: 3 }, (_, i) => ({
+    name: `The ${["Crown", "Swan", "Red Lion"][i]} Pub`,
+    address: `${i + 1} High St, Arundel`,
+    verified: true,
+    evidence: `Website mentions live music events on ${["Fridays", "Saturdays", "weekends"][i]}`,
+    source_url: `https://the${["crown", "swan", "redlion"][i]}pub.co.uk`,
+  }));
+
+  const result = judgeLeadsList({
+    requested_count_user: 5,
+    delivered_leads: verifiedLeads as any[],
+    leads: [] as Lead[],
+    delivered_count: 3,
+    constraints: [
+      { type: "LOCATION", field: "location", value: "Arundel", hardness: "soft" },
+      { type: "HAS_ATTRIBUTE", field: "attribute", value: "live_music", hardness: "soft" },
+      { type: "COUNT_MIN", field: "requested_count", value: 5, hardness: "hard" },
+    ] as Constraint[],
+    verification_summary: {
+      verified_exact_count: 3,
+      constraint_results: [
+        { type: "LOCATION", field: "location", value: "Arundel", status: "yes" as const },
+        { type: "HAS_ATTRIBUTE", field: "attribute", value: "live_music", status: "yes" as const },
+      ],
+    },
+    delivery_summary: "PARTIAL",
+    original_goal: "Find 5 pubs in Arundel that mention live music on their website",
+    meta: { replans_used: 3, max_replans: 3, plan_version: 4 },
+    attribute_evidence: [
+      { lead_name: "The Crown Pub", attribute: "live_music", attribute_key: "live_music", verdict: "yes" as const, confidence: 0.9, source_url: "https://thecrownpub.co.uk", quote: "Live music every Friday", semantic_verdict: "yes" as const, semantic_status: "verified" as const, semantic_strength: "strong" as const, semantic_confidence: 0.9 },
+      { lead_name: "The Swan Pub", attribute: "live_music", attribute_key: "live_music", verdict: "yes" as const, confidence: 0.85, source_url: "https://theswanpub.co.uk", quote: "Live music Saturday nights", semantic_verdict: "yes" as const, semantic_status: "verified" as const, semantic_strength: "strong" as const, semantic_confidence: 0.85 },
+      { lead_name: "The Red Lion Pub", attribute: "live_music", attribute_key: "live_music", verdict: "yes" as const, confidence: 0.88, source_url: "https://theredlionpub.co.uk", quote: "Weekend live music events", semantic_verdict: "yes" as const, semantic_status: "verified" as const, semantic_strength: "strong" as const, semantic_confidence: 0.88 },
+    ],
+  });
+
+  expect(result.verdict).toBe("ACCEPT_WITH_UNVERIFIED");
+  expect(result.gaps).toContain("HONEST_SHORTFALL");
+  expect(result.delivered).toBe(3);
+  expect(result.requested).toBe(5);
+  if (result.stop_reason?.code !== "HONEST_SHORTFALL") {
+    throw new Error(`Expected stop_reason.code=HONEST_SHORTFALL, got ${result.stop_reason?.code}`);
+  }
+  console.log(`  HONEST_SHORTFALL PASS: verdict=${result.verdict} delivered=${result.delivered} requested=${result.requested} gaps=${JSON.stringify(result.gaps)}`);
+});
+
+test("HONEST_SHORTFALL: 0 verified exact, 5 weak closest, requested 5 → NOT accepted as success", () => {
+  const weakLeads = Array.from({ length: 5 }, (_, i) => ({
+    name: `Pub ${i + 1}`,
+    address: `${i + 1} High St, Arundel`,
+    verified: false,
+  }));
+
+  const result = judgeLeadsList({
+    requested_count_user: 5,
+    leads: weakLeads as Lead[],
+    delivered_count: 0,
+    constraints: [
+      { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+      { type: "HAS_ATTRIBUTE", field: "attribute", value: "live_music", hardness: "hard" },
+      { type: "COUNT_MIN", field: "requested_count", value: 5, hardness: "hard" },
+    ] as Constraint[],
+    verification_summary: { verified_exact_count: 0 },
+    delivery_summary: "PARTIAL",
+    original_goal: "Find 5 pubs in Arundel that mention live music on their website",
+    meta: { replans_used: 3, max_replans: 3, plan_version: 4 },
+  });
+
+  if (result.verdict === "ACCEPT") {
+    throw new Error(`0 verified leads should NOT produce ACCEPT, got ${result.verdict}`);
+  }
+  if (!result.gaps.some(g => g.includes("INSUFFICIENT_COUNT") || g.includes("HARD_CONSTRAINT") || g.includes("ZERO_DELIVERED") || g.includes("MAX_REPLANS"))) {
+    throw new Error(`Expected a failure gap, got gaps=${JSON.stringify(result.gaps)}`);
+  }
+  console.log(`  ZERO_VERIFIED PASS: verdict=${result.verdict} gaps=${JSON.stringify(result.gaps)}`);
+});
+
+test("HONEST_SHORTFALL: 5 verified exact, requested 5 → ACCEPT (full success, not partial)", () => {
+  const verifiedLeads = Array.from({ length: 5 }, (_, i) => ({
+    name: `Pub ${i + 1}`,
+    address: `${i + 1} High St, Arundel`,
+    verified: true,
+    evidence: `Website explicitly mentions live music`,
+    source_url: `https://pub${i + 1}.co.uk`,
+  }));
+
+  const result = judgeLeadsList({
+    requested_count_user: 5,
+    leads: verifiedLeads as Lead[],
+    delivered_count: 5,
+    constraints: [
+      { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+      { type: "HAS_ATTRIBUTE", field: "attribute", value: "live_music", hardness: "hard" },
+      { type: "COUNT_MIN", field: "requested_count", value: 5, hardness: "hard" },
+    ] as Constraint[],
+    verification_summary: {
+      verified_exact_count: 5,
+      constraint_results: [
+        { type: "LOCATION", field: "location", value: "Arundel", status: "yes" as const },
+        { type: "HAS_ATTRIBUTE", field: "attribute", value: "live_music", status: "yes" as const },
+      ],
+    },
+    delivery_summary: "PASS",
+    original_goal: "Find 5 pubs in Arundel that mention live music on their website",
+    meta: { replans_used: 0, max_replans: 3, plan_version: 1 },
+    attribute_evidence: Array.from({ length: 5 }, (_, i) => ({
+      lead_name: `Pub ${i + 1}`,
+      attribute: "live_music",
+      attribute_key: "live_music",
+      verdict: "yes" as const,
+      confidence: 0.9,
+      source_url: `https://pub${i + 1}.co.uk`,
+      quote: "Live music every weekend",
+      semantic_verdict: "yes" as const,
+      semantic_status: "verified" as const,
+      semantic_strength: "strong" as const,
+      semantic_confidence: 0.9,
+    })),
+  });
+
+  expect(result.verdict).toBe("ACCEPT");
+  if (result.gaps.some(g => g === "HONEST_SHORTFALL")) {
+    throw new Error(`Full success should NOT have HONEST_SHORTFALL gap`);
+  }
+  console.log(`  FULL_VERIFIED PASS: verdict=${result.verdict} delivered=${result.delivered} requested=${result.requested}`);
+});
+
+test("HONEST_SHORTFALL: broken evidence quality should not satisfy hard website constraint", () => {
+  const leads = Array.from({ length: 5 }, (_, i) => ({
+    name: `Pub ${i + 1}`,
+    address: `${i + 1} High St, Arundel`,
+    verified: true,
+    evidence: "",
+  }));
+
+  const result = judgeLeadsList({
+    requested_count_user: 5,
+    leads: leads as Lead[],
+    delivered_count: 5,
+    constraints: [
+      { type: "LOCATION", field: "location", value: "Arundel", hardness: "hard" },
+      { type: "HAS_ATTRIBUTE", field: "attribute", value: "live_music", hardness: "hard" },
+      { type: "COUNT_MIN", field: "requested_count", value: 5, hardness: "hard" },
+    ] as Constraint[],
+    verification_summary: {
+      verified_exact_count: 5,
+      constraint_results: [
+        { type: "LOCATION", field: "location", value: "Arundel", status: "yes" as const },
+        { type: "HAS_ATTRIBUTE", field: "attribute", value: "live_music", status: "unknown" as const },
+      ],
+    },
+    delivery_summary: "PASS",
+    original_goal: "Find 5 pubs in Arundel that mention live music on their website",
+    meta: { replans_used: 0, max_replans: 3, plan_version: 1 },
+  });
+
+  if (result.verdict === "ACCEPT") {
+    throw new Error(`Broken evidence (empty strings, HAS_ATTRIBUTE unknown) should NOT produce ACCEPT, got ${result.verdict}`);
+  }
+  console.log(`  BROKEN_EVIDENCE PASS: verdict=${result.verdict} gaps=${JSON.stringify(result.gaps)}`);
+});
+
+test("HONEST_SHORTFALL: 3 verified + replans available → CHANGE_PLAN with HONEST_SHORTFALL", () => {
+  const verifiedLeads = Array.from({ length: 3 }, (_, i) => ({
+    name: `Pub ${i + 1}`,
+    address: `${i + 1} High St, Arundel`,
+    verified: true,
+    evidence: `Live music confirmed on website`,
+    source_url: `https://pub${i + 1}.co.uk`,
+  }));
+
+  const result = judgeLeadsList({
+    requested_count_user: 5,
+    delivered_leads: verifiedLeads as any[],
+    leads: [] as Lead[],
+    delivered_count: 3,
+    constraints: [
+      { type: "COUNT_MIN", field: "requested_count", value: 5, hardness: "hard" },
+    ] as Constraint[],
+    verification_summary: { verified_exact_count: 3 },
+    delivery_summary: "PARTIAL",
+    original_goal: "Find 5 pubs in Arundel that mention live music on their website",
+    meta: { replans_used: 1, max_replans: 3, plan_version: 2, radius_km: 5 },
+  });
+
+  expect(result.verdict).toBe("CHANGE_PLAN");
+  expect(result.gaps).toContain("HONEST_SHORTFALL");
+  expect(result.delivered).toBe(3);
+  expect(result.requested).toBe(5);
+  if (result.stop_reason?.code !== "HONEST_SHORTFALL") {
+    throw new Error(`Expected stop_reason.code=HONEST_SHORTFALL, got ${result.stop_reason?.code}`);
+  }
+  console.log(`  HONEST_SHORTFALL_REPLAN PASS: verdict=${result.verdict} delivered=${result.delivered} gaps=${JSON.stringify(result.gaps)}`);
+});
+
+test("HONEST_SHORTFALL: delivery_summary=STOP does not trigger honest partial path", () => {
+  const verifiedLeads = Array.from({ length: 2 }, (_, i) => ({
+    name: `Pub ${i + 1}`,
+    address: `${i + 1} High St, Arundel`,
+    verified: true,
+    evidence: `Live music confirmed`,
+    source_url: `https://pub${i + 1}.co.uk`,
+  }));
+
+  const result = judgeLeadsList({
+    requested_count_user: 5,
+    leads: verifiedLeads as Lead[],
+    delivered_count: 2,
+    constraints: [
+      { type: "COUNT_MIN", field: "requested_count", value: 5, hardness: "hard" },
+    ] as Constraint[],
+    verification_summary: { verified_exact_count: 2 },
+    delivery_summary: "STOP",
+    meta: { replans_used: 3, max_replans: 3, plan_version: 4 },
+  });
+
+  if (result.gaps.some(g => g === "HONEST_SHORTFALL")) {
+    throw new Error(`delivery_summary=STOP should NOT trigger HONEST_SHORTFALL path`);
+  }
+  console.log(`  STOP_DELIVERY_PASS: verdict=${result.verdict} gaps=${JSON.stringify(result.gaps)}`);
+});
+
 runTests();
