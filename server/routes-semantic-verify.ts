@@ -2,6 +2,8 @@ import express from "express";
 import { z } from "zod";
 import { judgeEvidenceSemantically } from "../src/evaluator/semanticEvidenceJudge";
 import type { Constraint } from "../src/evaluator/towerVerdict";
+import { proofBurdenFromRequirement } from "../src/evaluator/towerVerdict";
+import type { EvidenceRequirement, SourceTier } from "../src/evaluator/towerVerdict";
 
 const router = express.Router();
 
@@ -18,6 +20,8 @@ const semanticVerifySchema = z.object({
   page_title: z.string().nullable().optional(),
   attribute_raw: z.string().nullable().optional(),
   constraint_raw: z.string().nullable().optional(),
+  source_tier: z.enum(["first_party_website", "directory_field", "search_snippet", "lead_field", "external_source", "unknown"]).nullable().optional(), // PHASE_4
+  evidence_requirement: z.enum(["none", "lead_field", "directory_data", "search_snippet", "website_text", "external_source"]).nullable().optional(), // PHASE_4
 });
 
 router.post("/semantic-verify", async (req, res) => {
@@ -35,11 +39,13 @@ router.post("/semantic-verify", async (req, res) => {
 
     const body = parsed.data;
 
+    const evidenceReq = (body.evidence_requirement ?? undefined) as EvidenceRequirement | undefined; // PHASE_4
     const constraint: Constraint = {
       type: "HAS_ATTRIBUTE",
       field: "attribute",
       value: body.constraint_to_check,
       hardness: "hard",
+      evidence_requirement: evidenceReq, // PHASE_4
     };
 
     let evidenceQuote: string | null = null;
@@ -87,6 +93,10 @@ router.post("/semantic-verify", async (req, res) => {
       `page_title="${body.page_title ?? "none"}"`
     );
 
+    // PHASE_4: pass source_tier and proof burden
+    const sourceTier = (body.source_tier ?? null) as SourceTier | null;
+    const burden = proofBurdenFromRequirement(evidenceReq);
+
     const judgement = await judgeEvidenceSemantically(
       body.original_user_goal,
       constraint,
@@ -96,7 +106,9 @@ router.post("/semantic-verify", async (req, res) => {
       extractedQuotes,
       body.page_title ?? null,
       body.constraint_raw ?? null,
-      body.attribute_raw ?? null
+      body.attribute_raw ?? null,
+      sourceTier,
+      burden
     );
 
     const responseJson = {

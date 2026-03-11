@@ -1,0 +1,75 @@
+TOWER — Phase 4 implementation prompt:
+
+Implement Phase 4 of the Tower upgrade: claim-sensitive judgement. You now receive richer input from Supervisor — use it.
+Do not change run verdict derivation in this phase. That is Phase 5. This phase is about per-constraint judgement only.
+1. Read structured_constraints instead of flat strings
+You now receive structured_constraints[] on the Tower payload. Each constraint has:
+{
+  id: string,
+  type: ConstraintType,
+  field: string,
+  value: any,
+  hardness: "hard" | "soft",
+  evidence_requirement: "none" | "lead_field" | "directory_data" | "search_snippet" | "website_text" | "external_source",
+  label: string
+}
+Use these instead of flat hard_constraints / soft_constraints strings where they exist. Fall back to flat strings if structured_constraints is absent (backward compatibility).
+2. Add proof burden classification
+Map each constraint's evidence_requirement to a proof burden:
+
+none → self_evident (verify locally from lead data, do not require external evidence)
+lead_field → self_evident
+directory_data → evidence_required (directory or maps confirmation needed)
+search_snippet → evidence_required (snippet confirmation acceptable)
+website_text → evidence_required_first_party (must come from first-party website, snippet is insufficient)
+external_source → inherently_uncertain
+
+3. Add source_tier awareness to evidence judgement
+Evidence items now carry source_tier. Use it:
+
+For constraints with proof burden evidence_required_first_party (i.e. HAS_ATTRIBUTE / website_text):
+
+first_party_website evidence → full confidence, can reach verified
+search_snippet or external_source evidence → cap confidence at weak_match, cannot reach verified
+directory_field or lead_field evidence → insufficient_evidence for website claims
+
+
+For constraints with proof burden evidence_required:
+
+Any source tier is acceptable but weight first-party higher
+
+
+For self_evident constraints:
+
+Ignore source tier — verify locally from lead data directly
+
+
+
+4. Add richer constraint verdict enum
+Replace binary pass/fail with:
+
+VERIFIED — strong evidence meeting the required proof burden
+PLAUSIBLE — some evidence but below the required proof burden (e.g. snippet for a website claim)
+UNSUPPORTED — no evidence found
+CONTRADICTED — evidence actively disproves the constraint
+NOT_APPLICABLE — constraint does not apply to this lead
+
+Map to existing passed: boolean for backward compatibility — VERIFIED and PLAUSIBLE → passed: true, UNSUPPORTED and CONTRADICTED → passed: false.
+5. Fix the negation gap
+The keyword fallback currently returns weak_match for "we no longer offer live music" because it matches tokens without negation awareness. Fix the keyword fallback to check for negation patterns within a 50-character window around any match. If negation is detected, return CONTRADICTED not weak_match.
+6. Local verification for self-evident claims
+For NAME_CONTAINS and NAME_STARTS_WITH constraints with proof burden self_evident:
+
+Verify directly against the lead name field
+Do not wait for CVL, do not require external evidence
+CVL unknown should not block a constraint Tower can verify locally
+
+Definition of done:
+
+HAS_ATTRIBUTE constraints with evidence_requirement: website_text cannot reach VERIFIED from a search snippet alone
+NAME_CONTAINS constraints verify locally regardless of CVL status
+Negation in evidence produces CONTRADICTED not weak_match
+Richer verdict enum is present on constraint results
+Backward compatible — passed: boolean still present
+Existing tests pass
+Add a brief comment marking each change as PHASE_4

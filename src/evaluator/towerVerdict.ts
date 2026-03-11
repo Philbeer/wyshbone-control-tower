@@ -16,11 +16,25 @@ export type ConstraintType =
   | "COUNT_MIN"
   | "HAS_ATTRIBUTE";
 
+// PHASE_4: evidence requirement levels from Supervisor
+export type EvidenceRequirement = "none" | "lead_field" | "directory_data" | "search_snippet" | "website_text" | "external_source";
+
+// PHASE_4: proof burden derived from evidence_requirement
+export type ProofBurden = "self_evident" | "evidence_required" | "evidence_required_first_party" | "inherently_uncertain";
+
+// PHASE_4: source tier for evidence provenance
+export type SourceTier = "first_party_website" | "directory_field" | "search_snippet" | "lead_field" | "external_source" | "unknown";
+
+// PHASE_4: richer per-constraint verdict
+export type ConstraintVerdict = "VERIFIED" | "PLAUSIBLE" | "UNSUPPORTED" | "CONTRADICTED" | "NOT_APPLICABLE";
+
 export interface Constraint {
   type: ConstraintType;
   field: string;
   value: string | number;
   hardness: "hard" | "soft";
+  evidence_requirement?: EvidenceRequirement; // PHASE_4
+  label?: string; // PHASE_4
 }
 
 export interface Lead {
@@ -78,6 +92,7 @@ export interface ConstraintResult {
   total_leads: number;
   passed: boolean;
   status?: CvlConstraintStatus;
+  constraint_verdict?: ConstraintVerdict; // PHASE_4
   evidence_id?: string;
   source_url?: string;
   quote?: string;
@@ -156,11 +171,12 @@ export interface AttributeEvidenceArtefact {
   extracted_quotes?: string[];
   page_title?: string;
   semantic_verdict?: CvlConstraintStatus;
-  semantic_status?: "verified" | "weak_match" | "no_evidence" | "insufficient_evidence";
+  semantic_status?: "verified" | "weak_match" | "no_evidence" | "insufficient_evidence" | "contradicted"; // PHASE_4: added contradicted
   semantic_strength?: "strong" | "indirect" | "weak" | "none";
   semantic_confidence?: number;
   semantic_reasoning?: string;
   semantic_supporting_quotes?: string[];
+  source_tier?: SourceTier; // PHASE_4
 }
 
 export interface CvlVerificationSummary {
@@ -253,6 +269,8 @@ export interface StructuredConstraint {
   hardness?: "hard" | "soft";
   operator?: string;
   rationale?: string;
+  evidence_requirement?: EvidenceRequirement; // PHASE_4
+  label?: string; // PHASE_4
 }
 
 export interface AttemptHistoryEntry {
@@ -432,6 +450,51 @@ function findAttributeEvidence(
   return null;
 }
 
+// PHASE_4: derive proof burden from evidence_requirement
+export function proofBurdenFromRequirement(req?: EvidenceRequirement): ProofBurden {
+  switch (req) {
+    case "none":
+    case "lead_field":
+      return "self_evident";
+    case "directory_data":
+    case "search_snippet":
+      return "evidence_required";
+    case "website_text":
+      return "evidence_required_first_party";
+    case "external_source":
+      return "inherently_uncertain";
+    default:
+      return "evidence_required";
+  }
+}
+
+// PHASE_4: derive ConstraintVerdict from evaluation outcome
+const CONSTRAINT_VERDICT_RANK: Record<ConstraintVerdict, number> = {
+  CONTRADICTED: 0, UNSUPPORTED: 1, NOT_APPLICABLE: 2, PLAUSIBLE: 3, VERIFIED: 4,
+};
+
+function deriveConstraintVerdict(
+  passed: boolean,
+  status: CvlConstraintStatus | undefined,
+  semanticStatus?: string,
+  proofBurden?: ProofBurden,
+  sourceTier?: SourceTier,
+): ConstraintVerdict {
+  if (status === "not_applicable") return "NOT_APPLICABLE";
+  if (semanticStatus === "contradicted") return "CONTRADICTED";
+  if (!passed && status === "no") return "UNSUPPORTED";
+  if (!passed) return "UNSUPPORTED";
+  if (semanticStatus === "verified" || status === "yes") {
+    if (proofBurden === "evidence_required_first_party" && sourceTier && sourceTier !== "first_party_website") {
+      return "PLAUSIBLE";
+    }
+    return "VERIFIED";
+  }
+  if (semanticStatus === "weak_match") return "PLAUSIBLE";
+  if (proofBurden === "self_evident") return "VERIFIED";
+  return "PLAUSIBLE";
+}
+
 function evaluateConstraint(
   constraint: Constraint,
   leads: Lead[],
@@ -457,16 +520,21 @@ function evaluateConstraint(
         }
       }
 
+      // PHASE_4: compute proof burden for this constraint
+      const burden = proofBurdenFromRequirement(constraint.evidence_requirement);
+
       if (cvlMatch && cvlMatch.status !== "unknown") {
         if (ATTR_TRACE) {
           console.log(`[TOWER][ATTR_TRACE] DECISION: using cvlMatch directly → status=${cvlMatch.status} passed=${cvlMatch.status === "yes"}`);
         }
+        const cvlPassed = cvlMatch.status === "yes";
         return {
           constraint,
-          matched_count: cvlMatch.status === "yes" ? total : 0,
+          matched_count: cvlPassed ? total : 0,
           total_leads: total,
-          passed: cvlMatch.status === "yes",
+          passed: cvlPassed,
           status: cvlMatch.status,
+          constraint_verdict: deriveConstraintVerdict(cvlPassed, cvlMatch.status, undefined, burden), // PHASE_4
           evidence_id: cvlMatch.evidence_id,
           source_url: cvlMatch.source_url,
           quote: cvlMatch.quote,
@@ -478,6 +546,9 @@ function evaluateConstraint(
         let hasYes = false;
         let hasNo = false;
         let hasUnknown = false;
+        // PHASE_4: track per-lead verdicts for aggregate constraint_verdict
+        let bestLeadVerdict: ConstraintVerdict = "UNSUPPORTED";
+        let anyContradicted = false;
 
         for (const lead of leads) {
           const leadPlaceId = (lead as any).place_id ?? (lead as any).placeId;
@@ -500,8 +571,14 @@ function evaluateConstraint(
                 source_url: ev.source_url,
                 quote: ev.quote,
               });
+              // PHASE_4: derive per-lead verdict using source_tier
+              const lv = deriveConstraintVerdict(true, "yes", ev.semantic_status, burden, ev.source_tier);
+              if (CONSTRAINT_VERDICT_RANK[lv] > CONSTRAINT_VERDICT_RANK[bestLeadVerdict]) {
+                bestLeadVerdict = lv;
+              }
             } else if (effectiveVerdict === "no") {
               hasNo = true;
+              if (ev.semantic_status === "contradicted") anyContradicted = true; // PHASE_4
             } else {
               hasUnknown = true;
             }
@@ -519,9 +596,19 @@ function evaluateConstraint(
           resolvedStatus = "unknown";
         }
 
+        // PHASE_4: compute aggregate constraint_verdict
+        let aggregateVerdict: ConstraintVerdict;
+        if (anyContradicted && resolvedStatus !== "yes") {
+          aggregateVerdict = "CONTRADICTED";
+        } else if (resolvedStatus === "yes") {
+          aggregateVerdict = bestLeadVerdict;
+        } else {
+          aggregateVerdict = "UNSUPPORTED";
+        }
+
         const firstEvidence = evidencePointers[0];
         if (ATTR_TRACE) {
-          console.log(`[TOWER][ATTR_TRACE] DECISION: from attributeEvidence → status=${resolvedStatus} hasYes=${hasYes} hasNo=${hasNo} hasUnknown=${hasUnknown} evidencePointers=${evidencePointers.length}`);
+          console.log(`[TOWER][ATTR_TRACE] DECISION: from attributeEvidence → status=${resolvedStatus} hasYes=${hasYes} hasNo=${hasNo} hasUnknown=${hasUnknown} evidencePointers=${evidencePointers.length} constraint_verdict=${aggregateVerdict}`);
           const topExcerpts = evidencePointers.slice(0, 2).map(ep => `lead="${ep.lead}" quote="${(ep.quote ?? "none").substring(0, 100)}"`);
           console.log(`[TOWER][ATTR_TRACE] top_evidence: ${topExcerpts.length > 0 ? topExcerpts.join(" | ") : "none found"}`);
         }
@@ -531,6 +618,7 @@ function evaluateConstraint(
           total_leads: total,
           passed: resolvedStatus === "yes",
           status: resolvedStatus,
+          constraint_verdict: aggregateVerdict, // PHASE_4
           evidence_id: firstEvidence?.evidence_id,
           source_url: firstEvidence?.source_url,
           quote: firstEvidence?.quote,
@@ -548,58 +636,71 @@ function evaluateConstraint(
         total_leads: total,
         passed: false,
         status: "not_attempted",
+        constraint_verdict: "UNSUPPORTED" as ConstraintVerdict, // PHASE_4
       };
     }
 
     case "NAME_CONTAINS": {
-      if (cvlMatch) {
+      // PHASE_4: CVL unknown should not block self-evident constraints — verify locally
+      if (cvlMatch && cvlMatch.status !== "unknown" && cvlMatch.status !== "not_attempted") {
+        const passed = cvlMatch.status === "yes";
         return {
           constraint,
-          matched_count: cvlMatch.status === "yes" ? total : 0,
+          matched_count: passed ? total : 0,
           total_leads: total,
-          passed: cvlMatch.status === "yes",
+          passed,
+          constraint_verdict: deriveConstraintVerdict(passed, cvlMatch.status, undefined, proofBurdenFromRequirement(constraint.evidence_requirement)),
         };
       }
       const word = String(constraint.value).toLowerCase();
       const regex = new RegExp(`\\b${escapeRegex(word)}\\b`, "i");
       const matched = leads.filter((l) => regex.test(l.name));
+      const localPassed = matched.length > 0;
       return {
         constraint,
         matched_count: matched.length,
         total_leads: total,
-        passed: matched.length > 0,
+        passed: localPassed,
+        constraint_verdict: localPassed ? "VERIFIED" as ConstraintVerdict : "UNSUPPORTED" as ConstraintVerdict, // PHASE_4: self-evident local check
       };
     }
 
     case "NAME_STARTS_WITH": {
-      if (cvlMatch) {
+      // PHASE_4: CVL unknown should not block self-evident constraints — verify locally
+      if (cvlMatch && cvlMatch.status !== "unknown" && cvlMatch.status !== "not_attempted") {
+        const passed = cvlMatch.status === "yes";
         return {
           constraint,
-          matched_count: cvlMatch.status === "yes" ? total : 0,
+          matched_count: passed ? total : 0,
           total_leads: total,
-          passed: cvlMatch.status === "yes",
+          passed,
+          constraint_verdict: deriveConstraintVerdict(passed, cvlMatch.status, undefined, proofBurdenFromRequirement(constraint.evidence_requirement)),
         };
       }
       const prefix = String(constraint.value).toLowerCase();
       const matched = leads.filter((l) =>
         l.name.toLowerCase().startsWith(prefix)
       );
+      const localPassed = matched.length > 0;
       return {
         constraint,
         matched_count: matched.length,
         total_leads: total,
-        passed: matched.length > 0,
+        passed: localPassed,
+        constraint_verdict: localPassed ? "VERIFIED" as ConstraintVerdict : "UNSUPPORTED" as ConstraintVerdict, // PHASE_4: self-evident local check
       };
     }
 
     case "LOCATION": {
       if (cvlMatch) {
         const passed = cvlMatch.status === "yes" || cvlMatch.status === "not_applicable";
+        const cv = cvlMatch.status === "not_applicable" ? "NOT_APPLICABLE" as ConstraintVerdict : deriveConstraintVerdict(passed, cvlMatch.status); // PHASE_4
         return {
           constraint,
           matched_count: passed ? total : 0,
           total_leads: total,
           passed,
+          constraint_verdict: cv,
           ...(cvlMatch.status === "not_applicable" ? { status: "not_applicable" as CvlConstraintStatus } : {}),
         };
       }
@@ -608,6 +709,7 @@ function evaluateConstraint(
         matched_count: total,
         total_leads: total,
         passed: true,
+        constraint_verdict: "PLAUSIBLE" as ConstraintVerdict, // PHASE_4: location unverified without CVL
         _locationUnverified: true,
       } as ConstraintResult & { _locationUnverified?: boolean };
     }
@@ -618,6 +720,7 @@ function evaluateConstraint(
         matched_count: total,
         total_leads: total,
         passed: false,
+        constraint_verdict: "UNSUPPORTED" as ConstraintVerdict, // PHASE_4
       };
     }
 
@@ -627,6 +730,7 @@ function evaluateConstraint(
         matched_count: 0,
         total_leads: total,
         passed: false,
+        constraint_verdict: "UNSUPPORTED" as ConstraintVerdict, // PHASE_4
       };
   }
 }
@@ -866,6 +970,8 @@ export function normalizeConstraintHardness(obj: Record<string, any>): Constrain
     hardness: obj.hardness === "hard" || obj.hardness === "soft"
       ? obj.hardness
       : defaultHardnessForType(obj.type),
+    evidence_requirement: obj.evidence_requirement, // PHASE_4
+    label: obj.label, // PHASE_4
   };
 }
 
@@ -900,6 +1006,8 @@ export function normalizeStructuredConstraint(sc: StructuredConstraint): Constra
     field,
     value: normalizedType === "COUNT_MIN" ? Number(sc.value) : sc.value,
     hardness,
+    evidence_requirement: sc.evidence_requirement, // PHASE_4
+    label: sc.label, // PHASE_4
   };
 }
 

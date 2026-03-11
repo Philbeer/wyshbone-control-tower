@@ -1,7 +1,9 @@
 import { openai } from "../lib/openai";
-import type { AttributeEvidenceArtefact, Constraint, CvlConstraintStatus } from "./towerVerdict";
+import type { AttributeEvidenceArtefact, Constraint, CvlConstraintStatus, ProofBurden, SourceTier } from "./towerVerdict";
+import { proofBurdenFromRequirement } from "./towerVerdict";
 
-export type SemanticStatus = "verified" | "weak_match" | "no_evidence" | "insufficient_evidence";
+// PHASE_4: added "contradicted"
+export type SemanticStatus = "verified" | "weak_match" | "no_evidence" | "insufficient_evidence" | "contradicted";
 export type SemanticStrength = "strong" | "indirect" | "weak" | "none";
 
 export interface SemanticJudgement {
@@ -81,6 +83,8 @@ interface SemanticJudgeInput {
   pageTitle: string | null | undefined;
   constraintRaw: string | null | undefined;
   attributeRaw: string | null | undefined;
+  sourceTier?: SourceTier | null; // PHASE_4
+  proofBurden?: ProofBurden | null; // PHASE_4
 }
 
 function buildUserPrompt(input: SemanticJudgeInput): string {
@@ -178,14 +182,31 @@ function keywordFallbackJudge(input: SemanticJudgeInput): SemanticJudgement {
   }
 
   const matchedSnippets: string[] = [];
+  // PHASE_4: track negation for CONTRADICTED detection
+  const contradictionSnippets: string[] = [];
   let bestTokenOverlap = 0;
   let titleMatch = false;
-
   for (const text of allTextsToSearch) {
     const textLower = text.toLowerCase();
     const isTitle = text === pageTitle;
 
     if (textLower.includes(constraintValue)) {
+      // PHASE_4: check negation within 50-char window around ALL occurrences
+      let allNegated = true;
+      let startSearch = 0;
+      while (startSearch < textLower.length) {
+        const matchIdx = textLower.indexOf(constraintValue, startSearch);
+        if (matchIdx === -1) break;
+        if (!hasNegationNearMatch(textLower, matchIdx, constraintValue.length, 50)) {
+          allNegated = false;
+          break;
+        }
+        startSearch = matchIdx + 1;
+      }
+      if (allNegated) {
+        contradictionSnippets.push(text.substring(0, 200));
+        continue;
+      }
       if (isTitle) titleMatch = true;
       matchedSnippets.push(text.substring(0, 200));
       bestTokenOverlap = constraintTokens.length;
@@ -194,20 +215,43 @@ function keywordFallbackJudge(input: SemanticJudgeInput): SemanticJudgement {
 
     const textTokens = tokenizeForMatch(text);
     let overlap = 0;
+    const matchedPositions: number[] = [];
     for (const ct of constraintTokens) {
-      if (textTokens.some(tt => tt.includes(ct) || ct.includes(tt))) {
+      const tokenIdx = textTokens.findIndex(tt => tt.includes(ct) || ct.includes(tt));
+      if (tokenIdx >= 0) {
         overlap++;
+        const posInText = textLower.indexOf(textTokens[tokenIdx]);
+        if (posInText >= 0) matchedPositions.push(posInText);
       }
     }
 
     if (overlap > 0) {
       const ratio = overlap / constraintTokens.length;
       if (ratio >= 0.5) {
+        // PHASE_4: check negation around each matched token position
+        const anyNegated = matchedPositions.some(pos => hasNegationNearMatch(textLower, pos, constraintTokens[0].length, 50));
+        if (anyNegated && !matchedPositions.some(pos => !hasNegationNearMatch(textLower, pos, constraintTokens[0].length, 50))) {
+          contradictionSnippets.push(text.substring(0, 200));
+          continue;
+        }
         if (isTitle) titleMatch = true;
         matchedSnippets.push(text.substring(0, 200));
         if (overlap > bestTokenOverlap) bestTokenOverlap = overlap;
       }
     }
+  }
+
+  // PHASE_4: if we found matches but ALL were negated, return CONTRADICTED
+  if (matchedSnippets.length === 0 && contradictionSnippets.length > 0) {
+    return {
+      satisfies: "no",
+      status: "contradicted",
+      strength: "indirect",
+      confidence: 0.6,
+      reasoning: `Keyword fallback: constraint "${constraintValue}" found in evidence but negated (e.g. "no longer", "not", "without"). Evidence contradicts the constraint.`,
+      supporting_quotes: [...new Set(contradictionSnippets)].slice(0, 3),
+      judge_mode: "keyword_fallback",
+    };
   }
 
   if (matchedSnippets.length === 0) {
@@ -262,8 +306,9 @@ function keywordFallbackJudge(input: SemanticJudgeInput): SemanticJudgement {
 
 const NEGATION_PATTERNS = /\b(no|not|never|without|doesn'?t|don'?t|isn'?t|wasn'?t|won'?t|can'?t|cannot|stopped|ceased|formerly|previously|used to|no longer)\b/i;
 
-function hasNegationNearMatch(text: string, matchIndex: number, constraintLength: number): boolean {
-  const windowStart = Math.max(0, matchIndex - 30);
+// PHASE_4: parameterised pre-window size (default 30 for verbatim, 50 for keyword fallback)
+function hasNegationNearMatch(text: string, matchIndex: number, constraintLength: number, preWindow: number = 30): boolean {
+  const windowStart = Math.max(0, matchIndex - preWindow);
   const windowEnd = Math.min(text.length, matchIndex + constraintLength + 10);
   const window = text.substring(windowStart, windowEnd);
   return NEGATION_PATTERNS.test(window);
@@ -377,6 +422,25 @@ function mapLlmResponseToJudgement(parsed: any): SemanticJudgement {
   return { satisfies, status, strength, confidence, reasoning, supporting_quotes, judge_mode: "llm" };
 }
 
+// PHASE_4: cap confidence when evidence doesn't meet the required proof burden
+function applyProofBurdenCap(result: SemanticJudgement, proofBurden?: ProofBurden | null, sourceTier?: SourceTier | null): SemanticJudgement {
+  if (!proofBurden || !sourceTier) return result;
+  if (proofBurden === "evidence_required_first_party") {
+    if (sourceTier !== "first_party_website") {
+      if (result.status === "verified") {
+        return {
+          ...result,
+          status: "weak_match",
+          strength: "indirect",
+          confidence: Math.min(result.confidence, 0.6),
+          reasoning: result.reasoning + ` [PHASE_4: capped — proof burden requires first-party website but source is ${sourceTier}]`,
+        };
+      }
+    }
+  }
+  return result;
+}
+
 export async function judgeEvidenceSemantically(
   originalGoal: string,
   constraint: Constraint,
@@ -386,7 +450,9 @@ export async function judgeEvidenceSemantically(
   extractedQuotes?: string[] | null,
   pageTitle?: string | null,
   constraintRaw?: string | null,
-  attributeRaw?: string | null
+  attributeRaw?: string | null,
+  sourceTier?: SourceTier | null, // PHASE_4
+  proofBurden?: ProofBurden | null // PHASE_4
 ): Promise<SemanticJudgement> {
   const input: SemanticJudgeInput = {
     originalGoal,
@@ -398,6 +464,8 @@ export async function judgeEvidenceSemantically(
     pageTitle: pageTitle ?? null,
     constraintRaw: constraintRaw ?? null,
     attributeRaw: attributeRaw ?? null,
+    sourceTier: sourceTier ?? null, // PHASE_4
+    proofBurden: proofBurden ?? null, // PHASE_4
   };
 
   const TRACE = process.env.DEBUG_TOWER_SEMANTIC_TRACE === "true";
@@ -427,18 +495,21 @@ export async function judgeEvidenceSemantically(
 
   const verbatimResult = checkVerbatimMatch(input);
   if (verbatimResult) {
+    // PHASE_4: apply proof burden cap to verbatim results
+    const cappedVerbatim = applyProofBurdenCap(verbatimResult, proofBurden, sourceTier);
     if (TRACE) {
       console.log(
         `[TOWER][SEMANTIC] verbatim_match: lead="${leadName}" constraint="${constraint.value}" ` +
-        `confidence=${verbatimResult.confidence} quotes=${JSON.stringify(verbatimResult.supporting_quotes)}`
+        `confidence=${cappedVerbatim.confidence} quotes=${JSON.stringify(cappedVerbatim.supporting_quotes)}` +
+        (cappedVerbatim !== verbatimResult ? ` [PHASE_4: capped from ${verbatimResult.confidence}]` : "")
       );
     }
-    return verbatimResult;
+    return cappedVerbatim;
   }
 
   if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY === "placeholder-key-not-set") {
     console.warn("[TOWER][SEMANTIC] OPENAI_API_KEY not set — using keyword fallback judge");
-    const kwResult = keywordFallbackJudge(input);
+    const kwResult = applyProofBurdenCap(keywordFallbackJudge(input), proofBurden, sourceTier); // PHASE_4: cap applied
     if (TRACE) {
       console.log(
         `[TOWER][SEMANTIC] keyword_fallback result: lead="${leadName}" satisfies=${kwResult.satisfies} ` +
@@ -474,23 +545,25 @@ export async function judgeEvidenceSemantically(
 
     if (!text) {
       console.warn("[TOWER][SEMANTIC] Empty response from LLM — using keyword fallback judge");
-      return keywordFallbackJudge(input);
+      return applyProofBurdenCap(keywordFallbackJudge(input), proofBurden, sourceTier); // PHASE_4: cap applied
     }
 
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       console.warn(`[TOWER][SEMANTIC] Could not extract JSON from LLM response — using keyword fallback. Raw: ${text.substring(0, 200)}`);
-      return keywordFallbackJudge(input);
+      return applyProofBurdenCap(keywordFallbackJudge(input), proofBurden, sourceTier); // PHASE_4: cap applied
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
-    const result = mapLlmResponseToJudgement(parsed);
+    const rawResult = mapLlmResponseToJudgement(parsed);
+    const result = applyProofBurdenCap(rawResult, proofBurden, sourceTier); // PHASE_4: cap applied
 
     if (TRACE) {
       console.log(
         `[TOWER][SEMANTIC] LLM result: lead="${leadName}" satisfies=${result.satisfies} ` +
         `status=${result.status} strength=${result.strength} confidence=${result.confidence} ` +
-        `quotes=${JSON.stringify(result.supporting_quotes)} reason="${result.reasoning.substring(0, 120)}"`
+        `quotes=${JSON.stringify(result.supporting_quotes)} reason="${result.reasoning.substring(0, 120)}"` +
+        (result !== rawResult ? ` [PHASE_4: capped]` : "")
       );
     }
 
@@ -498,7 +571,7 @@ export async function judgeEvidenceSemantically(
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error(`[TOWER][SEMANTIC] LLM call failed: ${errMsg} — using keyword fallback judge`);
-    const kwResult = keywordFallbackJudge(input);
+    const kwResult = applyProofBurdenCap(keywordFallbackJudge(input), proofBurden, sourceTier); // PHASE_4: cap applied
     if (TRACE) {
       console.log(
         `[TOWER][SEMANTIC] keyword_fallback after LLM failure: lead="${leadName}" satisfies=${kwResult.satisfies} ` +
@@ -542,6 +615,10 @@ export async function enrichAttributeEvidence(
 
     if (!matchingConstraint) continue;
 
+    // PHASE_4: pass source_tier and proof burden to semantic judge
+    const evSourceTier = ev.source_tier ?? null;
+    const evProofBurden = proofBurdenFromRequirement(matchingConstraint.evidence_requirement);
+
     promises.push({
       index: i,
       promise: judgeEvidenceSemantically(
@@ -553,7 +630,9 @@ export async function enrichAttributeEvidence(
         ev.extracted_quotes,
         ev.page_title,
         ev.constraint_raw,
-        ev.attribute_raw
+        ev.attribute_raw,
+        evSourceTier,
+        evProofBurden
       ),
       constraint: matchingConstraint,
     });
