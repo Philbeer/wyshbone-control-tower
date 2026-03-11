@@ -195,6 +195,11 @@ function judgeLeadsListArtefact(
     return undefined;
   }
 
+  const rawRequestedCountUser =
+    successCriteria?.requested_count_user ?? payloadJson?.requested_count_user;
+  const userCountImplicit =
+    rawRequestedCountUser === "implicit" || rawRequestedCountUser === "none";
+
   const requestedCountUser =
     toFiniteNumber(successCriteria?.requested_count_user) ??
     toFiniteNumber(payloadJson?.requested_count_user) ??
@@ -205,10 +210,11 @@ function judgeLeadsListArtefact(
     toFiniteNumber(payloadJson?.requested_count) ??
     undefined;
 
-  const targetCount =
-    toFiniteNumber(successCriteria?.target_count) ??
-    toFiniteNumber(payloadJson?.success_criteria?.target_count) ??
-    undefined;
+  const targetCount = userCountImplicit
+    ? undefined
+    : toFiniteNumber(successCriteria?.target_count) ??
+      toFiniteNumber(payloadJson?.success_criteria?.target_count) ??
+      undefined;
 
   const deliveredObj: DeliveredInfo | number | undefined = (() => {
     if (payloadJson?.delivered && typeof payloadJson.delivered === "object") {
