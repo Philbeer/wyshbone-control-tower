@@ -306,16 +306,22 @@ function coerceToNumber(v: unknown): number | null {
 }
 
 function resolveRequestedCount(input: TowerVerdictInput): number | null {
+  const labels = ["requested_count_user", "success_criteria.requested_count_user", "success_criteria.target_count"];
   const candidates: unknown[] = [
     input.requested_count_user,
     input.success_criteria?.requested_count_user,
     input.success_criteria?.target_count,
   ];
-  for (const c of candidates) {
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i];
     if (c == null) continue;
     const n = coerceToNumber(c);
-    if (n != null) return n;
+    if (n != null) {
+      console.log(`[TOWER][resolveRequestedCount] resolved=${n} from=${labels[i]} all_candidates=${JSON.stringify(candidates)}`);
+      return n;
+    }
   }
+  console.log(`[TOWER][resolveRequestedCount] resolved=null all_candidates=${JSON.stringify(candidates)}`);
   return null;
 }
 
