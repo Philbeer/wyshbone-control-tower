@@ -51,7 +51,25 @@ Per-constraint judgement now considers evidence requirements, proof burden, sour
 - **HAS_ATTRIBUTE:** Tracks per-lead verdicts using source_tier from evidence artefacts. Aggregate constraint_verdict is the best lead verdict (VERIFIED > PLAUSIBLE) or CONTRADICTED if any evidence contradicts and no positive evidence exists.
 - **Negation in keyword fallback:** Detects negation patterns within 50-char window around matches. All-negated matches return `contradicted` status with `satisfies: "no"`.
 - **Semantic-verify endpoint:** Accepts optional `source_tier` and `evidence_requirement` fields to enable proof burden capping on standalone calls.
-- **Run verdict derivation is unchanged** (Phase 5). `constraint_verdict` is informational; `passed: boolean` still drives hard violation / hard unknown logic.
+- **Run verdict derivation uses constraint_verdict** (Phase 5). See PHASE_5 section below.
+
+**PHASE_5 — Constraint-Verdict-Driven Run Verdict:**
+Run verdict in `judgeLeadsListCore` now derives from `constraint_verdict` on each hard constraint result, not just `passed: boolean`. Rules:
+- **All hard VERIFIED → ACCEPT** (unchanged behavior for fully verified constraints).
+- **All hard VERIFIED or PLAUSIBLE (none worse) → ACCEPT_WITH_UNVERIFIED** (new: PLAUSIBLE constraints no longer silently pass as ACCEPT). LOCATION constraints excluded from PLAUSIBLE downgrade for backward compat — LOCATION without CVL is structurally plausible and always treated as passing.
+- **Any hard CONTRADICTED → immediate STOP** with code `HARD_CONSTRAINT_CONTRADICTED`, no replan offered. Fires before all other verdict paths.
+- **Any hard UNSUPPORTED + replans → CHANGE_PLAN** (existing behavior).
+- **Any hard UNSUPPORTED + no replans → STOP** (existing behavior).
+- **Count not met + no hard violations → CHANGE_PLAN/STOP** (unchanged).
+- **Response shape additions** (`TowerVerdict` interface):
+  - `failing_constraint_id?: string` — ID of the worst-performing hard constraint.
+  - `failing_constraint_reason?: string` — human-readable reason for the failure.
+  - `hard_constraint_verdicts?: HardConstraintVerdictEntry[]` — array of `{ id, verdict, label }` for every hard constraint.
+- **New type:** `HardConstraintVerdictEntry` exported from `towerVerdict.ts`.
+- **Exported:** `CONSTRAINT_VERDICT_RANK` for external ranking use.
+- **Helper functions:** `buildHardConstraintVerdicts()`, `findFailingHardConstraint()`, `attachPhase5Fields()` — all in `towerVerdict.ts`.
+- **COUNT_MIN** now carries `constraint_verdict` (VERIFIED if passed, UNSUPPORTED if not).
+- **Supervisor handoff:** Phase 5 fields flow through `res.json({ ...result })` spread in routes — no route changes needed. Supervisor reads `result.verdict`, `result.action`, `result.constraint_results`, `result.stop_reason`, and now also `result.failing_constraint_id`, `result.failing_constraint_reason`, `result.hard_constraint_verdicts`.
 
 **Delivered Count Resolution (v2):**
 `resolveDeliveredCount()` returns `{ count, source }` for debug tracing. Priority chain: (1) `delivered_leads.length`, (2) `leads.length`, (3) `delivered_count`, (4) CVL `verification_summary.verified_exact_count`, (5) top-level `verified_exact`, (6) `accumulated_count`, (7) `delivered.delivered_matching_accumulated`, (8) `delivered.delivered_matching_this_plan`, (9) numeric `delivered`, (10) `matchedLeadCount`, (11) `default(0)`. Fields `verified_exact` and `delivered_leads` added to `TowerVerdictInput` and Zod schema.

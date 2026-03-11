@@ -146,8 +146,8 @@ function buildProofVerdict(
   return { towerVerdict: "ACCEPT", rationale: "Proof accept" };
 }
 
-function towerVerdictToPassFail(v: "ACCEPT" | "CHANGE_PLAN" | "STOP"): { verdict: "pass" | "fail"; action: "continue" | "stop" | "change_plan" } {
-  if (v === "ACCEPT") return { verdict: "pass", action: "continue" };
+function towerVerdictToPassFail(v: "ACCEPT" | "ACCEPT_WITH_UNVERIFIED" | "CHANGE_PLAN" | "STOP"): { verdict: "pass" | "fail"; action: "continue" | "stop" | "change_plan" } {
+  if (v === "ACCEPT" || v === "ACCEPT_WITH_UNVERIFIED") return { verdict: "pass", action: "continue" }; // PHASE_5: ACCEPT_WITH_UNVERIFIED maps to pass/continue
   if (v === "CHANGE_PLAN") return { verdict: "fail", action: "change_plan" };
   return { verdict: "fail", action: "stop" };
 }

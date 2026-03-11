@@ -112,6 +112,13 @@ export interface TowerVerdictDebug {
   source: string;
 }
 
+// PHASE_5: per-hard-constraint verdict summary for Supervisor
+export interface HardConstraintVerdictEntry {
+  id: string;
+  verdict: ConstraintVerdict;
+  label: string;
+}
+
 export interface TowerVerdict {
   verdict: TowerVerdictAction;
   action: "continue" | "stop" | "change_plan";
@@ -123,6 +130,9 @@ export interface TowerVerdict {
   suggested_changes: SuggestedChange[];
   constraint_results?: ConstraintResult[];
   stop_reason?: StopReason;
+  failing_constraint_id?: string; // PHASE_5
+  failing_constraint_reason?: string; // PHASE_5
+  hard_constraint_verdicts?: HardConstraintVerdictEntry[]; // PHASE_5
   _debug?: TowerVerdictDebug;
 }
 
@@ -469,7 +479,8 @@ export function proofBurdenFromRequirement(req?: EvidenceRequirement): ProofBurd
 }
 
 // PHASE_4: derive ConstraintVerdict from evaluation outcome
-const CONSTRAINT_VERDICT_RANK: Record<ConstraintVerdict, number> = {
+// PHASE_5: exported for verdict derivation
+export const CONSTRAINT_VERDICT_RANK: Record<ConstraintVerdict, number> = {
   CONTRADICTED: 0, UNSUPPORTED: 1, NOT_APPLICABLE: 2, PLAUSIBLE: 3, VERIFIED: 4,
 };
 
@@ -1201,6 +1212,15 @@ export function detectRelationshipPredicate(
 }
 
 export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
+  const rawResult = judgeLeadsListInner(input);
+  // PHASE_5: attach hard_constraint_verdicts and failing info to every verdict
+  if (rawResult.constraint_results && rawResult.constraint_results.length > 0) {
+    return attachPhase5Fields(rawResult, rawResult.constraint_results);
+  }
+  return rawResult;
+}
+
+function judgeLeadsListInner(input: TowerVerdictInput): TowerVerdict {
   const coreResult = judgeLeadsListCore(input);
 
   const leads = resolveLeads(input);
@@ -1629,6 +1649,65 @@ function detectHonestPartial(
   };
 }
 
+// PHASE_5: build hard_constraint_verdicts array from constraintResults
+function buildHardConstraintVerdicts(constraintResults: ConstraintResult[]): HardConstraintVerdictEntry[] {
+  return constraintResults
+    .filter((cr) => cr.constraint.hardness === "hard")
+    .map((cr) => ({
+      id: cr.constraint.label ?? `${cr.constraint.type}:${cr.constraint.field}:${cr.constraint.value}`,
+      verdict: cr.constraint_verdict ?? (cr.passed ? "VERIFIED" : "UNSUPPORTED") as ConstraintVerdict,
+      label: cr.constraint.label ?? `${cr.constraint.type}(${cr.constraint.field}=${cr.constraint.value})`,
+    }));
+}
+
+// PHASE_5: find the first (worst) hard constraint that should drive a STOP/CHANGE_PLAN
+function findFailingHardConstraint(
+  constraintResults: ConstraintResult[],
+): { id: string; reason: string; verdict: ConstraintVerdict } | null {
+  const hard = constraintResults.filter((cr) => cr.constraint.hardness === "hard");
+  if (hard.length === 0) return null;
+
+  let worst: ConstraintResult | null = null;
+  let worstRank = Infinity;
+  for (const cr of hard) {
+    const cv = cr.constraint_verdict ?? (cr.passed ? "VERIFIED" : "UNSUPPORTED") as ConstraintVerdict;
+    const rank = CONSTRAINT_VERDICT_RANK[cv];
+    if (rank < worstRank) {
+      worstRank = rank;
+      worst = cr;
+    }
+  }
+
+  if (!worst) return null;
+  const cv = worst.constraint_verdict ?? (worst.passed ? "VERIFIED" : "UNSUPPORTED") as ConstraintVerdict;
+  if (cv === "VERIFIED" || cv === "PLAUSIBLE" || cv === "NOT_APPLICABLE") return null;
+
+  const id = worst.constraint.label ?? `${worst.constraint.type}:${worst.constraint.field}:${worst.constraint.value}`;
+  const reason = cv === "CONTRADICTED"
+    ? `Hard constraint "${id}" is contradicted by evidence.`
+    : `Hard constraint "${id}" is unsupported — no evidence confirms it.`;
+  return { id, reason, verdict: cv };
+}
+
+// PHASE_5: attach hard_constraint_verdicts and failing info to a TowerVerdict
+function attachPhase5Fields(
+  result: TowerVerdict,
+  constraintResults: ConstraintResult[],
+): TowerVerdict {
+  const hcv = buildHardConstraintVerdicts(constraintResults);
+  if (hcv.length === 0) return result;
+
+  const failing = findFailingHardConstraint(constraintResults);
+  return {
+    ...result,
+    hard_constraint_verdicts: hcv,
+    ...(failing ? {
+      failing_constraint_id: failing.id,
+      failing_constraint_reason: failing.reason,
+    } : {}),
+  };
+}
+
 function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
   const requestedCount = resolveRequestedCount(input);
   const leads = resolveLeads(input);
@@ -1780,16 +1859,36 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
   const constraintResults = constraints.map((c) => {
     if (c.type === "COUNT_MIN") {
       const minCount = Number(c.value);
+      const countPassed = deliveredCount >= minCount;
       return {
         constraint: c,
         matched_count: deliveredCount,
         total_leads: leads.length,
-        passed: deliveredCount >= minCount,
+        passed: countPassed,
+        constraint_verdict: (countPassed ? "VERIFIED" : "UNSUPPORTED") as ConstraintVerdict, // PHASE_5
       } as ConstraintResult;
     }
     return evaluateConstraint(c, leads, cvlConstraintResults, attrEvidence);
   });
 
+  // PHASE_5: derive hardViolations, hardUnknowns, and hardContradicted from constraint_verdict
+  const hardResults = constraintResults.filter((cr) => cr.constraint.hardness === "hard");
+  const hardContradicted = hardResults.filter((cr) => {
+    const cv = cr.constraint_verdict ?? (cr.passed ? "VERIFIED" : "UNSUPPORTED");
+    return cv === "CONTRADICTED";
+  });
+  const hardUnsupported = hardResults.filter((cr) => {
+    const cv = cr.constraint_verdict ?? (cr.passed ? "VERIFIED" : "UNSUPPORTED");
+    return cv === "UNSUPPORTED";
+  });
+  // PHASE_5: exclude LOCATION from PLAUSIBLE downgrade — LOCATION without CVL is structurally
+  // plausible and has always been treated as passing (backward compat)
+  const hardPlausible = hardResults.filter((cr) => {
+    const cv = cr.constraint_verdict ?? (cr.passed ? "VERIFIED" : "UNSUPPORTED");
+    return cv === "PLAUSIBLE" && cr.constraint.type !== "LOCATION";
+  });
+
+  // PHASE_5: backward compat — hardViolations = UNSUPPORTED + CONTRADICTED, hardUnknowns = constraints with unknown/not_attempted status
   const hardUnknownsCvl = cvlPresent
     ? constraints
         .filter((c) => c.hardness === "hard")
@@ -1848,9 +1947,60 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
 
   const labelGaps = checkLabelHonesty(input, constraintResults);
 
+  // PHASE_5: CONTRADICTED → immediate STOP, no replan offered
+  if (hardContradicted.length > 0) {
+    const first = hardContradicted[0];
+    const failId = first.constraint.label ?? `${first.constraint.type}:${first.constraint.field}:${first.constraint.value}`;
+    const failReason = `Hard constraint "${failId}" is contradicted by evidence — immediate stop.`;
+    const contradictedFields = hardContradicted.map(
+      (r) => r.constraint.label ?? `${r.constraint.type}(${r.constraint.field}=${r.constraint.value})`
+    );
+    const result: TowerVerdict = {
+      verdict: "STOP",
+      action: "stop",
+      delivered: deliveredCount,
+      requested: requestedCount ?? 0,
+      gaps: [...hardContradicted.map(() => "HARD_CONSTRAINT_CONTRADICTED"), ...labelGaps],
+      confidence: 100,
+      rationale: `Hard constraint contradicted: ${contradictedFields.join(", ")}. Evidence actively disproves the constraint — no replan possible.`,
+      suggested_changes: [],
+      constraint_results: constraintResults,
+      stop_reason: {
+        code: "HARD_CONSTRAINT_CONTRADICTED",
+        message: failReason,
+        evidence: { contradicted_constraints: contradictedFields, delivered: deliveredCount },
+      },
+      failing_constraint_id: failId,
+      failing_constraint_reason: failReason,
+      hard_constraint_verdicts: buildHardConstraintVerdicts(constraintResults),
+    };
+    console.log(`[TOWER] verdict=STOP reason=HARD_CONSTRAINT_CONTRADICTED constraint=${failId}`); // PHASE_5
+    return { ...result, _debug: debugBlock };
+  }
+
   if (!userRequestedCount) {
     if (deliveredCount >= 1 && hardViolations.length === 0 && hardUnknowns.length === 0) {
+      // PHASE_5: if any hard constraints are PLAUSIBLE (not VERIFIED), downgrade to ACCEPT_WITH_UNVERIFIED
+      const hasPlausibleOnly = hardPlausible.length > 0 && hardUnsupported.length === 0 && hardContradicted.length === 0;
       const gaps = [...locationUnverifiedGaps, ...labelGaps];
+      if (hasPlausibleOnly) {
+        const plausibleLabels = hardPlausible.map(
+          (cr) => cr.constraint.label ?? `${cr.constraint.type}(${cr.constraint.field}=${cr.constraint.value})`
+        );
+        const result: TowerVerdict = {
+          verdict: "ACCEPT_WITH_UNVERIFIED",
+          action: "continue",
+          delivered: deliveredCount,
+          requested: 0,
+          gaps: [...gaps, "HARD_CONSTRAINT_PLAUSIBLE"],
+          confidence: 70,
+          rationale: `Match(es) delivered. Hard constraints plausible but not fully verified: ${plausibleLabels.join(", ")}.`,
+          suggested_changes: [],
+          constraint_results: constraintResults,
+        };
+        console.log(`[TOWER] verdict=ACCEPT_WITH_UNVERIFIED reason=hard_plausible_not_verified delivered=${deliveredCount}`); // PHASE_5
+        return { ...result, _debug: debugBlock };
+      }
       const rationale = cvlPresent
         ? "Verified match(es) delivered. All hard constraints satisfied."
         : "Exact match(es) delivered. No specific count was requested.";
@@ -2093,6 +2243,28 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
       const confidence = Math.min(95, Math.round(80 + (ratio - 1) * 15));
 
       const gaps = [...locationUnverifiedGaps, ...labelGaps];
+
+      // PHASE_5: if any hard constraints are PLAUSIBLE (not VERIFIED), downgrade to ACCEPT_WITH_UNVERIFIED
+      const hasPlausibleOnly = hardPlausible.length > 0 && hardUnsupported.length === 0 && hardContradicted.length === 0;
+      if (hasPlausibleOnly) {
+        const plausibleLabels = hardPlausible.map(
+          (cr) => cr.constraint.label ?? `${cr.constraint.type}(${cr.constraint.field}=${cr.constraint.value})`
+        );
+        const result: TowerVerdict = {
+          verdict: "ACCEPT_WITH_UNVERIFIED",
+          action: "continue",
+          delivered: deliveredCount,
+          requested: effectiveRequestedCount,
+          gaps: [...gaps, "HARD_CONSTRAINT_PLAUSIBLE"],
+          confidence: Math.max(65, confidence - 15),
+          rationale: `Count met (${deliveredCount}/${effectiveRequestedCount}). Hard constraints plausible but not fully verified: ${plausibleLabels.join(", ")}.`,
+          suggested_changes: [],
+          constraint_results: constraintResults,
+        };
+        console.log(`[TOWER] verdict=ACCEPT_WITH_UNVERIFIED reason=count_met_hard_plausible delivered=${deliveredCount} requested=${effectiveRequestedCount}`); // PHASE_5
+        return { ...result, _debug: debugBlock };
+      }
+
       const rationale = cvlPresent
         ? "The requested number of verified matches was delivered. All hard constraints satisfied."
         : "The requested number of exact matches was delivered.";
@@ -2501,6 +2673,26 @@ function judgeLeadsListCore(input: TowerVerdictInput): TowerVerdict {
   const numericRequested = isFiniteNumber(effectiveRequestedCount) ? effectiveRequestedCount : 0;
 
   if (numericDelivered >= numericRequested && hardViolations.length === 0 && hardUnknowns.length === 0) {
+    // PHASE_5: check for PLAUSIBLE in fallback path
+    const hasPlausibleOnly = hardPlausible.length > 0 && hardUnsupported.length === 0 && hardContradicted.length === 0;
+    if (hasPlausibleOnly) {
+      const plausibleLabels = hardPlausible.map(
+        (cr) => cr.constraint.label ?? `${cr.constraint.type}(${cr.constraint.field}=${cr.constraint.value})`
+      );
+      const result: TowerVerdict = {
+        verdict: "ACCEPT_WITH_UNVERIFIED",
+        action: "continue",
+        delivered: numericDelivered,
+        requested: numericRequested,
+        gaps: [...labelGaps, "HARD_CONSTRAINT_PLAUSIBLE"],
+        confidence: 65,
+        rationale: `Delivered ${numericDelivered} of ${numericRequested} requested. Hard constraints plausible but not fully verified: ${plausibleLabels.join(", ")}.`,
+        suggested_changes: [],
+        constraint_results: constraintResults,
+      };
+      console.log(`[TOWER] verdict=ACCEPT_WITH_UNVERIFIED reason=fallback_hard_plausible delivered=${numericDelivered} requested=${numericRequested}`); // PHASE_5
+      return { ...result, _debug: debugBlock };
+    }
     const result: TowerVerdict = {
       verdict: "ACCEPT",
       action: "continue",
