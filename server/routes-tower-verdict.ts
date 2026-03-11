@@ -7,7 +7,8 @@ import type { PlasticsRubricInput, PlasticsStepSnapshot } from "../src/evaluator
 import { evaluateLearningUpdate } from "../src/evaluator/learningUpdateEmitter";
 import type { LearningUpdateInput } from "../src/evaluator/learningUpdateEmitter";
 import { enrichAttributeEvidence } from "../src/evaluator/semanticEvidenceJudge";
-import { fireBehaviourJudge } from "../src/evaluator/behaviourJudge";
+import { fireBehaviourJudge, inferQueryClass, mapSourceTier, buildLeadsEvidence } from "../src/evaluator/behaviourJudge";
+import type { ConstraintVerdictDetail } from "../src/evaluator/behaviourJudge";
 import { db } from "../src/lib/db";
 import { sql, eq } from "drizzle-orm";
 import { towerVerdicts } from "../shared/schema";
@@ -26,6 +27,8 @@ const constraintSchema = z.object({
   field: z.string(),
   value: z.union([z.string(), z.number()]),
   hardness: z.enum(["hard", "soft"]).optional(),
+  evidence_requirement: z.enum(["none", "lead_field", "directory_data", "search_snippet", "website_text", "external_source"]).optional(),
+  label: z.string().optional(),
 });
 
 const leadSchema = z
@@ -637,6 +640,54 @@ router.post("/tower-verdict", async (req, res) => {
     if (!pr.duplicate) {
       const goal =
         data.original_goal ?? data.original_user_goal ?? data.normalized_goal ?? "";
+
+      const bjConstraints = (data.constraints ?? []).map((c: any) => ({
+        type: c.type as string,
+        field: c.field as string,
+        value: c.value as string | number,
+        hardness: (c.hardness ?? "hard") as "hard" | "soft",
+        evidence_requirement: c.evidence_requirement as string | undefined,
+      }));
+
+      const bjConstraintVerdicts: ConstraintVerdictDetail[] = (result.constraint_results ?? []).map((cr) => {
+        const detail: ConstraintVerdictDetail = {
+          type: cr.constraint.type,
+          field: cr.constraint.field,
+          value: cr.constraint.value,
+          hardness: cr.constraint.hardness,
+          verdict: cr.constraint_verdict ?? (cr.passed ? "VERIFIED" : "UNSUPPORTED"),
+          matched_count: cr.matched_count,
+          total_leads: cr.total_leads,
+        };
+        if (cr.quote) detail.quote = cr.quote;
+        if (cr.source_url) {
+          detail.source_url = cr.source_url;
+        }
+        if (cr.attribute_evidence_details && cr.attribute_evidence_details.length > 0) {
+          const first = cr.attribute_evidence_details[0];
+          if (!detail.quote && first.quote) detail.quote = first.quote;
+          if (!detail.source_url && first.source_url) detail.source_url = first.source_url;
+        }
+        const matchingAttrEv = attributeEvidenceItems.find((ae) =>
+          ae.attribute_key === cr.constraint.field || ae.attribute === cr.constraint.field
+        );
+        if (matchingAttrEv?.source_tier) {
+          detail.source_tier = mapSourceTier(matchingAttrEv.source_tier);
+        }
+        if (matchingAttrEv?.semantic_reasoning) {
+          detail.reason = matchingAttrEv.semantic_reasoning;
+        }
+        return detail;
+      });
+
+      const bjLeadsEvidence = buildLeadsEvidence(
+        (data.leads ?? []) as Array<{ name: string; [key: string]: unknown }>,
+        (data.delivered_leads as Array<{ name: string; [key: string]: unknown }> | undefined),
+        attributeEvidenceItems,
+      );
+
+      const bjQueryClass = inferQueryClass(goal, bjConstraints);
+
       fireBehaviourJudge({
         run_id: runId,
         original_goal: goal,
@@ -644,19 +695,10 @@ router.post("/tower-verdict", async (req, res) => {
         verification_policy: data.verification_policy ?? null,
         delivered_count: result.delivered,
         requested_count: data.requested_count_user ?? data.requested_count ?? null,
-        constraints: (data.constraints ?? []).map((c: any) => ({
-          type: c.type,
-          field: c.field,
-          value: c.value,
-          hardness: c.hardness ?? "hard",
-        })),
-        constraint_verdicts: (result.constraint_results ?? []).map((cr) => ({
-          type: cr.constraint.type,
-          field: cr.constraint.field,
-          value: cr.constraint.value,
-          verdict: cr.constraint_verdict ?? (cr.passed ? "VERIFIED" : "UNSUPPORTED"),
-          reason: undefined,
-        })),
+        query_class: bjQueryClass,
+        constraints: bjConstraints,
+        constraint_verdicts: bjConstraintVerdicts,
+        leads_evidence: bjLeadsEvidence,
         tower_verdict: result.verdict,
         tower_gaps: result.gaps,
         tower_stop_reason_code: result.stop_reason?.code ?? null,
