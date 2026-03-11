@@ -276,9 +276,21 @@ function isWordBoundaryMatch(text: string, matchIndex: number, constraintLength:
   return !isWordChar(before) && !isWordChar(after);
 }
 
+function normalizeConstraintForVerbatim(raw: string): string {
+  return raw
+    .toLowerCase()
+    .trim()
+    .replace(/^c_attr_/, "")
+    .replace(/[_\-]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function checkVerbatimMatch(input: SemanticJudgeInput): SemanticJudgement | null {
-  const constraintValue = String(input.constraint.value ?? "").toLowerCase().trim();
-  if (!constraintValue || constraintValue.length < 3) return null;
+  const rawValue = String(input.constraint.value ?? "");
+  const phrase = normalizeConstraintForVerbatim(rawValue);
+  if (!phrase || phrase.length < 3) return null;
+  if (!phrase.includes(" ")) return null;
 
   const evidenceTexts = collectEvidenceTexts(input);
   if (evidenceTexts.length === 0) return null;
@@ -289,15 +301,15 @@ function checkVerbatimMatch(input: SemanticJudgeInput): SemanticJudgement | null
     const lowerText = text.toLowerCase();
     let searchFrom = 0;
     while (true) {
-      const idx = lowerText.indexOf(constraintValue, searchFrom);
+      const idx = lowerText.indexOf(phrase, searchFrom);
       if (idx === -1) break;
       searchFrom = idx + 1;
 
-      if (!isWordBoundaryMatch(lowerText, idx, constraintValue.length)) continue;
-      if (hasNegationNearMatch(lowerText, idx, constraintValue.length)) continue;
+      if (!isWordBoundaryMatch(lowerText, idx, phrase.length)) continue;
+      if (hasNegationNearMatch(lowerText, idx, phrase.length)) continue;
 
       const start = Math.max(0, idx - 40);
-      const end = Math.min(text.length, idx + constraintValue.length + 40);
+      const end = Math.min(text.length, idx + phrase.length + 40);
       const snippet = (start > 0 ? "..." : "") + text.substring(start, end) + (end < text.length ? "..." : "");
       matchedSnippets.push(snippet);
       break;
@@ -313,7 +325,7 @@ function checkVerbatimMatch(input: SemanticJudgeInput): SemanticJudgement | null
     status: "verified",
     strength: "strong",
     confidence: 0.95,
-    reasoning: `Verbatim match: the evidence text contains "${constraintValue}" as a literal phrase.`,
+    reasoning: `Verbatim match: the evidence text contains "${phrase}" as a contiguous phrase.`,
     supporting_quotes: uniqueSnippets,
     judge_mode: "keyword_fallback",
   };
