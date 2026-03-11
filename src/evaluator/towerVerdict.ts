@@ -347,13 +347,17 @@ function resolveDeliveredCount(input: TowerVerdictInput, matchedLeadCount: numbe
     return { count: input.delivered_leads.length, source: "delivered_leads.length" };
   }
 
+  // TOWER_COUNT_FIX: when delivered_count is explicitly provided, prefer it over leads.length.
+  // leads may contain the search pool (e.g. 20 SEARCH_PLACES results) while delivered_count
+  // reflects the filtered delivery (e.g. 1 after FILTER_FIELDS). delivered_count is the
+  // authoritative signal from Supervisor about actual delivery.
+  if (input.delivered_count != null) {
+    return { count: input.delivered_count, source: "delivered_count" };
+  }
+
   const leads = resolveLeads(input);
   if (leads.length > 0) {
     return { count: leads.length, source: "leads.length" };
-  }
-
-  if (input.delivered_count != null) {
-    return { count: input.delivered_count, source: "delivered_count" };
   }
 
   if (hasCvl(input)) {
@@ -1211,6 +1215,29 @@ export function detectRelationshipPredicate(
   return { detected: false, predicate: null };
 }
 
+// TOWER_SELF_EVIDENT_FIX: determine if all hard constraints are self-evident
+// (i.e. verifiable without external evidence). Self-evident types:
+//   NAME_CONTAINS / NAME_STARTS_WITH — verified by inspecting lead name directly
+//   LOCATION — verified by Supervisor or structurally plausible without CVL
+//   COUNT_MIN — verified by counting delivered leads
+// When all hard constraints are self-evident, the evidence quality judge should
+// not override ACCEPT → STOP for missing verification data.
+function allHardConstraintsSelfEvident(constraintResults: ConstraintResult[]): boolean {
+  const hardResults = constraintResults.filter((cr) => cr.constraint.hardness === "hard");
+  if (hardResults.length === 0) return true;
+  const selfEvidentTypes: Set<string> = new Set(["NAME_CONTAINS", "NAME_STARTS_WITH", "LOCATION", "COUNT_MIN"]);
+  for (const cr of hardResults) {
+    if (!selfEvidentTypes.has(cr.constraint.type)) return false;
+    if (cr.constraint.type === "COUNT_MIN" || cr.constraint.type === "LOCATION") continue;
+    if (cr.constraint.evidence_requirement != null &&
+        cr.constraint.evidence_requirement !== "none" &&
+        cr.constraint.evidence_requirement !== "lead_field") {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
   const rawResult = judgeLeadsListInner(input);
   // PHASE_5: attach hard_constraint_verdicts and failing info to every verdict
@@ -1239,7 +1266,15 @@ function judgeLeadsListInner(input: TowerVerdictInput): TowerVerdict {
     tower_verdict: coreResult.verdict,
   });
 
-  if (!eqResult.pass && coreResult.verdict === "ACCEPT") {
+  // TOWER_SELF_EVIDENT_FIX: skip evidence quality override when all hard constraints
+  // are self-evident (NAME_CONTAINS, NAME_STARTS_WITH, LOCATION, COUNT_MIN with no
+  // external evidence requirement). These queries don't need verified/evidence fields
+  // on leads — the constraint evaluation itself is sufficient proof.
+  const selfEvident = coreResult.constraint_results
+    ? allHardConstraintsSelfEvident(coreResult.constraint_results)
+    : false;
+
+  if (!eqResult.pass && coreResult.verdict === "ACCEPT" && !selfEvident) {
     console.log(`[TOWER] evidence_quality_override verdict=ACCEPT→STOP gaps=${eqResult.gaps.join(",")}`);
     return {
       ...coreResult,
@@ -1249,6 +1284,9 @@ function judgeLeadsListInner(input: TowerVerdictInput): TowerVerdict {
       stop_reason: eqResult.stop_reason,
       rationale: `${coreResult.rationale} [Evidence quality: ${eqResult.detail}]`,
     };
+  }
+  if (!eqResult.pass && coreResult.verdict === "ACCEPT" && selfEvident) {
+    console.log(`[TOWER] evidence_quality_override SKIPPED (self-evident constraints) gaps=${eqResult.gaps.join(",")}`); // TOWER_SELF_EVIDENT_FIX
   }
 
   if (!eqResult.pass && coreResult.verdict === "CHANGE_PLAN") {

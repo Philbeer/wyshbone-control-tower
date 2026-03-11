@@ -353,3 +353,37 @@ Replace the current `hardViolations` / `hardUnknowns` counting approach with a r
 - 0 new files needed
 - 0 changes to the HTTP API contract (the response shape stays the same, just richer `constraint_results`)
 - Backward-compatible: `passed: boolean` can remain alongside `constraint_verdict` during transition
+
+---
+
+## Phase 6: Bug Fixes — COUNT_MIN Search Pool & Self-Evident Evidence Quality
+
+Two bugs identified and fixed:
+
+### Bug Fix 1: COUNT_MIN Search Pool (TOWER_COUNT_FIX)
+
+**Problem:** `resolveDeliveredCount()` priority chain ranked `leads.length` above `delivered_count`. When Supervisor passed the full SEARCH_PLACES pool (e.g. 20 results) as `leads` but set `delivered_count` to the filtered amount (e.g. 1 after FILTER_FIELDS), COUNT_MIN was incorrectly evaluated against 20 instead of 1.
+
+**Fix:** Moved `delivered_count` above `leads.length` in the priority chain. When Supervisor explicitly provides `delivered_count`, it is the authoritative delivery signal and should not be overridden by the size of the leads array (which may be the search pool). `delivered_leads.length` remains the highest priority since it's explicitly the delivered set.
+
+**Priority chain (after fix):**
+1. `delivered_leads.length` (explicit delivered set)
+2. `delivered_count` (explicit delivery signal — **moved up**)
+3. `leads.length` (may be search pool)
+4. `verification_summary.verified_exact_count`
+5. `verified_exact`
+6. `accumulated_count`
+7. `delivered.delivered_matching_accumulated`
+8. `delivered.delivered_matching_this_plan`
+9. `delivered` (number)
+10. `matchedLeadCount`
+11. 0 (default)
+
+### Bug Fix 2: Self-Evident Evidence Quality Override (TOWER_SELF_EVIDENT_FIX)
+
+**Problem:** The evidence quality judge (`judgeEvidenceQuality`) applied `NO_EVIDENCE_PRESENT` and `VERIFIED_EXACT_BELOW_REQUESTED` checks to all queries, including ones where the only hard constraints were self-evident types (NAME_CONTAINS, NAME_STARTS_WITH). For "Find pubs in Arundel with Swan in the name", Tower correctly verified the name constraint via local string matching (`constraint_verdict: VERIFIED`), then the evidence quality gate overrode ACCEPT → STOP because leads didn't carry `verified: true` or `evidence` fields.
+
+**Fix:** Added `allHardConstraintsSelfEvident()` check before the evidence quality override. Self-evident constraint types: NAME_CONTAINS, NAME_STARTS_WITH, LOCATION, COUNT_MIN. When all hard constraints are self-evident, the evidence quality judge's ACCEPT → STOP override is bypassed. Non-self-evident constraints (HAS_ATTRIBUTE with `evidence_requirement: "web"`) still trigger the evidence quality gate normally.
+
+**Files changed:** `src/evaluator/towerVerdict.ts`
+**Test result:** 144 passed / 7 failed (no regressions — same 7 pre-existing failures)

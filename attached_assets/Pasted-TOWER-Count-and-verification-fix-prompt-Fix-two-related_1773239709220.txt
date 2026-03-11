@@ -1,0 +1,24 @@
+TOWER — Count and verification fix prompt:
+
+Fix two related bugs in how Tower evaluates run success for simple discovery and name-match queries. Both are causing Tower to fail correct runs.
+Bug 1 — Wrong count baseline for filtered runs
+When the Supervisor uses SEARCH_PLACES → FILTER_FIELDS, the search pool (e.g. 20 results) is larger than the filtered delivery (e.g. 1 result). Tower is currently evaluating COUNT_MIN against the search pool size, not the filtered delivery count.
+For "Find pubs in Arundel with Swan in the name": search found 20, filter reduced to 1, 1 was delivered. Tower said "0 verified exact matches out of 20 requested." This is wrong on two counts — the requested count was not 20, and the delivery count was 1.
+Fix: Tower must evaluate COUNT_MIN against delivered_count, not the search pool size. The filtered delivery is the relevant population.
+Bug 2 — Verification demanded for queries that don't need it
+For simple discovery queries ("Find 10 cafes in York") and name-match queries ("Find pubs with Swan in the name"), Tower is requiring verified exact matches before it will ACCEPT. These query types do not require external evidence verification:
+
+NAME_CONTAINS / NAME_STARTS_WITH constraints are self_evident — verified by inspecting the lead name directly via FILTER_FIELDS. A lead that passed FILTER_FIELDS for "Swan" is verified by definition.
+Simple COUNT_MIN with LOCATION constraints are evidence_requirement: none — no external verification needed, delivery count is sufficient.
+
+Fix: When all hard constraints are self_evident or evidence_requirement: none, and the delivered count meets COUNT_MIN, Tower should return ACCEPT not require verified exact matches from external evidence.
+Specifically: if a NAME_CONTAINS constraint was satisfied via FILTER_FIELDS (direct field matching), set constraint_verdict: VERIFIED on that constraint — do not leave it as PLAUSIBLE or UNSUPPORTED just because no website evidence exists.
+Definition of done:
+
+"Find pubs in Arundel with Swan in the name" — 1 lead delivered with Swan in name → Tower ACCEPT
+"Find 10 cafes in York" — 10 cafes delivered → Tower ACCEPT
+NAME_CONTAINS satisfied via FILTER_FIELDS → constraint_verdict: VERIFIED
+COUNT_MIN evaluated against delivered_count not search pool size
+Website evidence queries unchanged — still require first-party evidence
+Existing tests pass
+Mark changes as TOWER_COUNT_FIX and TOWER_SELF_EVIDENT_FIX in comments
