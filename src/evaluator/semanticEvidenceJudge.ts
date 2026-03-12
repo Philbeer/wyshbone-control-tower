@@ -146,6 +146,15 @@ function tokenizeForMatch(text: string): string[] {
     .filter(t => t.length > 2);
 }
 
+// Generic words that carry no domain signal on their own. For multi-word constraints
+// (e.g. "vegan options", "dog training"), these words must NOT be the sole basis for
+// a token-overlap match — the meaningful/specific word must also match.
+const GENERIC_NOISE_TOKENS = new Set([
+  "options", "facilities", "services", "events", "training", "features",
+  "activities", "programs", "items", "products", "menu", "support",
+  "solutions", "tools", "offers", "packages", "area", "space", "zone",
+]);
+
 function keywordFallbackJudge(input: SemanticJudgeInput): SemanticJudgement {
   const constraintValue = String(input.constraint.value ?? "").toLowerCase().trim();
   if (!constraintValue) {
@@ -226,6 +235,16 @@ function keywordFallbackJudge(input: SemanticJudgeInput): SemanticJudgement {
     }
 
     if (overlap > 0) {
+      // For multi-word constraints, require at least one matching token to be a
+      // domain-specific signal word. This prevents generic words like "options"
+      // from matching "vegan options" on a page that only mentions "dining options".
+      if (constraintTokens.length > 1) {
+        const hasSignalMatch = constraintTokens.some(ct => {
+          const matched = textTokens.some(tt => tt.includes(ct) || ct.includes(tt));
+          return matched && !GENERIC_NOISE_TOKENS.has(ct);
+        });
+        if (!hasSignalMatch) continue;
+      }
       const ratio = overlap / constraintTokens.length;
       if (ratio >= 0.5) {
         // PHASE_4: check negation around each matched token position

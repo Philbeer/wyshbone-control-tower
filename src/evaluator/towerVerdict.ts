@@ -508,13 +508,16 @@ function deriveConstraintVerdict(
   if (semanticStatus === "contradicted") return "CONTRADICTED";
   if (!passed && status === "no") return "UNSUPPORTED";
   if (!passed) return "UNSUPPORTED";
+  // weak_match must be checked BEFORE the status === "yes" path. The keyword fallback
+  // returns satisfies="yes" + status="weak_match", so semantic_verdict ends up as "yes".
+  // If we checked status === "yes" first, weak matches would slip through as VERIFIED.
+  if (semanticStatus === "weak_match") return "PLAUSIBLE";
   if (semanticStatus === "verified" || status === "yes") {
     if (proofBurden === "evidence_required_first_party" && sourceTier && sourceTier !== "first_party_website") {
       return "PLAUSIBLE";
     }
     return "VERIFIED";
   }
-  if (semanticStatus === "weak_match") return "PLAUSIBLE";
   if (proofBurden === "self_evident") return "VERIFIED";
   return "PLAUSIBLE";
 }
