@@ -201,6 +201,7 @@ CAPABILITY_FAIL vs WRONG_DECISION:
 - third_party evidence (directories, review sites) is good but may be outdated or incomplete.
 - snippet evidence (search result snippets only) is weak — the agent should have fetched the page for stronger verification. If critical constraints rely only on snippet evidence, consider CAPABILITY_FAIL.
 - For website_evidence queries: if the agent only checked snippets but didn't actually visit the website, that is a CAPABILITY_FAIL.
+- For website_evidence queries: a low delivery count is NOT evidence of CAPABILITY_FAIL. If the agent visited the websites and Tower found no evidence on most pages, delivering only the verified results is CORRECT behaviour. In this case use HONEST_PARTIAL (real world scarcity) or BATCH_EXHAUSTED (search scope too narrow), not CAPABILITY_FAIL. CAPABILITY_FAIL for website_evidence queries should only be used if the agent did not visit the actual pages at all — only used search snippets.
 - For relationship queries: look for concrete evidence of the relationship, not just co-mentions.
 
 ## Response format
