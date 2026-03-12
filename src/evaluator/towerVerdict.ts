@@ -583,7 +583,21 @@ function evaluateConstraint(
           }
           if (result) {
             const ev = result.match;
-            const effectiveVerdict = ev.semantic_verdict ?? ev.verdict;
+            // If semantic_verdict is absent, check whether enrichment was skipped
+            // because there was no evidence to evaluate. In that case the upstream
+            // ev.verdict (often "yes" from the Supervisor) must NOT be used as a
+            // fallback — the Semantic Judge never had a chance to challenge it.
+            // Only fall back to ev.verdict when evidence WAS present but enrichment
+            // was skipped for another reason (e.g. constraint key mismatch).
+            const semanticSkippedNoEvidence =
+              ev.semantic_verdict === undefined &&
+              (!ev.extracted_quotes || !ev.extracted_quotes.some((q) => typeof q === "string" && q.trim().length > 0)) &&
+              (!ev.quote || ev.quote.trim().length === 0);
+            const effectiveVerdict = ev.semantic_verdict !== undefined
+              ? ev.semantic_verdict
+              : semanticSkippedNoEvidence
+                ? "unknown"  // no evidence present — treat as unverified, not VERIFIED
+                : ev.verdict; // evidence existed; fall back to upstream verdict
             if (ATTR_TRACE && ev.semantic_verdict) {
               console.log(`[TOWER][ATTR_TRACE] semantic override: lead="${lead.name}" upstream=${ev.verdict} semantic=${ev.semantic_verdict} status=${ev.semantic_status ?? "N/A"} strength=${ev.semantic_strength ?? "N/A"} confidence=${ev.semantic_confidence ?? "N/A"} quotes=${JSON.stringify(ev.semantic_supporting_quotes ?? [])} reasoning="${(ev.semantic_reasoning ?? "").substring(0, 100)}"`);
             }
