@@ -299,6 +299,8 @@ function judgeLeadsListArtefact(
     attribute_evidence: attributeEvidence,
     requires_relationship_evidence: payloadJson?.requires_relationship_evidence,
     verified_relationship_count: payloadJson?.verified_relationship_count,
+    verification_policy: payloadJson?.verification_policy ?? undefined,
+    strategy: payloadJson?.strategy ?? undefined,
   });
 
   if (DEBUG) {
