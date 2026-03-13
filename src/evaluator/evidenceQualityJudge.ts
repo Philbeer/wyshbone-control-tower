@@ -111,17 +111,18 @@ export function judgeEvidenceQuality(input: EvidenceQualityInput): EvidenceQuali
     }
   }
 
+  const isDirectoryVerified = input.verification_policy === "DIRECTORY_VERIFIED";
+
   if (verifiedWithoutEvidence > 0) {
     gaps.push("VERIFIED_WITHOUT_EVIDENCE");
   }
 
-  if (leads.length > 0 && !anyLeadHasEvidenceField && verified_exact_count == null) {
+  if (!isDirectoryVerified && leads.length > 0 && !anyLeadHasEvidenceField && verified_exact_count == null) {
     gaps.push("NO_EVIDENCE_PRESENT");
   }
 
   const effectiveVerified = verified_exact_count ?? verifiedWithEvidence;
 
-  const isDirectoryVerified = input.verification_policy === "DIRECTORY_VERIFIED";
   if (!isDirectoryVerified && requested_count != null && effectiveVerified < requested_count && requested_count > 0) {
     gaps.push("VERIFIED_EXACT_BELOW_REQUESTED");
   }
@@ -131,6 +132,7 @@ export function judgeEvidenceQuality(input: EvidenceQualityInput): EvidenceQuali
   }
 
   if (
+    !isDirectoryVerified &&
     delivery_summary === "PASS" &&
     leads.length > 0 &&
     !anyLeadHasEvidenceField &&
