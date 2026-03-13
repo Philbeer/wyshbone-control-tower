@@ -1290,6 +1290,7 @@ function judgeLeadsListInner(input: TowerVerdictInput): TowerVerdict {
     requested_count: resolveRequestedCount(input) != null ? coreResult.requested : null,
     delivery_summary: input.delivery_summary,
     tower_verdict: coreResult.verdict,
+    verification_policy: input.verification_policy,
   });
 
   // TOWER_SELF_EVIDENT_FIX: skip evidence quality override when all hard constraints

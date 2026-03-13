@@ -48,6 +48,7 @@ export interface EvidenceQualityInput {
   requested_count: number | null;
   delivery_summary?: "PASS" | "PARTIAL" | "STOP" | string;
   tower_verdict?: "ACCEPT" | "CHANGE_PLAN" | "STOP";
+  verification_policy?: string;
 }
 
 export interface EvidenceQualityVerdict {
@@ -120,7 +121,8 @@ export function judgeEvidenceQuality(input: EvidenceQualityInput): EvidenceQuali
 
   const effectiveVerified = verified_exact_count ?? verifiedWithEvidence;
 
-  if (requested_count != null && effectiveVerified < requested_count && requested_count > 0) {
+  const isDirectoryVerified = input.verification_policy === "DIRECTORY_VERIFIED";
+  if (!isDirectoryVerified && requested_count != null && effectiveVerified < requested_count && requested_count > 0) {
     gaps.push("VERIFIED_EXACT_BELOW_REQUESTED");
   }
 
