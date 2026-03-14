@@ -119,6 +119,12 @@ export interface HardConstraintVerdictEntry {
   label: string;
 }
 
+export interface RejectedLead {
+  name: string;
+  matched_exclusion: string;
+  confidence: "high" | "low";
+}
+
 export interface TowerVerdict {
   verdict: TowerVerdictAction;
   action: "continue" | "stop" | "change_plan";
@@ -133,6 +139,7 @@ export interface TowerVerdict {
   failing_constraint_id?: string; // PHASE_5
   failing_constraint_reason?: string; // PHASE_5
   hard_constraint_verdicts?: HardConstraintVerdictEntry[]; // PHASE_5
+  rejected_leads?: RejectedLead[];
   _debug?: TowerVerdictDebug;
 }
 
@@ -199,7 +206,14 @@ export interface CvlConstraintsExtracted {
   constraints?: Constraint[];
 }
 
+export interface IntentNarrative {
+  entity_exclusions?: string[];
+  key_discriminator?: string;
+  [key: string]: unknown;
+}
+
 export interface TowerVerdictInput {
+  intent_narrative?: IntentNarrative;
   original_goal?: string;
   requested_count_user?: number;
   constraints?: Constraint[];
@@ -1271,6 +1285,138 @@ export function judgeLeadsList(input: TowerVerdictInput): TowerVerdict {
     return attachPhase5Fields(rawResult, rawResult.constraint_results);
   }
   return rawResult;
+}
+
+// Batch size for entity exclusion LLM calls
+const EXCLUSION_BATCH_SIZE = 10;
+
+interface ExclusionCheckItem {
+  name: string;
+  excluded: boolean;
+  matched_exclusion: string | null;
+  confidence: "high" | "low";
+}
+
+async function checkEntityExclusions(
+  leads: Lead[],
+  entityExclusions: string[],
+  keyDiscriminator?: string
+): Promise<RejectedLead[]> {
+  if (leads.length === 0 || entityExclusions.length === 0) return [];
+
+  const { openai } = await import("../lib/openai");
+  const rejected: RejectedLead[] = [];
+
+  for (let i = 0; i < leads.length; i += EXCLUSION_BATCH_SIZE) {
+    const batch = leads.slice(i, i + EXCLUSION_BATCH_SIZE);
+    const names = batch.map((l) => l.name);
+
+    const prompt = [
+      `Given these exclusion criteria:`,
+      entityExclusions.map((e, idx) => `${idx + 1}. ${e}`).join("\n"),
+      "",
+      keyDiscriminator
+        ? `Key discriminator: ${keyDiscriminator}\n`
+        : "",
+      `For each business name below, does it clearly match an exclusion? Answer only if clearly obvious from the name alone — do not guess.`,
+      "",
+      `Respond with a JSON object: { "results": [ { "name": string, "excluded": boolean, "matched_exclusion": string | null, "confidence": "high" | "low" } ] }`,
+      "",
+      `Only mark excluded=true if confidence=high.`,
+      "",
+      `Businesses:`,
+      names.map((n, idx) => `${idx + 1}. ${n}`).join("\n"),
+    ].join("\n");
+
+    try {
+      const response = await openai.chat.completions.create({
+        model: process.env.EXCLUSION_MODEL_ID ?? "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0,
+        response_format: { type: "json_object" },
+      });
+
+      const text = response.choices[0]?.message?.content ?? "[]";
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        console.warn(`[TOWER] entity exclusion: failed to parse LLM response for batch starting at ${i}`);
+        continue;
+      }
+
+      // LLM may return { results: [...] } or just [...] — normalise
+      const items: ExclusionCheckItem[] = Array.isArray(parsed)
+        ? (parsed as ExclusionCheckItem[])
+        : Array.isArray((parsed as any).results)
+          ? ((parsed as any).results as ExclusionCheckItem[])
+          : Array.isArray((parsed as any).businesses)
+            ? ((parsed as any).businesses as ExclusionCheckItem[])
+            : [];
+
+      for (const item of items) {
+        if (item.excluded === true && item.confidence === "high" && item.matched_exclusion) {
+          console.log(`[TOWER] excluded lead: ${item.name} matched exclusion: ${item.matched_exclusion}`);
+          rejected.push({
+            name: item.name,
+            matched_exclusion: item.matched_exclusion,
+            confidence: "high",
+          });
+        }
+      }
+    } catch (err) {
+      console.warn(`[TOWER] entity exclusion: LLM call failed for batch starting at ${i}:`, err);
+    }
+  }
+
+  return rejected;
+}
+
+export async function judgeLeadsListAsync(input: TowerVerdictInput): Promise<TowerVerdict> {
+  const intentNarrative = input.intent_narrative;
+  const entityExclusions = intentNarrative?.entity_exclusions;
+
+  if (
+    !intentNarrative ||
+    !Array.isArray(entityExclusions) ||
+    entityExclusions.length === 0
+  ) {
+    return judgeLeadsList(input);
+  }
+
+  const allLeads: Lead[] = [
+    ...(Array.isArray(input.leads) ? input.leads : []),
+    ...(Array.isArray(input.delivered_leads) ? input.delivered_leads : []),
+  ];
+
+  const uniqueLeads = Array.from(
+    new Map(allLeads.map((l) => [l.name, l])).values()
+  );
+
+  const rejected = await checkEntityExclusions(
+    uniqueLeads,
+    entityExclusions,
+    intentNarrative.key_discriminator
+  );
+
+  const rejectedNames = new Set(rejected.map((r) => r.name));
+
+  const filteredInput: TowerVerdictInput = {
+    ...input,
+    leads: Array.isArray(input.leads)
+      ? input.leads.filter((l) => !rejectedNames.has(l.name))
+      : input.leads,
+    delivered_leads: Array.isArray(input.delivered_leads)
+      ? input.delivered_leads.filter((l) => !rejectedNames.has(l.name))
+      : input.delivered_leads,
+  };
+
+  const verdict = judgeLeadsList(filteredInput);
+
+  return {
+    ...verdict,
+    rejected_leads: rejected.length > 0 ? rejected : undefined,
+  };
 }
 
 function judgeLeadsListInner(input: TowerVerdictInput): TowerVerdict {

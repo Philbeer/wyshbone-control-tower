@@ -1,7 +1,7 @@
 import express from "express";
 import { z } from "zod";
-import { judgeLeadsList } from "../src/evaluator/towerVerdict";
-import type { Constraint, StopReason, AttributeEvidenceArtefact } from "../src/evaluator/towerVerdict";
+import { judgeLeadsList, judgeLeadsListAsync } from "../src/evaluator/towerVerdict";
+import type { Constraint, StopReason, AttributeEvidenceArtefact, IntentNarrative } from "../src/evaluator/towerVerdict";
 import { judgePlasticsInjection } from "../src/evaluator/plasticsInjectionRubric";
 import type { PlasticsRubricInput, PlasticsStepSnapshot } from "../src/evaluator/plasticsInjectionRubric";
 import { evaluateLearningUpdate } from "../src/evaluator/learningUpdateEmitter";
@@ -546,7 +546,7 @@ router.post("/tower-verdict", async (req, res) => {
       `verification_summary=${data.verification_summary ? `verified_exact_count=${data.verification_summary.verified_exact_count}` : "none"}`
     );
 
-    const result = judgeLeadsList({
+    const result = await judgeLeadsListAsync({
       leads: data.leads,
       delivered_leads: data.delivered_leads,
       constraints: data.constraints as Constraint[] | undefined,
@@ -586,6 +586,7 @@ router.post("/tower-verdict", async (req, res) => {
       verification_policy: data.verification_policy,
       strategy: data.strategy,
       agent_clarified: data.agent_clarified,
+      intent_narrative: (data as any).intent_narrative as IntentNarrative | undefined,
     });
 
     if (DEBUG) {

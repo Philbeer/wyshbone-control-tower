@@ -2,8 +2,8 @@ import express from "express";
 import { db } from "../src/lib/db";
 import { sql, eq } from "drizzle-orm";
 import { z } from "zod";
-import { judgeLeadsList, normalizeConstraintHardness, normalizeStructuredConstraints, judgeAskLeadQuestion } from "../src/evaluator/towerVerdict";
-import type { Lead, Constraint, DeliveredInfo, MetaInfo, StructuredConstraint, StopReason, AskLeadQuestionInput, AttributeEvidenceArtefact } from "../src/evaluator/towerVerdict";
+import { judgeLeadsList, judgeLeadsListAsync, normalizeConstraintHardness, normalizeStructuredConstraints, judgeAskLeadQuestion } from "../src/evaluator/towerVerdict";
+import type { Lead, Constraint, DeliveredInfo, MetaInfo, StructuredConstraint, StopReason, AskLeadQuestionInput, AttributeEvidenceArtefact, IntentNarrative, RejectedLead } from "../src/evaluator/towerVerdict";
 import { judgePlasticsInjection } from "../src/evaluator/plasticsInjectionRubric";
 import { judgeRunReceipt } from "../src/evaluator/receiptTruthJudge";
 import type { SiblingArtefact } from "../src/evaluator/receiptTruthJudge";
@@ -49,6 +49,7 @@ interface JudgeArtefactResponse {
     to: string | number | null;
     reason: string;
   }>;
+  rejected_leads?: RejectedLead[];
 }
 
 interface PersistResult {
@@ -154,14 +155,14 @@ function towerVerdictToPassFail(v: "ACCEPT" | "ACCEPT_WITH_UNVERIFIED" | "CHANGE
   return { verdict: "fail", action: "stop" };
 }
 
-function judgeLeadsListArtefact(
+async function judgeLeadsListArtefact(
   payloadJson: any,
   successCriteria: any,
   goal: string,
   artefactTitle?: string,
   artefactSummary?: string,
   attributeEvidence?: AttributeEvidenceArtefact[]
-): JudgeArtefactResponse {
+): Promise<JudgeArtefactResponse> {
   const leads: Lead[] = Array.isArray(payloadJson?.leads)
     ? payloadJson.leads.filter((l: any) => l && typeof l.name === "string")
     : [];
@@ -269,7 +270,7 @@ function judgeLeadsListArtefact(
     `[Tower][judge-artefact] leads_list resolution: leads=${leads.length} constraints=${constraints.length} requestedCountUser=${requestedCountUser} requestedCount=${requestedCount} delivered=${JSON.stringify(deliveredObj)}`
   );
 
-  const towerResult = judgeLeadsList({
+  const towerResult = await judgeLeadsListAsync({
     leads,
     delivered_leads: Array.isArray(payloadJson?.delivered_leads) ? payloadJson.delivered_leads : undefined,
     constraints,
@@ -301,6 +302,7 @@ function judgeLeadsListArtefact(
     verified_relationship_count: payloadJson?.verified_relationship_count,
     verification_policy: payloadJson?.verification_policy ?? undefined,
     strategy: payloadJson?.strategy ?? undefined,
+    intent_narrative: payloadJson?.intent_narrative as IntentNarrative | undefined,
   });
 
   if (DEBUG) {
@@ -332,6 +334,7 @@ function judgeLeadsListArtefact(
       _debug: towerResult._debug,
     },
     suggested_changes: towerResult.suggested_changes,
+    rejected_leads: towerResult.rejected_leads,
   };
 
   return response;
@@ -632,7 +635,7 @@ router.post("/judge-artefact", async (req, res) => {
         `verification_summary=${payloadJson?.verification_summary ? `verified_exact_count=${payloadJson.verification_summary.verified_exact_count}` : "none"}`
       );
 
-      const leadsResult = judgeLeadsListArtefact(
+      const leadsResult = await judgeLeadsListArtefact(
         payloadJson,
         successCriteria,
         goal,

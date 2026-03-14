@@ -1,0 +1,83 @@
+You are Wyshbone Control Tower. Report first, 
+then make changes.
+
+The intent_narrative is now being passed in the 
+Tower judgement payload. It contains an 
+entity_exclusions[] array. Tower is not currently 
+using it — leads that match an exclusion are 
+still being accepted.
+
+Example from the last run:
+- entity_exclusions: ["breweries selling their 
+  own beer", "supermarkets", "chains"]
+- Goldmark Craft Beers was delivered as verified
+  despite being a brewery
+- Langham Brewery & Tap was delivered despite 
+  having "Brewery" in the name
+
+Report first:
+1. Where does Tower currently receive the 
+   intent_narrative field in the judgement 
+   payload? Paste the exact input schema.
+
+2. In judgeLeadsListCore(), where are individual 
+   leads evaluated? Is there a per-lead 
+   acceptance/rejection step?
+
+3. Is there any existing mechanism for rejecting 
+   leads by entity type or name signal?
+
+Then make these changes:
+
+1. In judgeLeadsListCore(), after constraint 
+   evaluation, add an exclusion check per lead:
+
+   For each lead, check its name and any 
+   available description against 
+   intent_narrative.entity_exclusions[].
+   
+   Use a lightweight LLM call (claude-haiku or 
+   gpt-4o-mini) per batch of 10 leads:
+   
+   "Given these exclusion criteria:
+   {entity_exclusions}
+   
+   And this key discriminator:
+   {key_discriminator}
+   
+   For each business name below, does it 
+   clearly match an exclusion? Answer only 
+   if clearly obvious from the name alone — 
+   do not guess.
+   
+   Respond with JSON only:
+   [{ 
+     name: string, 
+     excluded: boolean, 
+     matched_exclusion: string | null,
+     confidence: 'high' | 'low'
+   }]
+   
+   Only mark excluded=true if confidence=high.
+   Businesses: {lead names}"
+
+2. Any lead where excluded=true and 
+   confidence=high should be:
+   - Removed from delivered leads
+   - Added to a rejected_leads[] array with 
+     reason: matched_exclusion value
+   - Logged: [TOWER] excluded lead: 
+     {name} matched exclusion: {reason}
+
+3. If intent_narrative is not present in the 
+   payload, skip the exclusion check entirely 
+   — do not break existing runs without 
+   intent_narrative.
+
+4. Add rejected_leads[] to the Tower judgement 
+   response so the UI and Behaviour Judge can 
+   see what was filtered and why.
+
+Confirm with a test case: for the bottle shop 
+query, Goldmark Craft Beers and Langham Brewery 
+& Tap should be rejected. Beerarama should pass.
