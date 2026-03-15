@@ -271,6 +271,7 @@ function buildBehaviourJudgePrompt(input: BehaviourJudgeInput): string {
         lead_name: le.lead_name,
         source_tier: le.source_tier,
         verified: le.verified,
+        is_bot_blocked: le.is_bot_blocked === true,
       };
       if (le.source_url) entry.source_url = le.source_url;
       if (le.evidence_text) entry.evidence_text = le.evidence_text;
