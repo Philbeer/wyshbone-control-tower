@@ -363,7 +363,9 @@ export function buildLeadsEvidence(
   }
 
   for (const ae of attributeEvidence) {
-    const key = ae.lead_place_id ? `pid:${ae.lead_place_id}` : `name:${ae.lead_name.toLowerCase()}`;
+    const key = ae.lead_place_id
+      ? evidenceByLead.has(`pid:${ae.lead_place_id}`) ? `pid:${ae.lead_place_id}` : `name:${ae.lead_name.toLowerCase()}`
+      : `name:${ae.lead_name.toLowerCase()}`;
     const existing = evidenceByLead.get(key);
     const tier = mapSourceTier(ae.source_tier);
     const aeText = ae.quote ?? ae.extracted_quotes?.join("\n---\n");
