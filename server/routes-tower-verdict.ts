@@ -690,6 +690,7 @@ router.post("/tower-verdict", async (req, res) => {
       const bjQueryClass = inferQueryClass(goal, bjConstraints);
 
       const bjIntentNarrative = (data as any).intent_narrative as IntentNarrative | undefined;
+      console.log('[BJ DEBUG] routes-tower-verdict intent_narrative:', JSON.stringify(bjIntentNarrative ?? null));
 
       fireBehaviourJudge({
         run_id: runId,

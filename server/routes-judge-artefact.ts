@@ -747,6 +747,7 @@ router.post("/judge-artefact", async (req, res) => {
           (typeof payloadJson?.requested_count === "number" ? payloadJson.requested_count : null);
 
         const bjIntentNarrative = payloadJson?.intent_narrative as IntentNarrative | undefined;
+        console.log('[BJ DEBUG] routes-judge-artefact intent_narrative:', JSON.stringify(bjIntentNarrative ?? null));
 
         fireBehaviourJudge({
           run_id: runId,
