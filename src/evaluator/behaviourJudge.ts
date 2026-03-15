@@ -91,7 +91,18 @@ export function inferQueryClass(
   }
 
   const goalLower = goal.toLowerCase();
-  if (goalLower.includes("website") && (goalLower.includes("mention") || goalLower.includes("evidence") || goalLower.includes("says"))) {
+  if (
+    goalLower.includes("website") && (
+      goalLower.includes("mention") ||
+      goalLower.includes("evidence") ||
+      goalLower.includes("says") ||
+      goalLower.includes("on their website") ||
+      goalLower.includes("from their website") ||
+      goalLower.includes("their website") ||
+      goalLower.includes("website lists") ||
+      goalLower.includes("website shows")
+    )
+  ) {
     return "website_evidence";
   }
 
