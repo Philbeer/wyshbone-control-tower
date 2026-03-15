@@ -75,8 +75,9 @@ const FICTIONAL_LOCATION_PATTERNS = [
 export function inferQueryClass(
   goal: string,
   constraints: Array<{ type: string; field: string; value: string | number; hardness: "hard" | "soft"; evidence_requirement?: string }>,
+  intentNarrative?: { key_discriminator?: string; entity_description?: string; findability?: string } | null,
 ): QueryClass {
-  console.log('[QUERY_CLASS DEBUG] goal:', goal, '| constraints:', JSON.stringify(constraints.map(c => ({ type: c.type, field: c.field, value: c.value, evidence_requirement: c.evidence_requirement }))));
+  console.log('[QUERY_CLASS DEBUG] goal:', goal, '| constraints:', JSON.stringify(constraints.map(c => ({ type: c.type, field: c.field, value: c.value }))), '| key_discriminator:', intentNarrative?.key_discriminator ?? 'none');
   for (const c of constraints) {
     if (c.type === "NAME_CONTAINS" || c.type === "NAME_STARTS_WITH") return "name_match";
   }
@@ -105,6 +106,19 @@ export function inferQueryClass(
     )
   ) {
     return "website_evidence";
+  }
+
+  if (intentNarrative?.key_discriminator) {
+    const kd = intentNarrative.key_discriminator.toLowerCase();
+    if (kd.includes("website") || kd.includes("page") || kd.includes("mention") || kd.includes("their site")) {
+      return "website_evidence";
+    }
+  }
+  if (intentNarrative?.entity_description) {
+    const ed = intentNarrative.entity_description.toLowerCase();
+    if (ed.includes("website") || ed.includes("mention") || ed.includes("their site")) {
+      return "website_evidence";
+    }
   }
 
   if (goalLower.includes("work with") || goalLower.includes("partner") || goalLower.includes("supplier") || goalLower.includes("relationship")) {

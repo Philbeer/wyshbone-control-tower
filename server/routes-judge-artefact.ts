@@ -739,15 +739,14 @@ router.post("/judge-artefact", async (req, res) => {
           attributeEvidenceItems,
         );
 
-        const bjQueryClass = inferQueryClass(goal, bjConstraints);
+        const bjIntentNarrative = (parsed.data?.successCriteria?.intent_narrative ?? parsed.data?.intent_narrative) as IntentNarrative | undefined;
+        const bjQueryClass = inferQueryClass(goal, bjConstraints, bjIntentNarrative);
 
         const bjRequestedCount =
           (typeof successCriteria?.requested_count_user === "number" ? successCriteria.requested_count_user : null) ??
           (typeof payloadJson?.requested_count_user === "number" ? payloadJson.requested_count_user : null) ??
           (typeof successCriteria?.requested_count === "number" ? successCriteria.requested_count : null) ??
           (typeof payloadJson?.requested_count === "number" ? payloadJson.requested_count : null);
-
-        const bjIntentNarrative = (parsed.data?.successCriteria?.intent_narrative ?? parsed.data?.intent_narrative) as IntentNarrative | undefined;
         console.log('[BJ DEBUG] full payloadJson keys:', JSON.stringify(Object.keys(payloadJson ?? {})));
         console.log('[BJ DEBUG] routes-judge-artefact intent_narrative:', JSON.stringify(bjIntentNarrative ?? null));
 
