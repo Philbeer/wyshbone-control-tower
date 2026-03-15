@@ -580,7 +580,7 @@ router.post("/judge-artefact", async (req, res) => {
                 quote: p.quote,
                 extracted_quotes: Array.isArray(p.extracted_quotes) ? p.extracted_quotes.filter((q: unknown) => typeof q === "string" && q) : undefined,
                 page_title: typeof p.page_title === "string" ? p.page_title : undefined,
-                source_tier: p.source_tier ?? p.evidence_source_tier ?? undefined,
+                source_tier: p.source_tier ?? p.evidence_source_tier ?? p.evidence_items?.[0]?.source_tier ?? undefined,
               });
             }
           }
