@@ -564,15 +564,15 @@ router.post("/judge-artefact", async (req, res) => {
                 ? JSON.parse(row.payload_json)
                 : row.payload_json;
             } catch {}
-            if (p && p.lead_name && (p.attribute || p.attribute_key) && p.verdict) {
+            if (p && p.lead_name && (p.attribute || p.attribute_key || p.constraint?.value || p.constraint?.field) && (p.verdict || p.tower_status)) {
               attributeEvidenceItems.push({
                 lead_name: p.lead_name,
                 lead_place_id: p.lead_place_id ?? p.placeId ?? p.place_id,
-                attribute: p.attribute ?? p.attribute_key,
-                attribute_key: p.attribute_key,
+                attribute: p.attribute ?? p.attribute_key ?? p.constraint?.value ?? p.constraint?.field,
+                attribute_key: p.attribute_key ?? p.constraint?.value,
                 attribute_raw: p.attribute_raw,
                 constraint_raw: p.constraint_raw,
-                verdict: p.verdict,
+                verdict: p.verdict ?? p.tower_status,
                 confidence: p.confidence ?? 0,
                 evidence_id: p.evidence_id,
                 source_url: p.source_url,
