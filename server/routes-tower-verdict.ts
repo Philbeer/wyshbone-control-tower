@@ -485,7 +485,7 @@ router.post("/tower-verdict", async (req, res) => {
                 ? JSON.parse(row.payload_json)
                 : row.payload_json;
             } catch {}
-            if (p && p.lead_name && (p.attribute || p.attribute_key || p.constraint?.value || p.constraint?.field) && (p.verdict || p.tower_status)) {
+            if (p && p.lead_name && (p.attribute || p.attribute_key || p.constraint?.value || p.constraint?.field)) {
               attributeEvidenceItems.push({
                 lead_name: p.lead_name,
                 lead_place_id: p.lead_place_id ?? p.placeId ?? p.place_id,
