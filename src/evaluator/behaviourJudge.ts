@@ -190,7 +190,7 @@ leads_evidence: Per-lead evidence context. Each entry includes:
   - source_tier: "first_party" (business's own website), "third_party" (TripAdvisor, Google Maps, directories), or "snippet" (search snippet only, no page fetched)
   - evidence_text: The actual page text or snippet fetched for this lead. First-party evidence is the most reliable.
   - verified: Whether the lead was marked as verified.
-  - is_bot_blocked: Whether the agent attempted to fetch this lead's website but was blocked by bot protection (Cloudflare, hCaptcha, 403 responses). If true, the agent DID attempt the fetch — it was not a capability failure. A high proportion of bot-blocked leads on a website_evidence query should push toward HONEST_PARTIAL not CAPABILITY_FAIL, since the agent cannot overcome bot protection.
+  - is_bot_blocked: Whether the agent attempted to fetch this lead's website but was actively blocked by bot protection (Cloudflare, hCaptcha, 403). The agent DID attempt the fetch. RULE: If 3 or more leads have is_bot_blocked: true on a website_evidence query, you MUST return HONEST_PARTIAL not CAPABILITY_FAIL — the agent executed correctly but was blocked by infrastructure outside its control. Only return CAPABILITY_FAIL if leads have snippet evidence AND is_bot_blocked is false or null, meaning the agent had an opportunity to fetch the website but did not.
 
 intent_narrative: The structured intent decoded from the original goal. Includes:
   - entity_exclusions: Leads that were intentionally filtered out (e.g. "exclude Laura Thomas"). A lower delivered_count caused by these exclusions is CORRECT behaviour — do not emit CAPABILITY_FAIL or BATCH_EXHAUSTED for it.
