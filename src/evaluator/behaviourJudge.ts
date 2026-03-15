@@ -76,6 +76,7 @@ export function inferQueryClass(
   goal: string,
   constraints: Array<{ type: string; field: string; value: string | number; hardness: "hard" | "soft"; evidence_requirement?: string }>,
 ): QueryClass {
+  console.log('[QUERY_CLASS DEBUG] goal:', goal, '| constraints:', JSON.stringify(constraints.map(c => ({ type: c.type, field: c.field, value: c.value, evidence_requirement: c.evidence_requirement }))));
   for (const c of constraints) {
     if (c.type === "NAME_CONTAINS" || c.type === "NAME_STARTS_WITH") return "name_match";
   }
