@@ -1,6 +1,6 @@
 import express from "express";
 import { db } from "../src/lib/db";
-import { judgementEvaluations, runs } from "../shared/schema";
+import { runs } from "../shared/schema";
 import { eq, desc } from "drizzle-orm";
 
 const router = express.Router();
@@ -87,12 +87,7 @@ router.get("/run-trace", async (req, res) => {
       });
     }
 
-    const evaluations = await db
-      .select()
-      .from(judgementEvaluations)
-      .where(eq(judgementEvaluations.run_id, resolvedRunId))
-      .orderBy(desc(judgementEvaluations.evaluated_at))
-      .limit(5);
+    const evaluations: never[] = [];
 
     if (evaluations.length === 0) {
       return res.json({
