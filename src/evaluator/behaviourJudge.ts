@@ -361,7 +361,7 @@ export function buildLeadsEvidence(
       source_url: lead.source_url,
       evidence_text: truncateEvidence(evidenceText),
       verified: lead.verified === true,
-      is_bot_blocked: (lead as any).is_bot_blocked === true || (lead as any).isBotBlocked === true,
+      is_bot_blocked: (lead as any).is_bot_blocked === true || (lead as any).isBotBlocked === true || (lead as any).verification_status === 'unreachable',
     });
   }
 
