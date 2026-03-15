@@ -51,6 +51,9 @@ export interface BehaviourJudgeInput {
   tower_gaps: string[];
   tower_stop_reason_code: string | null;
   agent_clarified: boolean;
+  intent_narrative?: string | null;
+  entity_exclusions?: string[] | null;
+  key_discriminator?: string | null;
 }
 
 export interface BehaviourJudgeResult {
@@ -160,6 +163,10 @@ leads_evidence: Per-lead evidence context. Each entry includes:
   - evidence_text: The actual page text or snippet fetched for this lead. First-party evidence is the most reliable.
   - verified: Whether the lead was marked as verified.
 
+intent_narrative: The structured intent decoded from the original goal. Includes:
+  - entity_exclusions: Leads that were intentionally filtered out (e.g. "exclude Laura Thomas"). A lower delivered_count caused by these exclusions is CORRECT behaviour — do not emit CAPABILITY_FAIL or BATCH_EXHAUSTED for it.
+  - key_discriminator: The specific attribute that distinguishes a genuine match from a false positive for this query.
+
 constraint_verdicts: Full per-constraint results including:
   - verdict: VERIFIED, PLAUSIBLE, UNSUPPORTED, CONTRADICTED, or NOT_APPLICABLE
   - reason: Why this verdict was given
@@ -240,6 +247,13 @@ function buildBehaviourJudgePrompt(input: BehaviourJudgeInput): string {
       if (le.evidence_text) entry.evidence_text = le.evidence_text;
       return entry;
     });
+  }
+
+  if (input.entity_exclusions && input.entity_exclusions.length > 0) {
+    payload.entity_exclusions = input.entity_exclusions;
+  }
+  if (input.key_discriminator) {
+    payload.key_discriminator = input.key_discriminator;
   }
 
   return JSON.stringify(payload, null, 2);

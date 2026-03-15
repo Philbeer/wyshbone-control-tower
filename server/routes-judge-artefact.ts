@@ -746,6 +746,8 @@ router.post("/judge-artefact", async (req, res) => {
           (typeof successCriteria?.requested_count === "number" ? successCriteria.requested_count : null) ??
           (typeof payloadJson?.requested_count === "number" ? payloadJson.requested_count : null);
 
+        const bjIntentNarrative = payloadJson?.intent_narrative as IntentNarrative | undefined;
+
         fireBehaviourJudge({
           run_id: runId,
           original_goal: goal,
@@ -761,6 +763,9 @@ router.post("/judge-artefact", async (req, res) => {
           tower_gaps: (leadsResult.metrics.gaps as string[]) ?? [],
           tower_stop_reason_code: leadsResult.stop_reason?.code ?? null,
           agent_clarified: payloadJson?.agent_clarified ?? false,
+          intent_narrative: bjIntentNarrative ? JSON.stringify(bjIntentNarrative) : null,
+          entity_exclusions: bjIntentNarrative?.entity_exclusions ?? null,
+          key_discriminator: bjIntentNarrative?.key_discriminator ?? null,
         });
       }
 

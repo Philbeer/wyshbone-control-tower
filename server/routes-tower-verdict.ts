@@ -689,6 +689,8 @@ router.post("/tower-verdict", async (req, res) => {
 
       const bjQueryClass = inferQueryClass(goal, bjConstraints);
 
+      const bjIntentNarrative = (data as any).intent_narrative as IntentNarrative | undefined;
+
       fireBehaviourJudge({
         run_id: runId,
         original_goal: goal,
@@ -704,6 +706,9 @@ router.post("/tower-verdict", async (req, res) => {
         tower_gaps: result.gaps,
         tower_stop_reason_code: result.stop_reason?.code ?? null,
         agent_clarified: data.agent_clarified ?? false,
+        intent_narrative: bjIntentNarrative ? JSON.stringify(bjIntentNarrative) : null,
+        entity_exclusions: bjIntentNarrative?.entity_exclusions ?? null,
+        key_discriminator: bjIntentNarrative?.key_discriminator ?? null,
       });
     }
 
