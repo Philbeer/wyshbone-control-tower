@@ -151,6 +151,7 @@ export function inferQueryClass(
 export function mapSourceTier(tier: SourceTier | string | undefined): SimplifiedSourceTier {
   switch (tier) {
     case "first_party_website":
+    case "first_party":
       return "first_party";
     case "directory_field":
     case "lead_field":
