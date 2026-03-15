@@ -474,7 +474,7 @@ router.post("/tower-verdict", async (req, res) => {
         const attrEvResult = await db.execute(
           sql`SELECT payload_json FROM artefacts
               WHERE run_id = ${runId}
-                AND artefact_type = 'attribute_evidence'
+                AND type = 'constraint_led_evidence'
               ORDER BY created_at DESC`
         );
         if (attrEvResult.rows && attrEvResult.rows.length > 0) {
@@ -500,6 +500,7 @@ router.post("/tower-verdict", async (req, res) => {
                 quote: p.quote,
                 extracted_quotes: Array.isArray(p.extracted_quotes) ? p.extracted_quotes.filter((q: unknown) => typeof q === "string" && q) : undefined,
                 page_title: typeof p.page_title === "string" ? p.page_title : undefined,
+                source_tier: p.source_tier ?? p.evidence_source_tier ?? undefined,
               });
             }
           }

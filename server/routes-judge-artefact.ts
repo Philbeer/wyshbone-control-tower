@@ -492,7 +492,7 @@ router.post("/judge-artefact", async (req, res) => {
           const cvlResult = await db.execute(
             sql`SELECT payload_json FROM artefacts
                 WHERE run_id = ${runId}
-                  AND artefact_type = 'lead_verification'
+                  AND type = 'lead_verification'
                 ORDER BY created_at DESC
                 LIMIT 1`
           );
@@ -553,7 +553,7 @@ router.post("/judge-artefact", async (req, res) => {
         const attrEvResult = await db.execute(
           sql`SELECT payload_json FROM artefacts
               WHERE run_id = ${runId}
-                AND artefact_type = 'attribute_evidence'
+                AND type = 'constraint_led_evidence'
               ORDER BY created_at DESC`
         );
         if (attrEvResult.rows && attrEvResult.rows.length > 0) {
@@ -579,6 +579,7 @@ router.post("/judge-artefact", async (req, res) => {
                 quote: p.quote,
                 extracted_quotes: Array.isArray(p.extracted_quotes) ? p.extracted_quotes.filter((q: unknown) => typeof q === "string" && q) : undefined,
                 page_title: typeof p.page_title === "string" ? p.page_title : undefined,
+                source_tier: p.source_tier ?? p.evidence_source_tier ?? undefined,
               });
             }
           }
@@ -782,9 +783,9 @@ router.post("/judge-artefact", async (req, res) => {
       let siblingArtefacts: SiblingArtefact[] = [];
       try {
         const siblingResult = await db.execute(
-          sql`SELECT id, artefact_type, payload_json FROM artefacts
+          sql`SELECT id, type, payload_json FROM artefacts
               WHERE run_id = ${runId}
-                AND artefact_type IN ('lead_pack', 'contact_extract')
+                AND type IN ('lead_pack', 'contact_extract')
               ORDER BY created_at DESC`
         );
         if (siblingResult.rows) {
@@ -798,7 +799,7 @@ router.post("/judge-artefact", async (req, res) => {
             if (p) {
               siblingArtefacts.push({
                 id: row.id as string,
-                artefact_type: row.artefact_type as string,
+                artefact_type: row.type as string,
                 payload_json: p,
               });
             }
