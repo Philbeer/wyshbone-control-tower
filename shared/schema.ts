@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, timestamp, jsonb, uuid, varchar, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, jsonb, uuid, varchar, integer, serial } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -437,6 +437,18 @@ export const insertLearningArtefactSchema = createInsertSchema(learningArtefacts
 });
 export type InsertLearningArtefact = z.infer<typeof insertLearningArtefactSchema>;
 export type LearningArtefact = typeof learningArtefacts.$inferSelect;
+
+export const groundTruthRecords = pgTable('ground_truth_records', {
+  id: serial('id').primaryKey(),
+  queryId: text('query_id').unique(),
+  queryText: text('query_text'),
+  queryClass: text('query_class'),
+  trueUniverse: jsonb('true_universe'),
+  matchCriteria: text('match_criteria'),
+  reasoning: text('reasoning'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
 
 export const behaviourJudgeResults = pgTable("behaviour_judge_results", {
   id: uuid("id").primaryKey().defaultRandom(),

@@ -11,7 +11,7 @@ import { fireBehaviourJudge, inferQueryClass, mapSourceTier, buildLeadsEvidence 
 import type { ConstraintVerdictDetail } from "../src/evaluator/behaviourJudge";
 import { db } from "../src/lib/db";
 import { sql, eq } from "drizzle-orm";
-import { towerVerdicts } from "../shared/schema";
+import { towerVerdicts, groundTruthRecords } from "../shared/schema";
 
 const router = express.Router();
 
@@ -225,6 +225,7 @@ const towerVerdictRequestSchema = z.object({
   current_search_budget_pages: z.number().int().optional(),
   current_verification_level: z.enum(["minimal", "standard", "strict"]).optional(),
   current_radius_escalation: z.enum(["conservative", "moderate", "aggressive"]).optional(),
+  query_id: z.string().optional().nullable(),
 });
 
 interface PersistResult {
@@ -692,6 +693,15 @@ router.post("/tower-verdict", async (req, res) => {
       const bjQueryClass = inferQueryClass(goal, bjConstraints, bjIntentNarrative);
       console.log('[BJ DEBUG] routes-tower-verdict intent_narrative:', JSON.stringify(bjIntentNarrative ?? null));
 
+      let gtRecord: typeof groundTruthRecords.$inferSelect | null = null;
+      if (data.query_id) {
+        gtRecord = await db.select()
+          .from(groundTruthRecords)
+          .where(eq(groundTruthRecords.queryId, data.query_id))
+          .limit(1)
+          .then(r => r[0] ?? null);
+      }
+
       fireBehaviourJudge({
         run_id: runId,
         original_goal: goal,
@@ -710,6 +720,9 @@ router.post("/tower-verdict", async (req, res) => {
         intent_narrative: bjIntentNarrative ? JSON.stringify(bjIntentNarrative) : null,
         entity_exclusions: bjIntentNarrative?.entity_exclusions ?? null,
         key_discriminator: bjIntentNarrative?.key_discriminator ?? null,
+        true_universe: (gtRecord?.trueUniverse as Array<{ name: string }> | null) ?? null,
+        match_criteria: gtRecord?.matchCriteria ?? null,
+        ground_truth_notes: gtRecord?.notes ?? null,
       });
     }
 

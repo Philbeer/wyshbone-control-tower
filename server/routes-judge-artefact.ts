@@ -13,7 +13,7 @@ import type { LearningUpdateInput } from "../src/evaluator/learningUpdateEmitter
 import { enrichAttributeEvidence } from "../src/evaluator/semanticEvidenceJudge";
 import { fireBehaviourJudge, inferQueryClass, mapSourceTier, buildLeadsEvidence } from "../src/evaluator/behaviourJudge";
 import type { ConstraintVerdictDetail } from "../src/evaluator/behaviourJudge";
-import { towerVerdicts } from "../shared/schema";
+import { towerVerdicts, groundTruthRecords } from "../shared/schema";
 
 const router = express.Router();
 
@@ -33,6 +33,7 @@ const judgeArtefactRequestSchema = z.object({
   current_search_budget_pages: z.number().int().optional(),
   current_verification_level: z.enum(["minimal", "standard", "strict"]).optional(),
   current_radius_escalation: z.enum(["conservative", "moderate", "aggressive"]).optional(),
+  query_id: z.string().optional().nullable(),
 });
 
 interface JudgeArtefactResponse {
@@ -357,6 +358,7 @@ router.post("/judge-artefact", async (req, res) => {
       runId, artefactId, goal, successCriteria, artefactType, proof_mode,
       idempotency_key, query_shape_key, steps_count, tool_calls,
       current_search_budget_pages, current_verification_level, current_radius_escalation,
+      query_id,
     } = parsed.data;
 
     const idempotencyKey = idempotency_key ?? null;
@@ -751,6 +753,15 @@ router.post("/judge-artefact", async (req, res) => {
         console.log('[BJ DEBUG] full payloadJson keys:', JSON.stringify(Object.keys(payloadJson ?? {})));
         console.log('[BJ DEBUG] routes-judge-artefact intent_narrative:', JSON.stringify(bjIntentNarrative ?? null));
 
+        let gtRecord: typeof groundTruthRecords.$inferSelect | null = null;
+        if (query_id) {
+          gtRecord = await db.select()
+            .from(groundTruthRecords)
+            .where(eq(groundTruthRecords.queryId, query_id))
+            .limit(1)
+            .then(r => r[0] ?? null);
+        }
+
         fireBehaviourJudge({
           run_id: runId,
           original_goal: goal,
@@ -769,6 +780,9 @@ router.post("/judge-artefact", async (req, res) => {
           intent_narrative: bjIntentNarrative ? JSON.stringify(bjIntentNarrative) : null,
           entity_exclusions: bjIntentNarrative?.entity_exclusions ?? null,
           key_discriminator: bjIntentNarrative?.key_discriminator ?? null,
+          true_universe: (gtRecord?.trueUniverse as Array<{ name: string }> | null) ?? null,
+          match_criteria: gtRecord?.matchCriteria ?? null,
+          ground_truth_notes: gtRecord?.notes ?? null,
         });
       }
 
