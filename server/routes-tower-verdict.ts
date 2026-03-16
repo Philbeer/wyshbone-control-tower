@@ -692,23 +692,6 @@ router.post("/tower-verdict", async (req, res) => {
       const bjQueryClass = inferQueryClass(goal, bjConstraints, bjIntentNarrative);
       console.log('[BJ DEBUG] routes-tower-verdict intent_narrative:', JSON.stringify(bjIntentNarrative ?? null));
 
-      let bjGroundTruthUniverse: string[] | null = null;
-      let bjGroundTruthMatchCriteria: string | null = null;
-      if (goal) {
-        try {
-          const gtResult = await db.execute(
-            sql`SELECT true_universe, match_criteria FROM ground_truth_records WHERE query_text = ${goal} LIMIT 1`
-          );
-          const gtRow = gtResult.rows?.[0];
-          if (gtRow) {
-            bjGroundTruthUniverse = Array.isArray(gtRow.true_universe) ? gtRow.true_universe as string[] : null;
-            bjGroundTruthMatchCriteria = typeof gtRow.match_criteria === "string" ? gtRow.match_criteria : null;
-          }
-        } catch (gtErr) {
-          console.warn(`[BEHAVIOUR_JUDGE] ground_truth lookup failed for run_id=${runId}:`, gtErr instanceof Error ? gtErr.message : gtErr);
-        }
-      }
-
       fireBehaviourJudge({
         run_id: runId,
         original_goal: goal,
@@ -727,8 +710,6 @@ router.post("/tower-verdict", async (req, res) => {
         intent_narrative: bjIntentNarrative ? JSON.stringify(bjIntentNarrative) : null,
         entity_exclusions: bjIntentNarrative?.entity_exclusions ?? null,
         key_discriminator: bjIntentNarrative?.key_discriminator ?? null,
-        ground_truth_universe: bjGroundTruthUniverse,
-        ground_truth_match_criteria: bjGroundTruthMatchCriteria,
       });
     }
 

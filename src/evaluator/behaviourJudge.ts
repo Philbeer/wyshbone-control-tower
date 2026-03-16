@@ -55,8 +55,6 @@ export interface BehaviourJudgeInput {
   intent_narrative?: string | null;
   entity_exclusions?: string[] | null;
   key_discriminator?: string | null;
-  ground_truth_universe?: string[] | null;
-  ground_truth_match_criteria?: string | null;
 }
 
 export interface BehaviourJudgeResult {
@@ -198,17 +196,6 @@ intent_narrative: The structured intent decoded from the original goal. Includes
   - entity_exclusions: Leads that were intentionally filtered out (e.g. "exclude Laura Thomas"). A lower delivered_count caused by these exclusions is CORRECT behaviour — do not emit CAPABILITY_FAIL or BATCH_EXHAUSTED for it.
   - key_discriminator: The specific attribute that distinguishes a genuine match from a false positive for this query.
 
-ground_truth (when available): Independent verification of what genuinely exists in the real world for this query, established by human or AI research independent of the agent.
-  - ground_truth_universe: The confirmed list of businesses that are genuine matches for this query. This is the true universe of correct answers.
-  - ground_truth_match_criteria: The rules for what counts as a valid match.
-
-RULES when ground_truth_universe is provided:
-  - Businesses the agent delivered that are NOT in the true universe are false positives — penalise toward CAPABILITY_FAIL
-  - Businesses in the true universe that the agent missed AND that were accessible (not bot_blocked) — penalise toward CAPABILITY_FAIL
-  - Businesses in the true universe that the agent missed because they were bot_blocked — this is HONEST_PARTIAL not CAPABILITY_FAIL
-  - Agent delivered all or most of the true universe correctly — lean toward PASS
-  - If ground_truth_universe is not provided — judge based on the agent's own evidence quality as normal
-
 constraint_verdicts: Full per-constraint results including:
   - verdict: VERIFIED, PLAUSIBLE, UNSUPPORTED, CONTRADICTED, or NOT_APPLICABLE
   - reason: Why this verdict was given
@@ -297,12 +284,6 @@ function buildBehaviourJudgePrompt(input: BehaviourJudgeInput): string {
   }
   if (input.key_discriminator) {
     payload.key_discriminator = input.key_discriminator;
-  }
-  if (input.ground_truth_universe && input.ground_truth_universe.length > 0) {
-    payload.ground_truth_universe = input.ground_truth_universe;
-  }
-  if (input.ground_truth_match_criteria) {
-    payload.ground_truth_match_criteria = input.ground_truth_match_criteria;
   }
 
   return JSON.stringify(payload, null, 2);
