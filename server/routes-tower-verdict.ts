@@ -694,6 +694,7 @@ router.post("/tower-verdict", async (req, res) => {
       const bjQueryClass = inferQueryClass(goal, bjConstraints, bjIntentNarrative);
       console.log('[BJ DEBUG] routes-tower-verdict intent_narrative:', JSON.stringify(bjIntentNarrative ?? null));
 
+      console.log('[GT-GOAL]', JSON.stringify(data.goal));
       let gtRecord: typeof groundTruthRecords.$inferSelect | null = null;
       if (data.query_id) {
         gtRecord = await db.select()
