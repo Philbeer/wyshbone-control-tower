@@ -1,0 +1,30 @@
+In wyshbone-control-tower, make the following changes to wire ground truth data into the behaviour judge:
+
+1. In src/evaluator/behaviourJudge.ts, add two new optional fields to BehaviourJudgeInput:
+   ground_truth_universe?: string[] | null
+   ground_truth_match_criteria?: string | null
+
+2. In BEHAVIOUR_JUDGE_SYSTEM_PROMPT, add a new section immediately after the intent_narrative section:
+
+ground_truth (when available): Independent verification of what genuinely exists in the real world for this query, established by human or AI research independent of the agent.
+  - ground_truth_universe: The confirmed list of businesses that are genuine matches for this query. This is the true universe of correct answers.
+  - ground_truth_match_criteria: The rules for what counts as a valid match.
+
+RULES when ground_truth_universe is provided:
+  - Businesses the agent delivered that are NOT in the true universe are false positives — penalise toward CAPABILITY_FAIL
+  - Businesses in the true universe that the agent missed AND that were accessible (not bot_blocked) — penalise toward CAPABILITY_FAIL
+  - Businesses in the true universe that the agent missed because they were bot_blocked — this is HONEST_PARTIAL not CAPABILITY_FAIL
+  - Agent delivered all or most of the true universe correctly — lean toward PASS
+  - If ground_truth_universe is not provided — judge based on the agent's own evidence quality as normal
+
+3. In buildBehaviourJudgePrompt(), add these two fields to the payload conditionally:
+   if (input.ground_truth_universe && input.ground_truth_universe.length > 0) {
+     payload.ground_truth_universe = input.ground_truth_universe
+   }
+   if (input.ground_truth_match_criteria) {
+     payload.ground_truth_match_criteria = input.ground_truth_match_criteria
+   }
+
+4. In server/routes-judge-artefact.ts and server/routes-tower-verdict.ts, wherever fireBehaviourJudge() is called, fetch the ground truth record from the ground_truth_records table using the run's original_goal to match against query_text. If a record is found, extract true_universe (as a string array) and match_criteria and pass them into fireBehaviourJudge() as ground_truth_universe and ground_truth_match_criteria.
+
+Do not change anything else. Show the updated BehaviourJudgeInput type, the new system prompt section, and the updated fireBehaviourJudge call sites.
