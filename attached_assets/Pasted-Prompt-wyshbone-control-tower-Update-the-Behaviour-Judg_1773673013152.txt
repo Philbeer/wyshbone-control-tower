@@ -1,0 +1,24 @@
+Prompt — wyshbone-control-tower
+
+Update the Behaviour Judge to return three independent assessments instead of a single verdict.
+File: src/evaluator/behaviourJudge.ts
+Change the return type from the current flat { outcome, reason, confidence } to:
+ts{
+  mission_intent_assessment: { verdict: BehaviourVerdict, reasoning: string, confidence: number },
+  ground_truth_assessment:   { verdict: BehaviourVerdict, reasoning: string, confidence: number } | null,
+  combined_verdict:          { verdict: BehaviourVerdict, reasoning: string, confidence: number }
+}
+Update the system prompt to instruct the LLM to produce three independent assessments:
+
+mission_intent_assessment — did the agent execute correctly given the query? Was the plan right? Did it behave honestly when blocked? Did it terminate appropriately? Use all existing mission intent logic — bot-blocking rules, entity exclusions, key discriminator, query class calibration — exactly as now.
+ground_truth_assessment — did the agent find what genuinely exists in the real world? Compare agent results against true_universe (the known real-world matches) and match_criteria (the rules for what counts as valid). If true_universe and match_criteria are not provided, return null for this assessment.
+combined_verdict — weigh both assessments and produce a single verdict. In a perfect run this is always PASS. Any degradation from either dimension pulls it below PASS.
+
+All three use the same scale: PASS | HONEST_PARTIAL | BATCH_EXHAUSTED | CAPABILITY_FAIL | WRONG_DECISION
+Each assessment has its own confidence score (0–100).
+The LLM must respond with raw JSON only — no markdown, no other text.
+The GT record contains only true_universe, match_criteria, notes. No expected verdicts exist or are passed in. The BJ earns all three verdicts from raw data only.
+Update the parse/fallback logic
+Handle the new three-field shape when parsing the LLM response. If the LLM returns unparseable JSON, fall back to { combined_verdict: { verdict: "CAPABILITY_FAIL", reasoning: "parse error", confidence: 0 }, mission_intent_assessment: null, ground_truth_assessment: null }.
+Files: server/routes-judge-artefact.ts and server/routes-tower-verdict.ts
+Update both callers of fireBehaviourJudge() to handle the new return shape. combined_verdict.verdict remains the primary verdict for Tower agreement calculations and all existing downstream logic. Persist all three fields to the behaviourJudgeResults table — add columns if needed.

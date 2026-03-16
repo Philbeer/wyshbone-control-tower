@@ -448,6 +448,8 @@ export const behaviourJudgeResults = pgTable("behaviour_judge_results", {
   delivered_count: integer("delivered_count"),
   requested_count: integer("requested_count"),
   input_snapshot: jsonb("input_snapshot"),
+  mission_intent_assessment: jsonb("mission_intent_assessment"),
+  ground_truth_assessment: jsonb("ground_truth_assessment"),
   created_at: timestamp("created_at").notNull().defaultNow(),
 });
 

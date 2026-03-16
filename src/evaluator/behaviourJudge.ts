@@ -5,6 +5,8 @@ import type { SourceTier } from "./towerVerdict";
 
 export type BehaviourOutcome = "PASS" | "HONEST_PARTIAL" | "BATCH_EXHAUSTED" | "CAPABILITY_FAIL" | "WRONG_DECISION";
 
+export type BehaviourVerdict = BehaviourOutcome;
+
 export type QueryClass = "simple_discovery" | "name_match" | "website_evidence" | "relationship" | "clarify_required";
 
 export type SimplifiedSourceTier = "first_party" | "third_party" | "snippet";
@@ -32,6 +34,12 @@ export interface ConstraintVerdictDetail {
   total_leads?: number;
 }
 
+export interface BehaviourAssessment {
+  verdict: BehaviourVerdict;
+  reasoning: string;
+  confidence: number;
+}
+
 export interface BehaviourJudgeInput {
   run_id: string;
   original_goal: string;
@@ -55,12 +63,15 @@ export interface BehaviourJudgeInput {
   intent_narrative?: string | null;
   entity_exclusions?: string[] | null;
   key_discriminator?: string | null;
+  true_universe?: Array<{ name: string; [key: string]: unknown }> | null;
+  match_criteria?: string | null;
+  ground_truth_notes?: string | null;
 }
 
 export interface BehaviourJudgeResult {
-  outcome: BehaviourOutcome;
-  reason: string;
-  confidence: number;
+  mission_intent_assessment: BehaviourAssessment;
+  ground_truth_assessment: BehaviourAssessment | null;
+  combined_verdict: BehaviourAssessment;
 }
 
 const VALID_OUTCOMES: Set<string> = new Set([
@@ -173,9 +184,9 @@ function truncateEvidence(text: string | undefined): string | undefined {
   return text.substring(0, MAX_EVIDENCE_TEXT_LENGTH) + "… [truncated]";
 }
 
-const BEHAVIOUR_JUDGE_SYSTEM_PROMPT = `You are the Behaviour Judge for Wyshbone. You receive the result of a completed agent run and must classify the agent's BEHAVIOUR into exactly one outcome.
+const BEHAVIOUR_JUDGE_SYSTEM_PROMPT = `You are the Behaviour Judge for Wyshbone. You receive the result of a completed agent run and must produce THREE independent assessments.
 
-You will receive: the user's original goal, the query class, the strategy used, how many leads were delivered vs requested, per-lead evidence with source tiers, full constraint verdicts with evidence quotes, Tower's verdict and gaps, and whether the agent clarified or ran directly.
+You will receive: the user's original goal, the query class, the strategy used, how many leads were delivered vs requested, per-lead evidence with source tiers, full constraint verdicts with evidence quotes, Tower's verdict and gaps, and whether the agent clarified or ran directly. Optionally you may also receive ground truth data (true_universe, match_criteria, ground_truth_notes).
 
 ## Input context
 
@@ -190,10 +201,10 @@ leads_evidence: Per-lead evidence context. Each entry includes:
   - source_tier: "first_party" (business's own website), "third_party" (TripAdvisor, Google Maps, directories), or "snippet" (search snippet only, no page fetched)
   - evidence_text: The actual page text or snippet fetched for this lead. First-party evidence is the most reliable.
   - verified: Whether the lead was marked as verified.
-  - is_bot_blocked: Whether the agent attempted to fetch this lead's website but was actively blocked by bot protection (Cloudflare, hCaptcha, 403). The agent DID attempt the fetch. RULE: If 3 or more leads have is_bot_blocked: true on a website_evidence query, you MUST return HONEST_PARTIAL not CAPABILITY_FAIL — the agent executed correctly but was blocked by infrastructure outside its control. Only return CAPABILITY_FAIL if leads have snippet evidence AND is_bot_blocked is false or null, meaning the agent had an opportunity to fetch the website but did not.
+  - is_bot_blocked: Whether the agent attempted to fetch this lead's website but was actively blocked by bot protection (Cloudflare, hCaptcha, 403). The agent DID attempt the fetch.
 
 intent_narrative: The structured intent decoded from the original goal. Includes:
-  - entity_exclusions: Leads that were intentionally filtered out (e.g. "exclude Laura Thomas"). A lower delivered_count caused by these exclusions is CORRECT behaviour — do not emit CAPABILITY_FAIL or BATCH_EXHAUSTED for it.
+  - entity_exclusions: Leads that were intentionally filtered out (e.g. "exclude Laura Thomas"). A lower delivered_count caused by these exclusions is CORRECT behaviour.
   - key_discriminator: The specific attribute that distinguishes a genuine match from a false positive for this query.
 
 constraint_verdicts: Full per-constraint results including:
@@ -203,50 +214,111 @@ constraint_verdicts: Full per-constraint results including:
   - source_tier: Where the evidence came from
   - matched_count / total_leads: How many leads matched this constraint
 
-## The five outcomes
+true_universe (optional): The known set of real-world entities that genuinely match the goal. Only present in ground-truth evaluation runs.
+match_criteria (optional): The rules defining what counts as a valid match. Only present in ground-truth evaluation runs.
+ground_truth_notes (optional): Contextual notes about the ground truth record.
+
+## The five verdicts (used by all three assessments)
 
 PASS
-  The agent met the request. Enough leads delivered, constraints satisfied or plausibly met, evidence correctly handled. No action needed.
+  Fully met the request / fully matches reality. No meaningful gaps.
 
 HONEST_PARTIAL
-  The agent performed well — good queries, correct interpretation, proper verification — but the real world simply doesn't have enough matching results. The shortfall is genuine scarcity, not agent error. Example: user asks for 10 vegan restaurants in a small village; only 3 exist.
+  Performance was good but real-world supply is genuinely limited (mission) OR the agent found the real matches that exist but fewer than requested because that's all there are (ground truth).
 
 BATCH_EXHAUSTED
-  The agent performed well within the search batch it used, but the batch was too narrow. More matching results likely exist in the world but the agent's search parameters (radius, keywords, page depth) didn't reach them. A wider or different search would likely find more. Example: searched 5km radius when 15km would have found more matches.
+  Performance was good within the search scope used, but more matching results exist in the world and a wider search would find them (mission) OR the agent found a subset of the true universe because its search window was too narrow (ground truth).
 
 CAPABILITY_FAIL
-  The agent missed findable things. Bad search queries, missed obvious evidence on pages it visited, wrong interpretation of constraints, failed to filter correctly, or didn't verify when it should have. The results exist and were reachable but the agent failed to find or process them.
+  The agent missed findable things: bad queries, missed evidence, wrong constraint interpretation, failed verification, or — for ground truth — the agent delivered results that don't appear in the true universe or missed results that do.
 
 WRONG_DECISION
-  The agent made the wrong routing decision. It ran a search when it should have asked a clarifying question first (ambiguous goal, missing key info), OR it asked for clarification when the goal was clear enough to act on.
+  The agent made the wrong routing decision: ran when it should have clarified, or clarified when the goal was clear. Not applicable to ground_truth_assessment.
+
+## Assessment 1 — mission_intent_assessment
+
+Evaluate whether the agent EXECUTED CORRECTLY given the query. Consider:
+- Was the routing decision right (run vs clarify)?
+- Was the plan and strategy appropriate?
+- Did the agent use correct search queries and correct verification depth?
+- Did it interpret constraints correctly?
+- Did it behave honestly when blocked?
+- Did it terminate appropriately?
+
+Bot-blocking rule: If 3 or more leads have is_bot_blocked: true on a website_evidence query, you MUST return HONEST_PARTIAL not CAPABILITY_FAIL — the agent executed correctly but was blocked by infrastructure outside its control. Only return CAPABILITY_FAIL if leads have snippet evidence AND is_bot_blocked is false or null, meaning the agent had an opportunity to fetch the website but did not.
+
+Entity exclusions: A lower delivered_count caused by entity_exclusions is CORRECT behaviour — do not penalise the agent for it.
+
+Key discriminator: Use this to assess whether the agent was distinguishing genuine matches from false positives.
+
+Evidence tiers:
+- first_party (business's own website) is strongest. VERIFIED with first_party = high confidence.
+- third_party (directories, review sites) is good but may be outdated.
+- snippet only is weak. If critical constraints rely only on snippets, lean toward CAPABILITY_FAIL.
+- For website_evidence queries: if the agent only checked snippets but never visited the website, that is CAPABILITY_FAIL. A low count alone is NOT CAPABILITY_FAIL if the agent visited pages and Tower found no evidence.
+- For relationship queries: look for concrete evidence of the relationship, not just co-mentions.
+
+## Assessment 2 — ground_truth_assessment
+
+Only produce this assessment when BOTH true_universe and match_criteria are present in the input. If either is absent, set ground_truth_assessment to null.
+
+When ground truth is available:
+- Compare the agent's delivered leads against true_universe using match_criteria.
+- Count: how many true matches did the agent find? How many did it miss? Did it deliver any false positives not in the true universe?
+- Use PASS if all true matches were found (or the count met the requested amount).
+- Use HONEST_PARTIAL if the agent found all genuinely findable matches but the true universe is smaller than requested.
+- Use BATCH_EXHAUSTED if the agent found a subset of the true universe and a broader search would plausibly have found more.
+- Use CAPABILITY_FAIL if the agent missed true matches that were findable, or delivered false positives.
+- Do NOT use WRONG_DECISION for ground_truth_assessment.
+- Derive your verdict from the raw data only. No expected verdict is given to you.
+
+## Assessment 3 — combined_verdict
+
+Weigh both assessments and produce a single summary verdict. Rules:
+- In a perfect run, combined_verdict is always PASS.
+- Any degradation from either dimension pulls combined_verdict below PASS.
+- If mission_intent_assessment is WRONG_DECISION, combined_verdict is WRONG_DECISION regardless of ground truth.
+- If ground_truth_assessment is null, combined_verdict equals mission_intent_assessment.
+- Otherwise take the worse of the two verdicts, using this severity order (worst first): WRONG_DECISION > CAPABILITY_FAIL > BATCH_EXHAUSTED > HONEST_PARTIAL > PASS.
+- Write a brief reasoning that synthesises both dimensions.
 
 ## Key distinctions
 
 HONEST_PARTIAL vs BATCH_EXHAUSTED:
-  Both involve a shortfall with competent agent work. HONEST_PARTIAL = the world genuinely lacks results. BATCH_EXHAUSTED = results exist but the search window was too narrow. Ask: "Would a broader search plausibly find more?" If yes -> BATCH_EXHAUSTED. If no -> HONEST_PARTIAL.
+  Both involve a shortfall with competent work. HONEST_PARTIAL = the world genuinely lacks results. BATCH_EXHAUSTED = results exist but the search window was too narrow. Ask: "Would a broader search plausibly find more?" If yes -> BATCH_EXHAUSTED. If no -> HONEST_PARTIAL.
 
 BATCH_EXHAUSTED vs CAPABILITY_FAIL:
-  BATCH_EXHAUSTED = the agent's technique was sound but scope was limited. CAPABILITY_FAIL = the agent's technique was flawed (wrong queries, missed evidence, bad filtering). Ask: "Was the agent's approach correct within what it searched?" If yes -> BATCH_EXHAUSTED. If no -> CAPABILITY_FAIL.
+  BATCH_EXHAUSTED = technique was sound but scope was limited. CAPABILITY_FAIL = technique was flawed. Ask: "Was the approach correct within what it searched?" If yes -> BATCH_EXHAUSTED. If no -> CAPABILITY_FAIL.
 
 CAPABILITY_FAIL vs WRONG_DECISION:
   CAPABILITY_FAIL = correct decision to run, poor execution. WRONG_DECISION = should not have run (or should have run but asked instead).
 
-## Evidence evaluation guidance
-
-- first_party evidence (from the business's own website) is the strongest signal. If a constraint is VERIFIED with first_party evidence, that is high confidence.
-- third_party evidence (directories, review sites) is good but may be outdated or incomplete.
-- snippet evidence (search result snippets only) is weak — the agent should have fetched the page for stronger verification. If critical constraints rely only on snippet evidence, consider CAPABILITY_FAIL.
-- For website_evidence queries: if the agent only checked snippets but didn't actually visit the website, that is a CAPABILITY_FAIL.
-- For website_evidence queries: a low delivery count is NOT evidence of CAPABILITY_FAIL. If the agent visited the websites and Tower found no evidence on most pages, delivering only the verified results is CORRECT behaviour. In this case use HONEST_PARTIAL (real world scarcity) or BATCH_EXHAUSTED (search scope too narrow), not CAPABILITY_FAIL. CAPABILITY_FAIL for website_evidence queries should only be used if the agent did not visit the actual pages at all — only used search snippets.
-- For relationship queries: look for concrete evidence of the relationship, not just co-mentions.
-
 ## Response format
 
-Respond with valid JSON only, no markdown fences:
+Respond with valid JSON only. No markdown fences, no other text:
 {
-  "outcome": "PASS",
-  "reason": "Brief explanation of why this outcome was chosen.",
-  "confidence": 85
+  "mission_intent_assessment": {
+    "verdict": "PASS",
+    "reasoning": "Brief explanation.",
+    "confidence": 85
+  },
+  "ground_truth_assessment": {
+    "verdict": "PASS",
+    "reasoning": "Brief explanation.",
+    "confidence": 90
+  },
+  "combined_verdict": {
+    "verdict": "PASS",
+    "reasoning": "Brief synthesis of both dimensions.",
+    "confidence": 87
+  }
+}
+
+If ground truth data is not present, set ground_truth_assessment to null:
+{
+  "mission_intent_assessment": { "verdict": "PASS", "reasoning": "...", "confidence": 85 },
+  "ground_truth_assessment": null,
+  "combined_verdict": { "verdict": "PASS", "reasoning": "...", "confidence": 85 }
 }`;
 
 function buildBehaviourJudgePrompt(input: BehaviourJudgeInput): string {
@@ -286,7 +358,29 @@ function buildBehaviourJudgePrompt(input: BehaviourJudgeInput): string {
     payload.key_discriminator = input.key_discriminator;
   }
 
+  if (input.true_universe && input.true_universe.length > 0) {
+    payload.true_universe = input.true_universe;
+  }
+  if (input.match_criteria) {
+    payload.match_criteria = input.match_criteria;
+  }
+  if (input.ground_truth_notes) {
+    payload.ground_truth_notes = input.ground_truth_notes;
+  }
+
   return JSON.stringify(payload, null, 2);
+}
+
+function parseAssessment(raw: unknown): BehaviourAssessment | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  if (!obj.verdict || !VALID_OUTCOMES.has(obj.verdict as string)) return null;
+  if (typeof obj.reasoning !== "string") return null;
+  return {
+    verdict: obj.verdict as BehaviourVerdict,
+    reasoning: obj.reasoning,
+    confidence: typeof obj.confidence === "number" ? obj.confidence : 50,
+  };
 }
 
 function parseResponse(text: string): BehaviourJudgeResult | null {
@@ -297,17 +391,32 @@ function parseResponse(text: string): BehaviourJudgeResult | null {
       cleaned = fenceMatch[1].trim();
     }
     const parsed = JSON.parse(cleaned);
-    if (!parsed.outcome || !VALID_OUTCOMES.has(parsed.outcome)) return null;
-    if (typeof parsed.reason !== "string") return null;
+
+    const mia = parseAssessment(parsed.mission_intent_assessment);
+    if (!mia) return null;
+
+    const gta = parsed.ground_truth_assessment === null || parsed.ground_truth_assessment === undefined
+      ? null
+      : parseAssessment(parsed.ground_truth_assessment);
+
+    const cv = parseAssessment(parsed.combined_verdict);
+    if (!cv) return null;
+
     return {
-      outcome: parsed.outcome as BehaviourOutcome,
-      reason: parsed.reason,
-      confidence: typeof parsed.confidence === "number" ? parsed.confidence : 50,
+      mission_intent_assessment: mia,
+      ground_truth_assessment: gta,
+      combined_verdict: cv,
     };
   } catch {
     return null;
   }
 }
+
+const PARSE_FAILURE_RESULT: BehaviourJudgeResult = {
+  combined_verdict: { verdict: "CAPABILITY_FAIL", reasoning: "parse error", confidence: 0 },
+  mission_intent_assessment: { verdict: "CAPABILITY_FAIL", reasoning: "parse error", confidence: 0 },
+  ground_truth_assessment: null,
+};
 
 export async function judgeBehaviour(input: BehaviourJudgeInput): Promise<BehaviourJudgeResult> {
   const model = process.env.BEHAVIOUR_JUDGE_MODEL ?? "gpt-4o";
@@ -319,17 +428,25 @@ export async function judgeBehaviour(input: BehaviourJudgeInput): Promise<Behavi
       { role: "user", content: buildBehaviourJudgePrompt(input) },
     ],
     temperature: 0.15,
-    max_tokens: 600,
+    max_tokens: 1200,
   });
 
   const text = response.choices[0]?.message?.content;
   if (!text) {
-    return { outcome: "CAPABILITY_FAIL", reason: "Behaviour judge returned empty response", confidence: 0 };
+    return {
+      ...PARSE_FAILURE_RESULT,
+      combined_verdict: { verdict: "CAPABILITY_FAIL", reasoning: "Behaviour judge returned empty response", confidence: 0 },
+      mission_intent_assessment: { verdict: "CAPABILITY_FAIL", reasoning: "Behaviour judge returned empty response", confidence: 0 },
+    };
   }
 
   const result = parseResponse(text);
   if (!result) {
-    return { outcome: "CAPABILITY_FAIL", reason: `Behaviour judge returned unparseable response: ${text.substring(0, 200)}`, confidence: 0 };
+    return {
+      ...PARSE_FAILURE_RESULT,
+      combined_verdict: { verdict: "CAPABILITY_FAIL", reasoning: `Behaviour judge returned unparseable response: ${text.substring(0, 200)}`, confidence: 0 },
+      mission_intent_assessment: { verdict: "CAPABILITY_FAIL", reasoning: `Behaviour judge returned unparseable response: ${text.substring(0, 200)}`, confidence: 0 },
+    };
   }
 
   return result;
@@ -418,15 +535,17 @@ export function fireBehaviourJudge(input: BehaviourJudgeInput): void {
       try {
         await db.insert(behaviourJudgeResults).values({
           run_id: input.run_id,
-          outcome: result.outcome,
-          reason: result.reason,
-          confidence: result.confidence,
+          outcome: result.combined_verdict.verdict,
+          reason: result.combined_verdict.reasoning,
+          confidence: result.combined_verdict.confidence,
           tower_verdict: input.tower_verdict,
           delivered_count: input.delivered_count,
           requested_count: input.requested_count,
           input_snapshot: input as any,
+          mission_intent_assessment: result.mission_intent_assessment as any,
+          ground_truth_assessment: result.ground_truth_assessment as any ?? null,
         });
-        console.log(`[BEHAVIOUR_JUDGE] run_id=${input.run_id} outcome=${result.outcome} confidence=${result.confidence} query_class=${input.query_class}`);
+        console.log(`[BEHAVIOUR_JUDGE] run_id=${input.run_id} combined=${result.combined_verdict.verdict}(${result.combined_verdict.confidence}) mission=${result.mission_intent_assessment.verdict}(${result.mission_intent_assessment.confidence}) gt=${result.ground_truth_assessment?.verdict ?? "null"} query_class=${input.query_class}`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[BEHAVIOUR_JUDGE] persist failed run_id=${input.run_id}: ${msg}`);
