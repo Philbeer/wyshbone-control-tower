@@ -360,6 +360,7 @@ router.post("/judge-artefact", async (req, res) => {
       current_search_budget_pages, current_verification_level, current_radius_escalation,
       query_id,
     } = parsed.data;
+    console.log('[GT] raw query_id:', query_id);
 
     const idempotencyKey = idempotency_key ?? null;
 
@@ -761,6 +762,7 @@ router.post("/judge-artefact", async (req, res) => {
             .limit(1)
             .then(r => r[0] ?? null);
         }
+        console.log('[GT-LOOKUP]', { query_id, goal, found: !!gtRecord });
 
         fireBehaviourJudge({
           run_id: runId,

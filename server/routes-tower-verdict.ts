@@ -433,6 +433,7 @@ router.post("/tower-verdict", async (req, res) => {
     }
 
     const data = parsed.data;
+    console.log('[GT] raw query_id:', data.query_id);
     const runId = data.run_id ?? "none";
     const artId = data.artefactId ?? "none";
     const idempotencyKey = data.idempotency_key ?? null;
@@ -701,6 +702,7 @@ router.post("/tower-verdict", async (req, res) => {
           .limit(1)
           .then(r => r[0] ?? null);
       }
+      console.log('[GT-LOOKUP]', { query_id: data.query_id, goal: data.goal, found: !!gtRecord });
 
       fireBehaviourJudge({
         run_id: runId,
