@@ -1,0 +1,37 @@
+## Task: Change how the Behaviour Judge handles agent results not found in Ground Truth
+
+### Context
+The BJ currently compares agent results against the Ground Truth (GT) library. When the agent returns a result that is NOT in the GT positive list, the BJ treats it as a "false positive" and penalises the agent. This is logically wrong.
+
+The GT is not exhaustive. It was built from a finite set of GPT-4o web searches and may have missed real positives. The Arundel live music benchmark proves this — the agent found pubs with genuine live music evidence on their websites, Tower PASSED them, but GT didn't list them so the BJ called them false positives.
+
+### The epistemological rule
+- A CONFIRMED POSITIVE is: agent found it AND evidence exists (Tower PASS or website evidence). This is reliable.
+- A CONFIRMED MISS is: GT says this should exist AND the agent didn't find it. This is reliable.  
+- An ALLEGED FALSE POSITIVE is: agent found it BUT GT doesn't list it. This is NOT reliable. GT may simply have a gap. You CANNOT confirm a false positive by absence from a list — you would have to actively re-verify that specific result.
+
+### What to change in the BJ ground_truth_assessment logic
+
+1. When comparing agent results to GT records for a given query:
+   - **GT positive that agent FOUND** → count as "confirmed_match" (good)
+   - **GT positive that agent MISSED** → count as "missed_positive" (bad — penalise)
+   - **Agent result that is NOT in GT positive list** → classify as "unconfirmed" NOT "false_positive"
+
+2. An "unconfirmed" result should NOT count against the agent in the ground_truth_assessment. It is neutral — we simply don't know yet.
+
+3. If Tower PASSED that unconfirmed result with evidence, note this in the assessment as "unconfirmed_but_tower_passed" — this is actually a positive signal suggesting the GT has a gap.
+
+4. Update the ground_truth_assessment field to reflect this:
+   - Report: confirmed_matches count, missed_positives count, unconfirmed count, unconfirmed_but_tower_passed count
+   - The assessment verdict should be based ONLY on confirmed_matches vs missed_positives, NOT penalised by unconfirmed results
+
+5. Make sure the combined_verdict calculation uses this corrected ground_truth_assessment — it should no longer be dragged to CAPABILITY_FAIL just because the agent found things GT didn't list.
+
+### Important
+- Do NOT change mission_intent_assessment logic — only ground_truth_assessment
+- Do NOT change how GT records are stored or fetched — only how results are compared
+- The expected_bj_outcome field in GT records must still NEVER be passed to the BJ (human tracking only)
+- Log clearly when unconfirmed results are found so we can track GT gaps
+
+### Test expectation
+After this change, a run like B06 (Arundel live music) where Agent=PASS, Tower=PASS, System=100% should no longer get CAPABILITY_FAIL from the BJ just because the agent found extra results not in GT.
