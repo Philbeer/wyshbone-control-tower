@@ -591,8 +591,14 @@ export function fireBehaviourJudge(input: BehaviourJudgeInput): void {
           if (unconfirmed.length > 0) {
             console.log(`[GT-ENRICHMENT] ${unconfirmed.length} unconfirmed candidate(s) for query_id=${input.gt_query_id} run_id=${input.run_id}`);
             let writtenCount = 0;
+            let skippedCount = 0;
             let enrichmentError: string | null = null;
             for (const { name, towerVerdict } of unconfirmed) {
+              if (towerVerdict !== "PASS") {
+                console.log(`[GT-ENRICHMENT] Skipping enrichment queue for "${name}" — tower_verdict is ${towerVerdict ?? "null"}, only PASS results are queued`);
+                skippedCount++;
+                continue;
+              }
               try {
                 const le = input.leads_evidence.find((l) => l.lead_name.toLowerCase() === name.toLowerCase());
                 console.log(`[GT-ENRICHMENT] queuing name="${name}" tower_verdict=${towerVerdict ?? "null"}`);
@@ -615,8 +621,9 @@ export function fireBehaviourJudge(input: BehaviourJudgeInput): void {
             if (enrichmentError) {
               enrichmentStatusLine = `\nEnrichment queue: FAILED — ${enrichmentError}`;
             } else {
-              enrichmentStatusLine = `\nEnrichment queue: ${writtenCount} item(s) written to gt_enrichment_queue with status=pending`;
-              console.log(`[GT-ENRICHMENT] queued ${writtenCount} candidate(s) for GT review`);
+              const skipNote = skippedCount > 0 ? `, ${skippedCount} skipped (no Tower PASS)` : "";
+              enrichmentStatusLine = `\nEnrichment queue: ${writtenCount} item(s) written to gt_enrichment_queue with status=pending${skipNote}`;
+              console.log(`[GT-ENRICHMENT] queued ${writtenCount} candidate(s) for GT review, skipped ${skippedCount}`);
             }
           } else {
             enrichmentStatusLine = "\nEnrichment queue: 0 unconfirmed items — nothing to queue";
