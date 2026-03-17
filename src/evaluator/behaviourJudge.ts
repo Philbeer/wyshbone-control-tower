@@ -294,6 +294,11 @@ Unconfirmed results MUST NOT influence the verdict in either direction. They are
 - Do NOT use WRONG_DECISION for ground_truth_assessment.
 - Derive your verdict from the raw data only. No expected verdict is given to you.
 
+### Reasoning format
+Your reasoning field for ground_truth_assessment must be a single JSON string (no literal newlines) that explicitly names every lead in each category. Use this inline format:
+
+"[One sentence verdict.] Confirmed matches ([X]): [Name] — matched GT entry[; Name — matched GT entry...]. Missed positives ([Y]): [Name] — in GT but not found[; ...] (or: None). Unconfirmed, Tower PASSED ([Z1]): [Name] — not in GT, Tower accepted with evidence[; ...] (or: None). Unconfirmed, no evidence ([Z2]): [Name] — not in GT, no Tower evidence[; ...] (or: None). GT comparison: [X] confirmed, [Y] missed, [Z1+Z2] unconfirmed (queued for enrichment)."
+
 ## Assessment 3 — combined_verdict
 
 Weigh both assessments and produce a single summary verdict. Rules:
@@ -327,7 +332,7 @@ Respond with valid JSON only. No markdown fences, no other text:
   },
   "ground_truth_assessment": {
     "verdict": "PASS",
-    "reasoning": "Brief explanation referencing confirmed_matches and missed_positives only.",
+    "reasoning": "One sentence verdict. Confirmed matches (2): Lead A — matched GT entry. Lead B — matched GT entry. Missed positives (0): None. Unconfirmed, Tower PASSED (1): Lead C — not in GT, Tower accepted with evidence. Unconfirmed, no evidence (0): None. GT comparison: 2 confirmed, 0 missed, 1 unconfirmed (queued for enrichment).",
     "confidence": 90,
     "confirmed_matches": ["Lead A", "Lead B"],
     "missed_positives": [],
@@ -574,6 +579,56 @@ export function fireBehaviourJudge(input: BehaviourJudgeInput): void {
   judgeBehaviour(input)
     .then(async (result) => {
       try {
+        const gta = result.ground_truth_assessment;
+
+        // Step 1: Write unconfirmed candidates to enrichment queue and capture status
+        let enrichmentStatusLine = "";
+        if (gta && input.gt_query_id) {
+          const unconfirmed: Array<{ name: string; towerVerdict: string | null }> = [
+            ...(gta.unconfirmed_tower_passed ?? []).map((name) => ({ name, towerVerdict: "PASS" })),
+            ...(gta.unconfirmed_no_evidence ?? []).map((name) => ({ name, towerVerdict: null })),
+          ];
+          if (unconfirmed.length > 0) {
+            console.log(`[GT-ENRICHMENT] ${unconfirmed.length} unconfirmed candidate(s) for query_id=${input.gt_query_id} run_id=${input.run_id}`);
+            let writtenCount = 0;
+            let enrichmentError: string | null = null;
+            for (const { name, towerVerdict } of unconfirmed) {
+              try {
+                const le = input.leads_evidence.find((l) => l.lead_name.toLowerCase() === name.toLowerCase());
+                console.log(`[GT-ENRICHMENT] queuing name="${name}" tower_verdict=${towerVerdict ?? "null"}`);
+                const inserted = await db.insert(gtEnrichmentQueue).values({
+                  query_id: input.gt_query_id,
+                  candidate_name: name,
+                  constraints_to_verify: input.match_criteria ?? null,
+                  tower_verdict: towerVerdict,
+                  tower_evidence: le?.evidence_text ?? null,
+                  status: "pending",
+                  run_id: input.run_id,
+                }).returning({ id: gtEnrichmentQueue.id, candidate_name: gtEnrichmentQueue.candidate_name });
+                console.log(`[GT-ENRICHMENT] returning id=${inserted[0]?.id ?? "none"} candidate="${inserted[0]?.candidate_name ?? "none"}"`);
+                writtenCount++;
+              } catch (qErr) {
+                enrichmentError = qErr instanceof Error ? qErr.message : String(qErr);
+                console.error(`[GT-ENRICHMENT] failed to queue name="${name}": ${enrichmentError}`);
+              }
+            }
+            if (enrichmentError) {
+              enrichmentStatusLine = `\nEnrichment queue: FAILED — ${enrichmentError}`;
+            } else {
+              enrichmentStatusLine = `\nEnrichment queue: ${writtenCount} item(s) written to gt_enrichment_queue with status=pending`;
+              console.log(`[GT-ENRICHMENT] queued ${writtenCount} candidate(s) for GT review`);
+            }
+          } else {
+            enrichmentStatusLine = "\nEnrichment queue: 0 unconfirmed items — nothing to queue";
+          }
+        }
+
+        // Step 2: Append enrichment status to ground_truth_assessment reasoning before persisting
+        if (gta && enrichmentStatusLine) {
+          gta.reasoning = (gta.reasoning ?? "") + enrichmentStatusLine;
+        }
+
+        // Step 3: Persist to DB with the fully augmented ground_truth_assessment
         await db.insert(behaviourJudgeResults).values({
           run_id: input.run_id,
           outcome: result.combined_verdict.verdict,
@@ -586,32 +641,7 @@ export function fireBehaviourJudge(input: BehaviourJudgeInput): void {
           mission_intent_assessment: result.mission_intent_assessment as any,
           ground_truth_assessment: result.ground_truth_assessment as any ?? null,
         });
-        console.log(`[BEHAVIOUR_JUDGE] run_id=${input.run_id} combined=${result.combined_verdict.verdict}(${result.combined_verdict.confidence}) mission=${result.mission_intent_assessment.verdict}(${result.mission_intent_assessment.confidence}) gt=${result.ground_truth_assessment?.verdict ?? "null"} query_class=${input.query_class}`);
-
-        const gta = result.ground_truth_assessment;
-        if (gta && input.gt_query_id) {
-          const unconfirmed: Array<{ name: string; towerVerdict: string | null }> = [
-            ...(gta.unconfirmed_tower_passed ?? []).map((name) => ({ name, towerVerdict: "PASS" })),
-            ...(gta.unconfirmed_no_evidence ?? []).map((name) => ({ name, towerVerdict: null })),
-          ];
-          if (unconfirmed.length > 0) {
-            console.log(`[GT-ENRICHMENT] ${unconfirmed.length} unconfirmed candidate(s) for query_id=${input.gt_query_id} run_id=${input.run_id}`);
-            for (const { name, towerVerdict } of unconfirmed) {
-              const le = input.leads_evidence.find((l) => l.lead_name.toLowerCase() === name.toLowerCase());
-              console.log(`[GT-ENRICHMENT] queuing name="${name}" tower_verdict=${towerVerdict ?? "null"}`);
-              await db.insert(gtEnrichmentQueue).values({
-                query_id: input.gt_query_id,
-                candidate_name: name,
-                constraints_to_verify: input.match_criteria ?? null,
-                tower_verdict: towerVerdict,
-                tower_evidence: le?.evidence_text ?? null,
-                status: "pending",
-                run_id: input.run_id,
-              });
-            }
-            console.log(`[GT-ENRICHMENT] queued ${unconfirmed.length} candidate(s) for GT review`);
-          }
-        }
+        console.log(`[BEHAVIOUR_JUDGE] run_id=${input.run_id} combined=${result.combined_verdict.verdict}(${result.combined_verdict.confidence}) mission=${result.mission_intent_assessment.verdict}(${result.mission_intent_assessment.confidence}) gt=${gta?.verdict ?? "null"} query_class=${input.query_class}`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[BEHAVIOUR_JUDGE] persist failed run_id=${input.run_id}: ${msg}`);
