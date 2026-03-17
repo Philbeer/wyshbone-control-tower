@@ -1,0 +1,54 @@
+## Task: Change how the Behaviour Judge handles agent results not found in Ground Truth
+
+### Context
+The BJ currently compares agent results against the Ground Truth (GT) library. When the agent returns a result that is NOT in the GT positive list, the BJ treats it as a "false positive" and penalises the agent. This is logically wrong.
+
+The GT is not exhaustive. It was built from a finite set of searches and may have missed real positives. Example: B06 (Arundel live music) — the agent found pubs with genuine live music evidence on their websites, Tower PASSED them with evidence, but GT didn't list them so the BJ called them false positives. They're not false positives. The GT just has gaps.
+
+### The epistemological rule
+- A CONFIRMED POSITIVE: agent found it AND evidence exists (Tower PASS or website evidence). Reliable.
+- A CONFIRMED MISS: GT says this should exist AND the agent didn't find it. Reliable.
+- An ALLEGED FALSE POSITIVE: agent found it BUT GT doesn't list it. NOT reliable. GT may have a gap. You CANNOT confirm a false positive by absence from a list — you must actively re-verify.
+
+### What to change in the BJ ground_truth_assessment logic
+
+1. When comparing agent results to GT records for a given query:
+   - **GT positive that agent FOUND** → count as "confirmed_match" (good)
+   - **GT positive that agent MISSED** → count as "missed_positive" (bad — penalise)
+   - **Agent result NOT in GT positive list BUT Tower PASSED with evidence** → classify as "unconfirmed_tower_passed" — neutral, do NOT penalise. This likely means GT has a gap.
+   - **Agent result NOT in GT positive list AND Tower did NOT pass / no evidence** → classify as "unconfirmed_no_evidence" — mildly suspicious but still do NOT treat as confirmed false positive.
+
+2. "unconfirmed" results must NOT count against the agent in ground_truth_assessment. They are neutral pending GT enrichment.
+
+3. Update the ground_truth_assessment structured output to include:
+   - confirmed_matches: count and list
+   - missed_positives: count and list
+   - unconfirmed_tower_passed: count and list (likely GT gaps)
+   - unconfirmed_no_evidence: count and list (suspicious, pending investigation)
+
+4. The ground_truth_assessment VERDICT should be based ONLY on:
+   - How many GT positives the agent found (confirmed_matches) vs how many it missed (missed_positives)
+   - Unconfirmed results are excluded from verdict calculation entirely
+
+5. The combined_verdict must use this corrected ground_truth_assessment. It should no longer be dragged to CAPABILITY_FAIL just because the agent found things GT didn't list.
+
+6. Write the unconfirmed results (both tower_passed and no_evidence) to a Supabase table or queue for the GT enrichment loop to pick up. Table suggestion: `gt_enrichment_queue` with fields:
+   - id (uuid)
+   - query_id (references the benchmark query, e.g. "B06")
+   - candidate_name (business name the agent found)
+   - candidate_location (location/address)
+   - constraints_to_verify (the specific constraints from the mission that need checking, e.g. "live music mentioned on website")
+   - tower_verdict (PASS/FAIL/null for this candidate)
+   - tower_evidence (any evidence text Tower had)
+   - status: "pending" (enrichment hasn't run yet)
+   - created_at (timestamp)
+   - run_id (which agent run produced this)
+
+### Important
+- Do NOT change mission_intent_assessment logic — only ground_truth_assessment
+- Do NOT change how GT records are stored or fetched — only how results are compared
+- The expected_bj_outcome field in GT records must still NEVER be passed to the BJ (human tracking only)
+- Log clearly when unconfirmed results are found and queued for enrichment
+
+### Test expectation
+After this change, a run like B06 (Arundel live music) where Agent=PASS, Tower=PASS, System=100% should no longer get CAPABILITY_FAIL from the BJ. The extra results the agent found should appear as "unconfirmed_tower_passed" and be queued for enrichment, not penalised.

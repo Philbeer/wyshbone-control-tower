@@ -1,6 +1,6 @@
 import { openai } from "../lib/openai";
 import { db } from "../lib/db";
-import { behaviourJudgeResults } from "../../shared/schema";
+import { behaviourJudgeResults, gtEnrichmentQueue } from "../../shared/schema";
 import type { SourceTier } from "./towerVerdict";
 
 export type BehaviourOutcome = "PASS" | "HONEST_PARTIAL" | "BATCH_EXHAUSTED" | "CAPABILITY_FAIL" | "WRONG_DECISION";
@@ -40,6 +40,13 @@ export interface BehaviourAssessment {
   confidence: number;
 }
 
+export interface GroundTruthAssessment extends BehaviourAssessment {
+  confirmed_matches?: string[];
+  missed_positives?: string[];
+  unconfirmed_tower_passed?: string[];
+  unconfirmed_no_evidence?: string[];
+}
+
 export interface BehaviourJudgeInput {
   run_id: string;
   original_goal: string;
@@ -66,11 +73,12 @@ export interface BehaviourJudgeInput {
   true_universe?: Array<{ name: string; [key: string]: unknown }> | null;
   match_criteria?: string | null;
   ground_truth_notes?: string | null;
+  gt_query_id?: string | null;
 }
 
 export interface BehaviourJudgeResult {
   mission_intent_assessment: BehaviourAssessment;
-  ground_truth_assessment: BehaviourAssessment | null;
+  ground_truth_assessment: GroundTruthAssessment | null;
   combined_verdict: BehaviourAssessment;
 }
 
@@ -262,13 +270,27 @@ Evidence tiers:
 
 Only produce this assessment when BOTH true_universe and match_criteria are present in the input. If either is absent, set ground_truth_assessment to null.
 
-When ground truth is available:
-- Compare the agent's delivered leads against true_universe using match_criteria.
-- Count: how many true matches did the agent find? How many did it miss? Did it deliver any false positives not in the true universe?
-- Use PASS if all true matches were found (or the count met the requested amount).
-- Use HONEST_PARTIAL if the agent found all genuinely findable matches but the true universe is smaller than requested.
-- Use BATCH_EXHAUSTED if the agent found a subset of the true universe and a broader search would plausibly have found more.
-- Use CAPABILITY_FAIL if the agent missed true matches that were findable, or delivered false positives.
+### Epistemological rule — the GT is not exhaustive
+The true_universe was built from a finite set of searches and may have genuine gaps. Absence from true_universe does NOT confirm a false positive — you would need to actively re-verify that specific business to confirm. You CANNOT penalise the agent for finding real matches that happen to be missing from the GT list.
+
+### Classify every delivered lead into exactly one category
+
+Match leads against true_universe using case-insensitive fuzzy matching (allow common variations: "The" prefix, "&" vs "and", minor spelling differences):
+
+- **confirmed_match**: Lead name matches an entry in true_universe. Agent found a known true positive. GOOD.
+- **unconfirmed_tower_passed**: Lead is NOT in true_universe, but it was verified (verified=true OR source_tier=first_party in leads_evidence). Tower PASSED it with evidence. NEUTRAL — likely a GT gap. Do NOT penalise.
+- **unconfirmed_no_evidence**: Lead is NOT in true_universe and was NOT verified / no first-party evidence. NEUTRAL — suspicious but cannot confirm as false positive without re-verification. Do NOT penalise.
+
+Also identify:
+- **missed_positive**: An entry in true_universe that the agent did NOT deliver at all. Agent missed a findable real positive. BAD — penalise this.
+
+### Verdict — based ONLY on confirmed_matches vs missed_positives
+Unconfirmed results MUST NOT influence the verdict in either direction. They are neutral pending GT enrichment.
+
+- PASS: Agent delivered all true_universe entries (zero missed_positives), or confirmed_matches ≥ requested_count with no missed_positives.
+- HONEST_PARTIAL: Agent found all genuinely findable true_universe matches but the true universe itself is smaller than requested, or some entries are inherently unfindable (e.g. bot-blocked, closed).
+- BATCH_EXHAUSTED: Agent found a subset of true_universe; a broader search would plausibly have found the missed_positives.
+- CAPABILITY_FAIL: Agent missed true_universe entries that were realistically findable with correct technique.
 - Do NOT use WRONG_DECISION for ground_truth_assessment.
 - Derive your verdict from the raw data only. No expected verdict is given to you.
 
@@ -280,6 +302,7 @@ Weigh both assessments and produce a single summary verdict. Rules:
 - If mission_intent_assessment is WRONG_DECISION, combined_verdict is WRONG_DECISION regardless of ground truth.
 - If ground_truth_assessment is null, combined_verdict equals mission_intent_assessment.
 - Otherwise take the worse of the two verdicts, using this severity order (worst first): WRONG_DECISION > CAPABILITY_FAIL > BATCH_EXHAUSTED > HONEST_PARTIAL > PASS.
+- IMPORTANT: Unconfirmed GT results (unconfirmed_tower_passed, unconfirmed_no_evidence) MUST NOT influence combined_verdict. Only confirmed_matches vs missed_positives from ground_truth_assessment count toward the combined verdict.
 - Write a brief reasoning that synthesises both dimensions.
 
 ## Key distinctions
@@ -304,8 +327,12 @@ Respond with valid JSON only. No markdown fences, no other text:
   },
   "ground_truth_assessment": {
     "verdict": "PASS",
-    "reasoning": "Brief explanation.",
-    "confidence": 90
+    "reasoning": "Brief explanation referencing confirmed_matches and missed_positives only.",
+    "confidence": 90,
+    "confirmed_matches": ["Lead A", "Lead B"],
+    "missed_positives": [],
+    "unconfirmed_tower_passed": ["Lead C"],
+    "unconfirmed_no_evidence": []
   },
   "combined_verdict": {
     "verdict": "PASS",
@@ -383,6 +410,20 @@ function parseAssessment(raw: unknown): BehaviourAssessment | null {
   };
 }
 
+function parseGroundTruthAssessment(raw: unknown): GroundTruthAssessment | null {
+  const base = parseAssessment(raw);
+  if (!base) return null;
+  const obj = raw as Record<string, unknown>;
+  const result: GroundTruthAssessment = { ...base };
+  const toStringArray = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  result.confirmed_matches = toStringArray(obj.confirmed_matches);
+  result.missed_positives = toStringArray(obj.missed_positives);
+  result.unconfirmed_tower_passed = toStringArray(obj.unconfirmed_tower_passed);
+  result.unconfirmed_no_evidence = toStringArray(obj.unconfirmed_no_evidence);
+  return result;
+}
+
 function parseResponse(text: string): BehaviourJudgeResult | null {
   try {
     let cleaned = text.trim();
@@ -397,7 +438,7 @@ function parseResponse(text: string): BehaviourJudgeResult | null {
 
     const gta = parsed.ground_truth_assessment === null || parsed.ground_truth_assessment === undefined
       ? null
-      : parseAssessment(parsed.ground_truth_assessment);
+      : parseGroundTruthAssessment(parsed.ground_truth_assessment);
 
     const cv = parseAssessment(parsed.combined_verdict);
     if (!cv) return null;
@@ -428,7 +469,7 @@ export async function judgeBehaviour(input: BehaviourJudgeInput): Promise<Behavi
       { role: "user", content: buildBehaviourJudgePrompt(input) },
     ],
     temperature: 0.15,
-    max_tokens: 1200,
+    max_tokens: 1800,
   });
 
   const text = response.choices[0]?.message?.content;
@@ -546,6 +587,31 @@ export function fireBehaviourJudge(input: BehaviourJudgeInput): void {
           ground_truth_assessment: result.ground_truth_assessment as any ?? null,
         });
         console.log(`[BEHAVIOUR_JUDGE] run_id=${input.run_id} combined=${result.combined_verdict.verdict}(${result.combined_verdict.confidence}) mission=${result.mission_intent_assessment.verdict}(${result.mission_intent_assessment.confidence}) gt=${result.ground_truth_assessment?.verdict ?? "null"} query_class=${input.query_class}`);
+
+        const gta = result.ground_truth_assessment;
+        if (gta && input.gt_query_id) {
+          const unconfirmed: Array<{ name: string; towerVerdict: string | null }> = [
+            ...(gta.unconfirmed_tower_passed ?? []).map((name) => ({ name, towerVerdict: "PASS" })),
+            ...(gta.unconfirmed_no_evidence ?? []).map((name) => ({ name, towerVerdict: null })),
+          ];
+          if (unconfirmed.length > 0) {
+            console.log(`[GT-ENRICHMENT] ${unconfirmed.length} unconfirmed candidate(s) for query_id=${input.gt_query_id} run_id=${input.run_id}`);
+            for (const { name, towerVerdict } of unconfirmed) {
+              const le = input.leads_evidence.find((l) => l.lead_name.toLowerCase() === name.toLowerCase());
+              console.log(`[GT-ENRICHMENT] queuing name="${name}" tower_verdict=${towerVerdict ?? "null"}`);
+              await db.insert(gtEnrichmentQueue).values({
+                query_id: input.gt_query_id,
+                candidate_name: name,
+                constraints_to_verify: input.match_criteria ?? null,
+                tower_verdict: towerVerdict,
+                tower_evidence: le?.evidence_text ?? null,
+                status: "pending",
+                run_id: input.run_id,
+              });
+            }
+            console.log(`[GT-ENRICHMENT] queued ${unconfirmed.length} candidate(s) for GT review`);
+          }
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[BEHAVIOUR_JUDGE] persist failed run_id=${input.run_id}: ${msg}`);

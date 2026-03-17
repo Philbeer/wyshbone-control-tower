@@ -791,6 +791,7 @@ router.post("/judge-artefact", async (req, res) => {
           true_universe: (gtRecord?.trueUniverse as Array<{ name: string }> | null) ?? null,
           match_criteria: gtRecord?.matchCriteria ?? null,
           ground_truth_notes: gtRecord?.notes ?? null,
+          gt_query_id: gtRecord?.queryId ?? null,
         });
       }
 

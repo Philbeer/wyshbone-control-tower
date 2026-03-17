@@ -438,6 +438,19 @@ export const insertLearningArtefactSchema = createInsertSchema(learningArtefacts
 export type InsertLearningArtefact = z.infer<typeof insertLearningArtefactSchema>;
 export type LearningArtefact = typeof learningArtefacts.$inferSelect;
 
+export const gtEnrichmentQueue = pgTable('gt_enrichment_queue', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  query_id: text('query_id'),
+  candidate_name: text('candidate_name').notNull(),
+  candidate_location: text('candidate_location'),
+  constraints_to_verify: text('constraints_to_verify'),
+  tower_verdict: text('tower_verdict'),
+  tower_evidence: text('tower_evidence'),
+  status: text('status').notNull().default('pending'),
+  run_id: text('run_id'),
+  created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const groundTruthRecords = pgTable('ground_truth_records', {
   id: serial('id').primaryKey(),
   queryId: text('query_id').unique(),
