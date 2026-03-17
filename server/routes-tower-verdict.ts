@@ -695,15 +695,21 @@ router.post("/tower-verdict", async (req, res) => {
       console.log('[BJ DEBUG] routes-tower-verdict intent_narrative:', JSON.stringify(bjIntentNarrative ?? null));
 
       console.log('[GT-GOAL]', JSON.stringify(data.goal));
+      const gtOriginalGoal = data.original_goal ?? data.original_user_goal ?? null;
+      console.log('[GT-ORIGINAL-GOAL]', JSON.stringify(gtOriginalGoal));
       let gtRecord: typeof groundTruthRecords.$inferSelect | null = null;
-      if (data.query_id) {
+      if (data.query_id || gtOriginalGoal) {
         gtRecord = await db.select()
           .from(groundTruthRecords)
-          .where(eq(groundTruthRecords.queryId, data.query_id))
+          .where(
+            data.query_id
+              ? eq(groundTruthRecords.queryId, data.query_id)
+              : eq(groundTruthRecords.queryText, gtOriginalGoal!)
+          )
           .limit(1)
           .then(r => r[0] ?? null);
       }
-      console.log('[GT-LOOKUP]', { query_id: data.query_id, goal: data.goal, found: !!gtRecord });
+      console.log('[GT-LOOKUP]', { query_id: data.query_id, original_goal: gtOriginalGoal, found: !!gtRecord });
 
       fireBehaviourJudge({
         run_id: runId,

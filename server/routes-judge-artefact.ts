@@ -754,15 +754,21 @@ router.post("/judge-artefact", async (req, res) => {
         console.log('[BJ DEBUG] full payloadJson keys:', JSON.stringify(Object.keys(payloadJson ?? {})));
         console.log('[BJ DEBUG] routes-judge-artefact intent_narrative:', JSON.stringify(bjIntentNarrative ?? null));
 
+        const gtOriginalGoal = payloadJson?.original_user_goal ?? payloadJson?.normalized_goal ?? null;
+        console.log('[GT-ORIGINAL-GOAL]', JSON.stringify(gtOriginalGoal));
         let gtRecord: typeof groundTruthRecords.$inferSelect | null = null;
-        if (query_id) {
+        if (query_id || gtOriginalGoal) {
           gtRecord = await db.select()
             .from(groundTruthRecords)
-            .where(eq(groundTruthRecords.queryId, query_id))
+            .where(
+              query_id
+                ? eq(groundTruthRecords.queryId, query_id)
+                : eq(groundTruthRecords.queryText, gtOriginalGoal!)
+            )
             .limit(1)
             .then(r => r[0] ?? null);
         }
-        console.log('[GT-LOOKUP]', { query_id, goal, found: !!gtRecord });
+        console.log('[GT-LOOKUP]', { query_id, original_goal: gtOriginalGoal, found: !!gtRecord });
 
         fireBehaviourJudge({
           run_id: runId,
