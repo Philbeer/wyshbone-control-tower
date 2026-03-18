@@ -1,0 +1,25 @@
+BUG FIX — Tower falsely rejecting deliveries due to unnecessary input corruption detection
+
+PROBLEM: Tower is rejecting valid deliveries containing 11+ verified leads with:
+"Input appears corrupted. Input appears concatenated: 'organisations' looks like words merged without spaces."
+
+"Organisations" is a normal English word. Tower is hallucinating a corruption problem that doesn't exist.
+
+ROOT CAUSE QUESTION: Find where Tower checks for corrupted/concatenated input. This could be:
+A) Instructions in the Tower verdict LLM system prompt telling it to check for corruption
+B) A code-level regex/heuristic pre-check
+C) Both
+
+THE FIX:
+
+If the check is in the LLM system prompt — REMOVE the instruction entirely. By the time a delivery reaches Tower for final judgement, the input has already passed through intent extraction, constraint mapping, planning, search execution, and evidence gathering. If the input was genuinely corrupted, those steps would have failed. Tower should not be doing input validation or spell-checking. Its job is to judge whether the delivery answers the question with sufficient evidence. Remove any instructions about checking for corrupted, concatenated, garbled, or malformed input text.
+
+If the check is in code — evaluate whether it has EVER caught a genuine corruption that the upstream pipeline didn't already catch. If not, remove it. If there's a legitimate reason to keep it, make it much more conservative: only flag input where there are literally no spaces at all (like "findorganisationsthatwork"), not input containing individual long words.
+
+IMPORTANT:
+- Do NOT add a whitelist of British English words — that's curve-fitting
+- Do NOT add exceptions for specific words — that doesn't fix the underlying problem
+- DO remove or drastically narrow the corruption check so it only catches genuinely garbled input
+- Do NOT modify any other Tower logic (per-candidate verification, evidence judging, GT lookup, BJ scoring)
+
+After fixing, append findings to AGENT_LOG.md documenting: where the corruption check was, what it did, whether it ever caught genuine corruption, and what was removed/changed.

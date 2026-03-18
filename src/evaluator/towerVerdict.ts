@@ -927,21 +927,15 @@ export function detectConcatenationArtifacts(
       }
     }
 
-    const lower = text.toLowerCase();
-    const concatPatterns = [
-      lower.match(/\b([a-z]{2,})(can|could|should|would|will|shall|does|did|is|are|was|were|have|has|had)([a-z]{2,})\b/),
-      lower.match(/\b([a-z]{3,})(can|could|should|would|will|shall|does|did|is|are|was|were|have|has|had)\b/),
-    ];
-    for (const concatMatch of concatPatterns) {
-      if (!concatMatch) continue;
-      const full = concatMatch[0];
-      const knownSafe = /^(american|african|mexican|dominican|franciscan|republican|anglican|candidate|candid|candy|candle|canal|canada|canadian|canary|cancel|cancer|canvas|canyon|scandal|volcano|significant|particular|popular|regular|circular|nuclear|angular|understand|thousand|standard|command|demand|expand|tuscan|artisan|partisan|guardian|median|suburban|veteran|spartan|christian|norwegian|hawaiian|european|indian|persian|russian|orphan|ocean|organ|urban|sedan|sultan|jordan|morgan|duncan|colorado|orlando|avocado|desperado|commando|tornado|crescendo|innuendo|nintendo|pseudo|overdo|bushido|bravado|eldorado|scholar|dollar|muscular|secular|spectacular|molecular|singular|cellular|modular|toucan|pelican|pecan|caravan|afghan|catalan|marzipan|husband|island|islands|began|scan|uncan|outdo|outis|outdid|outdoes|overis|overdid|overdoes|overwas|alcan|texan|vatican|vulcan|parmesan|artesian|diocesan|dentist|dentists|consist|consists|consistent|persist|persists|insist|insists|resist|resists|exist|exists|assist|assists|enlist|enlists|consist|desist|artist|artists|florist|florists|tourist|tourists|publicist|publicists|specialist|specialists|journalist|journalists|bristol|pistol|crystal|epistle|whistle|thistle|misty|history|historical|historic|listen|listed|listing|listings|discover|distort|distill|distant|distinguish|district|distribute|dismiss|dispute|dissolve|display|disturb|disclaim|discard|disgust|disdain|disabled|disappear|disagree|disappoint)$/;
-      if (!knownSafe.test(full)) {
-        return {
-          corrupted: true,
-          reason: `Input appears concatenated: "${full}" looks like words merged without spaces.`,
-        };
-      }
+    // Only flag text that has absolutely no whitespace and is too long to be a single real word.
+    // This catches genuinely garbled input like "findorganisationsthatwork" without
+    // false-positiving on normal words that happen to contain auxiliary verbs as substrings
+    // (e.g. "organisations", "distribution", "resistance", "consistent").
+    if (!/\s/.test(text) && text.length >= 30) {
+      return {
+        corrupted: true,
+        reason: `Input appears concatenated: "${text.substring(0, 40)}" contains no spaces and is likely multiple words merged together.`,
+      };
     }
   }
   return { corrupted: false, reason: null };

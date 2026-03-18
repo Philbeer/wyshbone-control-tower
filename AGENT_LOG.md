@@ -418,3 +418,112 @@ The planned change is to **eliminate per-candidate Tower verification and have T
 4. **`judgeEvidenceQuality()`** — this checks per-lead `verified`/`evidence`/`source_url` fields. In the new architecture, if verification is entirely upstream, Tower would need to know what the upstream claimed verified and rely on counts rather than per-lead fields.
 
 5. **The `artefacts` DB query** (lines 474–526 of `routes-tower-verdict.ts`) — fetches per-candidate evidence from DB. This would not be needed if the Supervisor delivers pre-enriched evidence in the request payload.
+
+---
+
+## BUG FIX LOG — Corruption Detection False Positive ("organisations")
+
+**Date:** 2026-03-18
+**Issue:** Tower was returning `CHANGE_PLAN` with stop code `INPUT_CONCATENATED` and rationale `"Input appears corrupted. Input appears concatenated: 'organisations' looks like words merged without spaces."` for valid deliveries containing the word "organisations".
+
+---
+
+### Where the Check Was
+
+**File:** `src/evaluator/towerVerdict.ts`
+**Function:** `detectConcatenationArtifacts()` (line 903)
+**Call site:** `judgeLeadsListCore()` (line 2024), passing `[artefact_title, artefact_summary, goal]`
+
+The function ran as an early gate inside `judgeLeadsListCore()`, before any constraint evaluation. A `corrupted: true` result caused an immediate `CHANGE_PLAN` return, bypassing all further logic.
+
+---
+
+### What the Check Did
+
+The function had three detection paths:
+
+**Check 1 — Question in parentheses** (kept unchanged):
+```
+/\([^)]{40,}\?\s*\)/
+```
+Flags text like `(How do I find a supplier that works with local authorities?)` — a question of 40+ chars embedded in parentheses.
+
+**Check 2 — Triple-repeated words** (kept unchanged):
+Splits the text on whitespace and looks for three consecutive identical words of length ≥ 3.
+
+**Check 3 — Verb-substring concatenation** (THE PROBLEMATIC CHECK — removed):
+```javascript
+const concatPatterns = [
+  lower.match(/\b([a-z]{2,})(can|could|should|would|will|shall|does|did|is|are|was|were|have|has|had)([a-z]{2,})\b/),
+  lower.match(/\b([a-z]{3,})(can|could|should|would|will|shall|does|did|is|are|was|were|have|has|had)\b/),
+];
+```
+This looked for any token where an auxiliary verb (`is`, `are`, `was`, `can`, `have`, etc.) appeared as a substring, treating it as evidence of merged words. The intent was to catch things like `"Walescan"` → `"Wales" + "can"`.
+
+To suppress false positives, a `knownSafe` regex was added listing hundreds of real English words that happened to contain these verb substrings (e.g. `american`, `organ`, `island`, `history`, `consistent`, etc.). This list was the fundamental problem — it was attempting to enumerate all legitimate English words containing auxiliary verb substrings, which is an unbounded set.
+
+**Why "organisations" was flagged:**
+The word "organisations" matches pattern 1 as `organ` + `is` + `ations`. The `knownSafe` list contained `organ` but not `organisations` (or `organisation`, `organisational`, `disorganisation`, etc.). The regex tests the full matched token — `concatMatch[0]` = `"organisations"` — against `knownSafe`, which does not include it, so it was flagged as corrupted.
+
+---
+
+### Has This Check Ever Caught Genuine Corruption?
+
+There is no evidence in the codebase, audit logs, or documentation that Check 3 ever caught a genuinely corrupted input that slipped through the upstream pipeline (intent extraction, constraint mapping, plan generation, search execution). The check was added proactively, not in response to a real observed failure.
+
+Furthermore, by the time a delivery reaches Tower for final judgement, the input has passed through:
+- User goal parsing and intent extraction
+- Constraint normalisation and structured mapping
+- Plan generation (which must produce coherent search queries)
+- Search execution
+- Evidence gathering and CVL evaluation
+
+Any genuinely garbled or concatenated goal text would have caused failures at one of these earlier stages. A goal like `"findorganisationsthatwork"` could not produce a valid plan, constraints, or leads.
+
+---
+
+### What Was Changed
+
+**Removed** the entire verb-substring concatenation check (Check 3), including:
+- Both regex patterns in `concatPatterns`
+- The `knownSafe` whitelist regex (800+ chars, listing hundreds of real English words)
+- The loop over `concatPatterns`
+- The `lower` variable that was only used by this check
+
+**Replaced** with a minimal, reliable check: flag text that has **literally no whitespace at all** and is **≥ 30 characters long**. This corresponds to the only type of garbled input that is genuinely unambiguous — multiple real words merged into a single unspaced string. The 30-character threshold is safely above the longest common single English words (~20 chars), meaning no legitimate single-word string will ever be flagged.
+
+```javascript
+// Before (removed):
+const lower = text.toLowerCase();
+const concatPatterns = [
+  lower.match(/\b([a-z]{2,})(can|...)(is|...)([a-z]{2,})\b/),
+  ...
+];
+for (const concatMatch of concatPatterns) {
+  if (!concatMatch) continue;
+  const full = concatMatch[0];
+  const knownSafe = /^(american|african|...|organisations...)/;
+  if (!knownSafe.test(full)) { return { corrupted: true, ... }; }
+}
+
+// After (replacement):
+if (!/\s/.test(text) && text.length >= 30) {
+  return {
+    corrupted: true,
+    reason: `Input appears concatenated: "${text.substring(0, 40)}" contains no spaces and is likely multiple words merged together.`,
+  };
+}
+```
+
+**Also updated:** `replit.md` — corrected the Concatenation Artifact Detection entry to describe the current behaviour.
+
+---
+
+### Tests
+
+- `"organisations"` → `{ corrupted: false }` ✓ (13 chars, would have spaces in context anyway)
+- `"Find organisations working with the local authority"` → `{ corrupted: false }` ✓ (has spaces)
+- `"findorganisationsthatworkwiththelocalauthority"` (46 chars, no spaces) → `{ corrupted: true }` ✓
+- `"Walescan"` (8 chars, no spaces) → `{ corrupted: false }` — correctly NOT flagged (too short to be multiple merged words; ambiguous)
+- A goal with a 40-char parenthesised question → `{ corrupted: true }` ✓ (Check 1 still active)
+- A goal with three consecutive identical words → `{ corrupted: true }` ✓ (Check 2 still active)
