@@ -573,3 +573,13 @@ The `combined_delivery` payload structure is identical to `final_delivery` — s
 
 - The Supervisor / reloop layer can now POST `combined_delivery` artefacts to `/api/tower/judge-artefact` and receive a full Tower verdict (ACCEPT / CHANGE_PLAN / STOP) with constraint results, evidence quality checks, and Behaviour Judge scoring.
 - If the combined delivery needs different verdict handling downstream (e.g. no replanning suggested since all iterations are complete), the Supervisor should inspect `artefact_type === "combined_delivery"` in the response and suppress CHANGE_PLAN handling accordingly — Tower itself will still return CHANGE_PLAN if constraints are unmet, as it has no knowledge of reloop exhaustion.
+
+---
+
+## CONFIRMATION — combined_delivery Already Applied (2026-03-20)
+
+A duplicate request was received to add `"combined_delivery"` to the artefact type gate in `server/routes-judge-artefact.ts`. Verified that the change was already present at line 492 from the previous session. No code modification was made. No restart required. Current state confirmed:
+
+```typescript
+if (artefactType === "leads_list" || artefactType === "final_delivery" || artefactType === "combined_delivery") {
+```
