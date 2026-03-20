@@ -489,7 +489,7 @@ router.post("/judge-artefact", async (req, res) => {
       payloadJson = null;
     }
 
-    if (artefactType === "leads_list" || artefactType === "final_delivery") {
+    if (artefactType === "leads_list" || artefactType === "final_delivery" || artefactType === "combined_delivery") {
       if (!payloadJson?.verification_summary) {
         try {
           const cvlResult = await db.execute(

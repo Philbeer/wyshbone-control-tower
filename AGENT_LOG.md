@@ -527,3 +527,49 @@ if (!/\s/.test(text) && text.length >= 30) {
 - `"Walescan"` (8 chars, no spaces) → `{ corrupted: false }` — correctly NOT flagged (too short to be multiple merged words; ambiguous)
 - A goal with a 40-char parenthesised question → `{ corrupted: true }` ✓ (Check 1 still active)
 - A goal with three consecutive identical words → `{ corrupted: true }` ✓ (Check 2 still active)
+
+---
+
+## CHANGE LOG — combined_delivery Artefact Type Support
+
+**Date:** 2026-03-20
+
+### What Changed
+
+**File:** `server/routes-judge-artefact.ts`, line 492 (now 495 after prior edits)
+
+**Change:** Added `"combined_delivery"` as an accepted artefact type in the branch that routes to the full leads-list judgement pipeline.
+
+**Before:**
+```typescript
+if (artefactType === "leads_list" || artefactType === "final_delivery") {
+```
+
+**After:**
+```typescript
+if (artefactType === "leads_list" || artefactType === "final_delivery" || artefactType === "combined_delivery") {
+```
+
+### Why
+
+The reloop architecture merges results from multiple iteration passes into a single combined delivery before sending to Tower for final judgement. This merged payload uses `artefactType: "combined_delivery"` to distinguish it from single-pass `final_delivery` artefacts. Without this change, `combined_delivery` artefacts fell through the `if` branch entirely and were processed by a different code path (the non-leads-list path), which does not perform constraint evaluation, evidence quality checks, or relationship gating.
+
+The `combined_delivery` payload structure is identical to `final_delivery` — same `leads` array, `constraints`, `verification_summary`, `attribute_evidence`, etc. — so no changes to the judgement logic itself were needed. The existing pipeline handles it correctly once the type is accepted.
+
+### Decisions Made
+
+- Only the type-gate condition was changed. No judgement logic, schema validation, or persistence code was modified.
+- The `artefact_type` stored in the `tower_verdicts` table will be `"combined_delivery"` (passed through as-is from `artefactType`), which correctly distinguishes these verdicts from single-pass records in audit queries.
+- No Zod schema change was required — the `artefactType` field in the `judge-artefact` route is read directly from the request body before schema validation of the payload.
+
+### Files Modified
+
+| File | Change |
+|---|---|
+| `server/routes-judge-artefact.ts` | One-line addition of `combined_delivery` to artefact type gate |
+| `AGENT_LOG.md` | This entry |
+
+### What's Next
+
+- The Supervisor / reloop layer can now POST `combined_delivery` artefacts to `/api/tower/judge-artefact` and receive a full Tower verdict (ACCEPT / CHANGE_PLAN / STOP) with constraint results, evidence quality checks, and Behaviour Judge scoring.
+- If the combined delivery needs different verdict handling downstream (e.g. no replanning suggested since all iterations are complete), the Supervisor should inspect `artefact_type === "combined_delivery"` in the response and suppress CHANGE_PLAN handling accordingly — Tower itself will still return CHANGE_PLAN if constraints are unmet, as it has no knowledge of reloop exhaustion.
